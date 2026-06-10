@@ -45,6 +45,10 @@ class BRDGenerationService:
         brd_sections = self._build_brd_sections(themes, state_by_card_id, db)
         open_issues = self._build_open_issues(themes, state_by_card_id, db)
         transcript_md = self._build_transcript(utterances, themes)
+
+        # Use GPT to rewrite raw evidence into formal BRD paragraphs
+        brd_sections = self._rewrite_sections_with_ai(document, brd_sections)
+
         brd_md = self._render_brd_markdown(document, brd_sections, open_issues)
 
         return {
@@ -177,6 +181,58 @@ class BRDGenerationService:
             lines.append("")
 
         return "\n".join(lines)
+
+    def _rewrite_sections_with_ai(
+        self, document: Optional[Document], sections: List[Dict[str, Any]]
+    ) -> List[Dict[str, Any]]:
+        """Use GPT 5.4 mini to rewrite raw evidence into formal BRD paragraphs."""
+        import json
+        from app.services.openai_service import openai_service
+
+        title = document.title if document else "需求文件"
+
+        for section in sections:
+            if not section["confirmedItems"]:
+                continue
+
+            for item in section["confirmedItems"]:
+                evidence = item.get("evidence", "")
+                if not evidence or len(evidence.strip()) < 10:
+                    continue
+
+                try:
+                    response = openai_service.client.chat.completions.create(
+                        model="gpt-5.4-mini",
+                        messages=[
+                            {"role": "system", "content": (
+                                "你是專業的商業分析師，負責將訪談逐字稿改寫成正式的 BRD（Business Requirements Document）段落。\n\n"
+                                "規則：\n"
+                                "- 使用正式、清晰的書面語\n"
+                                "- 保留所有具體資訊（數據、流程步驟、規則、角色名稱）\n"
+                                "- 移除口語贅詞（呃、那個、就是說）\n"
+                                "- 以條列或段落形式整理，方便閱讀\n"
+                                "- 不得添加訪談中沒有提到的資訊\n"
+                                "- 不得推測或補猜\n"
+                                "- 直接輸出改寫後的內容，不要加前言或說明"
+                            )},
+                            {"role": "user", "content": (
+                                f"文件：{title}\n"
+                                f"BRD 章節：{section['chapter']}\n"
+                                f"提問重點：{item['focusText']}\n\n"
+                                f"訪談原始回答：\n{evidence[:3000]}\n\n"
+                                f"請改寫成正式 BRD 段落。"
+                            )},
+                        ],
+                        temperature=0.3,
+                        max_completion_tokens=500,
+                    )
+                    rewritten = response.choices[0].message.content.strip()
+                    if rewritten:
+                        item["evidence"] = rewritten
+                except Exception as e:
+                    logger.warning(f"Failed to rewrite BRD section: {e}")
+
+        return sections
 
     def _render_brd_markdown(
         self, document: Optional[Document], sections: List[Dict], open_issues: List[Dict]

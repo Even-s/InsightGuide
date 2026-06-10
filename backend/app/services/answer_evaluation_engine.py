@@ -1078,6 +1078,7 @@ class AnswerEvaluationEngine:
         if not is_interviewer:
             existing_evidence = card_state.evidence_transcript or ""
             card_state.evidence_transcript = f"{existing_evidence}\n{utterance_text}".strip()
+        judgment = self._preserve_existing_followup_when_empty(card_state.evidence, judgment)
         card_state.evidence = {
             'judgment': judgment,
             'utterance_id': utterance_id,
@@ -1109,6 +1110,44 @@ class AnswerEvaluationEngine:
             'evidence_transcript': card_state.evidence_transcript,
             'judgment': judgment
         }
+
+    def _preserve_existing_followup_when_empty(
+        self,
+        existing_evidence: Optional[Dict[str, Any]],
+        judgment: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Keep the last useful follow-up when a later judgment returns an empty one."""
+        next_followup = (
+            judgment.get("suggested_followup")
+            or judgment.get("suggestedFollowup")
+            or ""
+        )
+        if isinstance(next_followup, str) and next_followup.strip():
+            return judgment
+
+        if not isinstance(existing_evidence, dict):
+            return judgment
+
+        previous_followup = (
+            existing_evidence.get("suggested_followup")
+            or existing_evidence.get("suggestedFollowup")
+            or ""
+        )
+        previous_judgment = existing_evidence.get("judgment")
+        if not previous_followup and isinstance(previous_judgment, dict):
+            previous_followup = (
+                previous_judgment.get("suggested_followup")
+                or previous_judgment.get("suggestedFollowup")
+                or ""
+            )
+
+        if isinstance(previous_followup, str) and previous_followup.strip():
+            return {
+                **judgment,
+                "suggested_followup": previous_followup.strip(),
+            }
+
+        return judgment
 
 
 # Singleton instance

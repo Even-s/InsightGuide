@@ -455,7 +455,7 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
                                     <AnimatedStrikeText
                                       text={formatQuestionText(card.questionText)}
                                       done={isDone}
-                                      className={`text-base leading-relaxed transition-colors duration-500 ease-out ${isDone ? 'text-gray-400' : 'text-gray-900'}`}
+                                      className={`text-base font-normal leading-relaxed transition-colors duration-500 ease-out ${isDone ? 'text-gray-400' : 'text-gray-900'}`}
                                     />
                                       <div className={`mt-3 overflow-hidden transition-[max-height,opacity] duration-500 ease-out ${isDone ? 'max-h-0 opacity-0' : 'max-h-16 opacity-100'}`}>
                                         <div className="mb-1 flex items-center justify-between text-xs text-gray-500 transition-opacity duration-300">
@@ -749,52 +749,33 @@ function AnimatedStrikeText({
 }
 
 function FollowupPromptPanel({ prompt }: { prompt: FollowupPrompt | null }) {
-  const hasMissingItems = Boolean(prompt?.missingItems.length)
   const promptKey = [
     prompt?.cardTitle,
-    prompt?.missingItems.join('|'),
-    prompt?.reason,
     prompt?.suggestedFollowup,
   ].filter(Boolean).join('::') || 'empty'
 
   return (
     <section className="shrink-0 bg-transparent px-6 py-3" aria-live="polite">
       <div className="mx-auto max-w-5xl">
-        <div className="min-h-[6.25rem] min-w-0 rounded-lg border border-gray-200 bg-white px-4 py-3 shadow-lg shadow-gray-200/70 transition-[box-shadow,border-color,opacity,transform] duration-500 ease-out">
-          <div className="mb-3 flex items-center gap-2">
-            <span className="rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs font-semibold tracking-wide text-gray-700">仍需追問</span>
+        <div className="min-h-[6.25rem] min-w-0 rounded-lg border border-amber-200 bg-white px-4 py-3 shadow-lg shadow-amber-100/60 transition-[box-shadow,border-color,opacity,transform] duration-500 ease-out">
+          <div className="mb-3 flex min-w-0 items-center gap-2">
+            <span className="shrink-0 rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">仍需追問</span>
             {prompt?.cardTitle && (
               <p key={prompt.cardTitle} className="animate-fadeIn truncate text-sm font-semibold text-gray-900">{prompt.cardTitle}</p>
             )}
           </div>
-          <div key={promptKey} className="animate-fadeIn">
-          {hasMissingItems ? (
-            <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(18rem,0.8fr)]">
-              <div className="grid gap-2 sm:grid-cols-2">
-              {prompt?.missingItems.map((item) => (
-                <div key={item} className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-sm leading-relaxed text-gray-800 transition-[background-color,border-color,opacity,transform] duration-300 ease-out">
-                  {item}
-                </div>
-              ))}
+          <div key={promptKey} className="animate-fadeIn space-y-3">
+            {prompt?.suggestedFollowup ? (
+              <div className="text-center">
+                <AnimatedStrikeText
+                  text={prompt.suggestedFollowup}
+                  done={false}
+                  className="text-base font-normal leading-relaxed text-gray-900"
+                />
               </div>
-              {prompt?.suggestedFollowup ? (
-                <p className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-sm leading-relaxed text-gray-900">
-                  {prompt.suggestedFollowup}
-                </p>
-              ) : null}
-            </div>
-          ) : prompt?.reason ? (
-            <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_minmax(18rem,0.8fr)]">
-              <p className="text-sm leading-relaxed text-gray-700">{prompt.reason}</p>
-              {prompt.suggestedFollowup ? (
-                <p className="rounded border border-gray-200 bg-gray-50 px-3 py-2 text-sm leading-relaxed text-gray-900">
-                  {prompt.suggestedFollowup}
-                </p>
-              ) : null}
-            </div>
-          ) : (
-            <div className="min-h-9" />
-          )}
+            ) : (
+              <div className="min-h-9" />
+            )}
           </div>
         </div>
       </div>

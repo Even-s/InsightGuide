@@ -407,7 +407,7 @@ export default function EditorPage() {
                         {session.status === 'ended' && (
                           <button
                             type="button"
-                            onClick={() => window.location.assign(`/interview/${deckId}`)}
+                            onClick={() => window.location.assign(`/interview/${deckId}/report/${session.id}`)}
                             className="rounded border border-gray-200 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50"
                           >
                             查看報告

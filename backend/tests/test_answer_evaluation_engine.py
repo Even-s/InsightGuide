@@ -870,6 +870,48 @@ class TestAnswerEvaluationEngine:
         assert update['new_status'] == 'probably_sufficient'
         assert sample_card_state.status == 'probably_sufficient'
 
+    def test_update_card_state_keeps_existing_followup_when_next_is_empty(
+        self,
+        mock_db,
+        sample_card_state,
+        sample_question_card,
+    ):
+        """Test that a later complete judgment does not clear the follow-up prompt."""
+        sample_card_state.evidence = {
+            'judgment': {
+                'suggested_followup': 'Can you clarify the timeline?',
+                'reason': 'Timeline is missing.',
+            }
+        }
+
+        judgment = {
+            'sufficiency_score': 0.7,
+            'is_sufficient': False,
+            'completion_percentage': 70,
+            'reason': 'Scope is clearer now.',
+            'suggested_followup': '',
+        }
+
+        update = answer_evaluation_engine._update_card_state(
+            db=mock_db,
+            card_state=sample_card_state,
+            card=sample_question_card,
+            utterance_id="utt-123",
+            utterance_text="Partial answer with more scope detail",
+            judgment=judgment,
+        )
+
+        assert update is not None
+        assert (
+            update['evidence']['judgment']['suggested_followup']
+            == 'Can you clarify the timeline?'
+        )
+        assert (
+            sample_card_state.evidence['judgment']['suggested_followup']
+            == 'Can you clarify the timeline?'
+        )
+        assert sample_card_state.evidence['judgment']['reason'] == 'Scope is clearer now.'
+
     def test_update_card_state_no_change(self, mock_db, sample_card_state, sample_question_card):
         """Test that no update is returned when status doesn't change."""
         sample_card_state.status = "listening"

@@ -2,6 +2,7 @@ import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
 import DeckUploadPage from './routes/DeckUploadPage'
 import EditorPage from './routes/EditorPage'
 import PresenterPage from './routes/PresenterPage'
+import InterviewReportPage from './routes/InterviewReportPage'
 import SessionListPage from './routes/SessionListPage'
 import PrepSessionListPage from './routes/PrepSessionListPage'
 import BRDGenerationPage from './routes/BRDGenerationPage'
@@ -18,6 +19,7 @@ function App() {
           <Route path="/editor/:deckId" element={<EditorPage />} />
           <Route path="/presenter/:deckId" element={<PresenterPage />} />
           <Route path="/interview/:deckId" element={<PresenterPage />} />
+          <Route path="/interview/:deckId/report/:sessionId" element={<InterviewReportPage />} />
           <Route path="/interview/:sessionId/brd" element={<BRDGenerationPage />} />
         </Routes>
       </div>
