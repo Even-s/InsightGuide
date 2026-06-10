@@ -1,0 +1,30 @@
+"""Document model."""
+
+from datetime import datetime
+from sqlalchemy import Column, String, DateTime, ForeignKey, Text
+from sqlalchemy.orm import relationship
+
+from app.db.session import Base
+
+
+class Document(Base):
+    """Document model - represents a requirements document."""
+
+    __tablename__ = "documents"
+
+    id = Column(String, primary_key=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    title = Column(String, nullable=False)
+    source_file_url = Column(Text, nullable=False)
+    file_type = Column(String, nullable=False)  # pdf, docx, md, txt
+    status = Column(String, nullable=False, default="uploaded", index=True)  # uploaded, analyzing, analyzed, failed
+    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    user = relationship("User", back_populates="documents")
+    sections = relationship("Section", back_populates="document", cascade="all, delete-orphan")
+    question_cards = relationship("QuestionCard", back_populates="document", cascade="all, delete-orphan")
+    prep_sessions = relationship("PrepSession", back_populates="document", cascade="all, delete-orphan")
+    interview_sessions = relationship("InterviewSession", back_populates="document", cascade="all, delete-orphan")
+    ai_usage_events = relationship("AIUsageEvent", back_populates="document", cascade="all, delete-orphan")

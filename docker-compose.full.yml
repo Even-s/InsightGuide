@@ -1,0 +1,154 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: insightguide-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-insightguide}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-insightguide_password}
+      POSTGRES_DB: ${POSTGRES_DB:-insightguide}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/app/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-insightguide}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - insightguide-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: insightguide-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - insightguide-network
+
+  minio:
+    image: minio/minio:latest
+    container_name: insightguide-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${S3_ACCESS_KEY_ID:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${S3_SECRET_ACCESS_KEY:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    networks:
+      - insightguide-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: insightguide-backend
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
+    env_file:
+      - ./backend/.env
+    environment:
+      # Database
+      DATABASE_URL: postgresql://insightguide:insightguide_password@postgres:5432/insightguide
+
+      # Redis
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+
+      # S3/MinIO
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_PUBLIC_ENDPOINT_URL: http://host.docker.internal:9000
+      S3_ACCESS_KEY_ID: minioadmin
+      S3_SECRET_ACCESS_KEY: minioadmin
+      S3_BUCKET_NAME: insightguide-uploads
+      S3_REGION: us-east-1
+
+      # OpenAI
+      EMBEDDING_MODEL: text-embedding-3-large
+
+      # App settings
+      ENVIRONMENT: development
+      LOG_LEVEL: INFO
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./backend:/app
+      - /tmp/insightguide:/tmp/insightguide
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - insightguide-network
+
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: insightguide-worker
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=4
+    env_file:
+      - ./backend/.env
+    environment:
+      # Database
+      DATABASE_URL: postgresql://insightguide:insightguide_password@postgres:5432/insightguide
+
+      # Redis
+      REDIS_URL: redis://redis:6379/0
+      CELERY_BROKER_URL: redis://redis:6379/1
+      CELERY_RESULT_BACKEND: redis://redis:6379/2
+
+      # S3/MinIO
+      S3_ENDPOINT_URL: http://minio:9000
+      S3_PUBLIC_ENDPOINT_URL: http://host.docker.internal:9000
+      S3_ACCESS_KEY_ID: minioadmin
+      S3_SECRET_ACCESS_KEY: minioadmin
+      S3_BUCKET_NAME: insightguide-uploads
+      S3_REGION: us-east-1
+
+      # OpenAI
+      EMBEDDING_MODEL: text-embedding-3-large
+
+      # App settings
+      ENVIRONMENT: development
+      LOG_LEVEL: INFO
+    volumes:
+      - ./backend:/app
+      - /tmp/insightguide:/tmp/insightguide
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - insightguide-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+
+networks:
+  insightguide-network:
+    driver: bridge
