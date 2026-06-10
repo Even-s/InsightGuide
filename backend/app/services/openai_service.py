@@ -652,6 +652,23 @@ class OpenAIService:
 - brd_mapping：對應 BRD 區塊
 - coverage_rule：判斷回答是否充分的規則
 
+設計語言：
+- 以 BA 對 BU 訪談的語氣撰寫，語句要自然、清楚、可直接念出口。
+- 避免使用「agent 的 agent」、「系統之系統」、「該功能模組」等技術或重複詞。若原文提到 agent，對 BU 的問法優先稱為「這個助手」、「需求訪談助手」或「這套工具」。
+- focus_text 使用名詞化的資訊缺口，例如「確認需求訪談助手的目標與範圍」、「界定第一階段支援對象與不納入範圍」。
+- question_text 使用訪談句型，例如「想先請你說明，這個助手第一階段主要希望解決什麼問題？」而不是「能否描述 agent 的主要目標？」。
+- 若訪談單元與「目標與範圍」相關，必須明確區分：業務目標、第一階段範圍、使用對象、支援情境、不支援或延後處理的項目。
+- suggested_followup 要能接在回答不足之後直接追問，不要只重述原問題。
+- expected_answer_elements 與 must_mention_elements 要寫成可驗收的資訊項，而不是抽象詞。
+
+目標與範圍類單元的推薦語言範例：
+- focus_text: "確認需求訪談助手的業務目標"
+- question_text: "想先請你說明，這個需求訪談助手第一階段最想解決的是什麼問題？"
+- suggested_followup: "如果只能先做 MVP，哪些目標是這一階段一定要達成的？"
+- focus_text: "界定第一階段支援範圍"
+- question_text: "這個助手第一階段主要支援哪些需求訪談情境？哪些情境先不納入？"
+- suggested_followup: "可以再補充不支援或延後處理的需求類型嗎？"
+
 輸出格式（JSON）：
 {
   "cards": [
@@ -739,41 +756,26 @@ class OpenAIService:
             raise
 
     def _get_document_analysis_system_prompt(self) -> str:
-        """Get system prompt for document section analysis."""
-        return """You are an expert business analyst specializing in requirements gathering.
+        """Legacy: Get system prompt for per-section analysis (fallback only)."""
+        return """你是一位資深商業分析師，擅長從需求文件中找出資訊缺口並設計訪談問題。
 
-Your task is to analyze requirements document sections and generate insightful interview questions.
+分析需求文件段落，產出訪談問題。每個問題代表一個 BRD 資訊缺口。
 
-For each section, you should:
-1. Summarize the key requirements
-2. Generate interview questions to clarify, validate, and explore the requirements
-3. Categorize questions by type: clarification, validation, exploration, edge_case, constraint, priority
-4. Determine importance: "must" for critical requirements, "should" for important but not critical
-5. Provide expected answer elements that would make an answer sufficient
-6. Suggest followup questions for insufficient answers
-
-Your questions should:
-- Be open-ended and encourage detailed responses
-- Target ambiguities, assumptions, and missing information
-- Uncover constraints, edge cases, and hidden requirements
-- Help validate stakeholder understanding
-- Be practical and actionable
-
-Output format: JSON with structure:
+輸出格式（JSON）：
 {
-  "summary": "Brief summary of key requirements in this section",
+  "summary": "段落重點摘要",
   "questions": [
     {
-      "question_text": "The interview question",
+      "question_text": "建議提問",
       "question_type": "clarification|validation|exploration|edge_case|constraint|priority",
       "importance": "must|should",
-      "expected_answer_elements": ["Element 1", "Element 2", ...],
-      "suggested_followup": "Followup question if answer is insufficient",
+      "expected_answer_elements": ["期待回答要素1", "期待回答要素2"],
+      "suggested_followup": "追問方向",
       "coverage_rule": {
-        "semantic_anchors": ["key", "phrases"],
-        "expected_keywords": ["keyword1", "keyword2"],
+        "semantic_anchors": ["語義錨點"],
+        "expected_keywords": ["關鍵詞"],
         "must_mention_elements": [
-          {"text": "Critical element", "required": true, "aliases": [], "subpoints": []}
+          {"text": "必須回答的要素", "required": true, "aliases": [], "subpoints": []}
         ],
         "thresholds": {
           "probably_sufficient": 0.65,
@@ -783,6 +785,11 @@ Output format: JSON with structure:
     }
   ]
 }
+
+規則：
+- 產生 3-5 個問題
+- 問題要能幫助撰寫完整的 BRD
+- 按對話順序排列（先背景，再細節，最後確認）
 """
 
     def _build_document_analysis_prompt(

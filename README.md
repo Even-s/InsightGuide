@@ -155,6 +155,31 @@ InsightGuide 採用模組化架構，明確分離各層責任：
 - **PostgreSQL**，需支援 pgvector extension，可透過 Docker 啟動
 - **Redis**，可透過 Docker 啟動
 
+### 前端關鍵套件
+
+| 套件 | 用途 |
+|------|------|
+| `react-markdown` | 核心 Markdown 渲染引擎 |
+| `remark-gfm` | GFM 擴充：表格、刪除線、任務清單、自動連結 |
+| `rehype-slug` | 標題自動加 id，支援頁內錨點跳轉 |
+| `rehype-autolink-headings` | 標題加上可點擊的錨點連結 |
+| `@tailwindcss/typography` | 為 Markdown 內容提供 `prose` 排版樣式（標題、段落、表格、引用等） |
+
+安裝方式（已包含在 `package.json`，一般 `npm install` 即會安裝）：
+
+```bash
+cd frontend
+npm install react-markdown remark-gfm rehype-slug rehype-autolink-headings @tailwindcss/typography
+```
+
+`@tailwindcss/typography` 需在 `tailwind.config.js` 的 `plugins` 中啟用：
+
+```js
+plugins: [
+  require('@tailwindcss/typography'),
+]
+```
+
 ## 快速開始
 
 ### ⚡ 一鍵啟動（推薦）

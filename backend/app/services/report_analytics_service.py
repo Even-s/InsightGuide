@@ -115,10 +115,10 @@ class ReportAnalyticsService:
         should_cards = []
 
         for state in card_states:
-            topic_card = state.topic_card
-            if topic_card.importance == "must":
+            card = state.question_card
+            if card.importance == "must":
                 must_cards.append(state)
-            elif topic_card.importance == "should":
+            elif card.importance == "should":
                 should_cards.append(state)
 
         must_covered = sum(
@@ -195,9 +195,9 @@ class ReportAnalyticsService:
             timeline.append({
                 "timestamp": state.answered_at.isoformat() + "Z",
                 "type": "card_covered",
-                "description": f"Topic covered: {state.topic_card.title}",
-                "card_id": state.topic_card_id,
-                "card_title": state.topic_card.title,
+                "description": f"Topic covered: {state.question_card.question_text}",
+                "card_id": state.question_card_id,
+                "card_title": state.question_card.question_text,
                 "status": state.status,
                 "confidence": float(state.confidence) if state.confidence else None,
             })
@@ -232,17 +232,17 @@ class ReportAnalyticsService:
         topic_analysis = []
 
         for state in card_states:
-            topic_card = state.topic_card
+            card = state.question_card
 
             analysis = {
-                "card_id": state.topic_card_id,
-                "title": topic_card.title,
-                "description": topic_card.description,
-                "importance": topic_card.importance,
+                "card_id": state.question_card_id,
+                "title": card.question_text,
+                "description": card.question_text,
+                "importance": card.importance,
                 "status": state.status,
                 "confidence": float(state.confidence) if state.confidence else 0,
-                "slide_page": topic_card.slide_page_number,
-                "estimated_seconds": topic_card.estimated_seconds,
+                "slide_page": card.section_number,
+                "estimated_seconds": card.estimated_seconds,
                 "covered_at": state.answered_at.isoformat() + "Z" if state.answered_at else None,
                 "evidence_transcript": state.evidence_transcript,
                 "success": self._is_acceptably_covered(state.status),

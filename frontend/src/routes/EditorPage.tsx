@@ -50,6 +50,14 @@ interface InterviewPlan {
   totalCards: number
 }
 
+interface SessionItem {
+  id: string
+  status: string
+  startedAt: string | null
+  endedAt: string | null
+  createdAt: string
+}
+
 export default function EditorPage() {
   const { deckId } = useParams<{ deckId: string }>()
   const [plan, setPlan] = useState<InterviewPlan | null>(null)
@@ -58,6 +66,9 @@ export default function EditorPage() {
   const [isLoading, setIsLoading] = useState(true)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [showSessionPanel, setShowSessionPanel] = useState(false)
+  const [sessions, setSessions] = useState<SessionItem[]>([])
+  const [sessionsLoading, setSessionsLoading] = useState(false)
 
   const loadPlan = useCallback(async () => {
     if (!deckId) return
@@ -143,16 +154,24 @@ export default function EditorPage() {
     [cards, selectedThemeId],
   )
 
+  async function handleOpenSessionPanel() {
+    setShowSessionPanel(true)
+    setSessionsLoading(true)
+    try {
+      const response = await apiClient.get(`/api/prep-sessions/${deckId}/presentation-sessions`)
+      setSessions(response.data)
+    } catch {
+      setSessions([])
+    } finally {
+      setSessionsLoading(false)
+    }
+  }
+
   async function updateCard(cardId: string, form: QuestionCardFormData) {
     const updated = await questionCardsAPI.updateCard(cardId, form)
     setCards((prev) => prev.map((c) => (c.id === updated.id ? updated : c)))
   }
 
-  async function regenerateFollowup(cardId: string) {
-    const updated = await questionCardsAPI.regenerateFollowup(cardId)
-    setCards((prev) => prev.map((c) => (c.id === updated.id ? updated : c)))
-    return updated
-  }
 
   async function createCard() {
     if (!selectedTheme) return
@@ -230,7 +249,10 @@ export default function EditorPage() {
             {plan.themes.length} 個訪談單元 · {plan.totalCards} 個提問重點
           </p>
         </div>
-        <Button onClick={() => window.location.assign(`/interview/${deckId}`)}>開始訪談</Button>
+        <div className="flex items-center gap-3">
+          <Button variant="secondary" onClick={handleOpenSessionPanel}>管理訪談</Button>
+          <Button onClick={() => window.location.assign(`/interview/${deckId}`)}>開始訪談</Button>
+        </div>
       </header>
 
       {/* Interview objective banner */}
@@ -281,7 +303,7 @@ export default function EditorPage() {
         {/* Right: Theme content + inline card editor */}
         <section className="flex min-h-0 flex-col overflow-y-auto p-5">
           {selectedTheme ? (
-            <div className="mx-auto w-full max-w-3xl space-y-5">
+            <div className="mx-auto w-full max-w-4xl space-y-5">
               <div>
                 <h2 className="text-lg font-semibold text-gray-950">
                   {selectedTheme.themeNumber}. {selectedTheme.title}
@@ -323,7 +345,6 @@ export default function EditorPage() {
                 <CardEditor
                   cards={themeCards}
                   onUpdate={updateCard}
-                  onRegenerateFollowup={regenerateFollowup}
                   onDelete={deleteCard}
                   onReorder={reorderCards}
                   onCreate={createCard}
@@ -337,6 +358,79 @@ export default function EditorPage() {
           )}
         </section>
       </main>
+
+      {/* Session management sidebar */}
+      {showSessionPanel && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div className="absolute inset-0 bg-black/20" onClick={() => setShowSessionPanel(false)} />
+          <aside className="relative w-96 bg-white shadow-xl overflow-y-auto">
+            <div className="sticky top-0 flex items-center justify-between border-b border-gray-200 bg-white px-5 py-4">
+              <h2 className="text-base font-semibold text-gray-900">訪談記錄</h2>
+              <button
+                type="button"
+                onClick={() => setShowSessionPanel(false)}
+                className="rounded p-1 text-gray-400 hover:text-gray-600"
+              >
+                <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="p-4">
+              {sessionsLoading ? (
+                <p className="text-sm text-gray-500 text-center py-8">載入中...</p>
+              ) : sessions.length === 0 ? (
+                <p className="text-sm text-gray-500 text-center py-8">尚無訪談記錄</p>
+              ) : (
+                <div className="space-y-3">
+                  {sessions.map((session) => (
+                    <div key={session.id} className="rounded-lg border border-gray-200 p-3">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className={`rounded px-2 py-0.5 text-xs font-medium ${
+                          session.status === 'ended' ? 'bg-green-50 text-green-700' :
+                          session.status === 'interviewing' ? 'bg-blue-50 text-blue-700' :
+                          'bg-gray-50 text-gray-600'
+                        }`}>
+                          {session.status === 'ended' ? '已結束' :
+                           session.status === 'interviewing' ? '進行中' :
+                           session.status === 'paused' ? '已暫停' : '未開始'}
+                        </span>
+                        <span className="text-xs text-gray-400">
+                          {session.createdAt ? new Date(session.createdAt).toLocaleDateString('zh-TW') : ''}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-500 mb-2">
+                        {session.startedAt ? new Date(session.startedAt).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' }) : '未開始'}
+                        {session.endedAt ? ` — ${new Date(session.endedAt).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })}` : ''}
+                      </p>
+                      <div className="flex gap-2">
+                        {session.status === 'ended' && (
+                          <button
+                            type="button"
+                            onClick={() => window.location.assign(`/interview/${deckId}`)}
+                            className="rounded border border-gray-200 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50"
+                          >
+                            查看報告
+                          </button>
+                        )}
+                        {(session.status === 'interviewing' || session.status === 'paused') && (
+                          <button
+                            type="button"
+                            onClick={() => window.location.assign(`/interview/${deckId}`)}
+                            className="rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-700"
+                          >
+                            繼續訪談
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </aside>
+        </div>
+      )}
     </div>
   )
 }

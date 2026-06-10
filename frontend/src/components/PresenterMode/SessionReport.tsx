@@ -1,6 +1,7 @@
 import type { CardState } from '@/types/presentation'
 import Button from '@/components/common/Button'
 import ProgressBar from '@/components/common/ProgressBar'
+import { formatFollowupText, formatQuestionText } from '@/utils/interviewCopy'
 
 interface SessionReportProps {
   cardStates: CardState[]
@@ -50,8 +51,8 @@ export default function SessionReport({ cardStates, onBackToEditor, onRestart }:
             <div className="space-y-2">
               {missedMustCards.map((card) => (
                 <div key={card.id} className="rounded-xl border border-wood-300 bg-wood-50 p-3">
-                  <p className="text-sm font-medium text-wood-600">{card.questionCard.questionText}</p>
-                  <p className="mt-1 text-xs text-wood-500">{card.questionCard.suggestedFollowup}</p>
+                  <p className="text-sm font-medium text-wood-600">{formatQuestionText(card.questionCard.questionText)}</p>
+                  <p className="mt-1 text-xs text-wood-500">{formatFollowupText(card.questionCard.suggestedFollowup)}</p>
                 </div>
               ))}
             </div>

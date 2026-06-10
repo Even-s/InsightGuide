@@ -2,11 +2,11 @@ import { useCallback, useState, useRef, useEffect } from 'react'
 import type { QuestionCard } from '@/types/questionCard'
 import type { QuestionCardFormData } from '@/api/questionCards'
 import Badge from '@/components/common/Badge'
+import { formatFocusText, formatQuestionText } from '@/utils/interviewCopy'
 
 interface CardEditorProps {
   cards: QuestionCard[]
   onUpdate: (cardId: string, form: QuestionCardFormData) => Promise<void>
-  onRegenerateFollowup: (cardId: string) => Promise<QuestionCard>
   onDelete: (card: QuestionCard) => void
   onReorder: (reorderedCards: QuestionCard[]) => void
   onCreate: () => void
@@ -27,7 +27,6 @@ interface CardItemProps {
   card: QuestionCard
   index: number
   onUpdate: (form: QuestionCardFormData) => Promise<void>
-  onRegenerateFollowup: () => Promise<QuestionCard>
   onDelete: () => void
   onDragStart: (index: number) => void
   onDragOver: (e: React.DragEvent, index: number) => void
@@ -42,7 +41,6 @@ function CardItem({
   card,
   index,
   onUpdate,
-  onRegenerateFollowup,
   onDelete,
   onDragStart,
   onDragOver,
@@ -56,11 +54,8 @@ function CardItem({
   const [swipeX, setSwipeX] = useState(0)
   const [isSwiping, setIsSwiping] = useState(false)
   const [hasMovedRef, setHasMovedRef] = useState(false)
-  const [isRegenerating, setIsRegenerating] = useState(false)
-  const [regenerateError, setRegenerateError] = useState<string | null>(null)
   const [form, setForm] = useState({
     questionText: card.questionText,
-    suggestedFollowup: card.suggestedFollowup || '',
     importance: card.importance,
   })
   const startXRef = useRef(0)
@@ -153,42 +148,20 @@ function CardItem({
     await onUpdate({
       sectionId: card.sectionId,
       questionText: form.questionText,
-      suggestedFollowup: form.suggestedFollowup,
+      suggestedFollowup: card.suggestedFollowup || '',
       importance: form.importance,
     })
     setIsEditing(false)
-  }, [card.sectionId, form.importance, form.suggestedFollowup, form.questionText, onUpdate])
+  }, [card.sectionId, card.suggestedFollowup, form.importance, form.questionText, onUpdate])
 
   function handleCancel() {
     setForm({
       questionText: card.questionText,
-      suggestedFollowup: card.suggestedFollowup || '',
       importance: card.importance,
     })
     setIsEditing(false)
   }
 
-  async function handleRegenerateFollowup(e: React.MouseEvent) {
-    e.preventDefault()
-    e.stopPropagation()
-    if (isRegenerating) return
-
-    setSwipeX(0)
-    setRegenerateError(null)
-    setIsRegenerating(true)
-
-    try {
-      const updatedCard = await onRegenerateFollowup()
-      setForm((current) => ({
-        ...current,
-        suggestedFollowup: updatedCard.suggestedFollowup || '',
-      }))
-    } catch (err) {
-      setRegenerateError(getErrorMessage(err))
-    } finally {
-      setIsRegenerating(false)
-    }
-  }
 
   // Click outside to save
   useEffect(() => {
@@ -208,11 +181,10 @@ function CardItem({
     if (!isEditing) {
       setForm({
         questionText: card.questionText,
-        suggestedFollowup: card.suggestedFollowup || '',
         importance: card.importance,
       })
     }
-  }, [card.importance, card.suggestedFollowup, card.questionText, isEditing])
+  }, [card.importance, card.questionText, isEditing])
 
   return (
     <div className="relative overflow-hidden">
@@ -292,43 +264,6 @@ function CardItem({
               autoFocus
             />
 
-            <div className="space-y-1.5">
-              <label className="text-xs font-medium text-gray-700">建議追問</label>
-              <textarea
-                value={form.suggestedFollowup}
-                onChange={(e) => setForm({ ...form, suggestedFollowup: e.target.value })}
-                placeholder="如果答案不夠充分時，可以用什麼方式追問？例如：「可以具體說明使用情境嗎？」"
-                rows={3}
-                className="w-full resize-none rounded border border-gray-300 px-3 py-2 text-sm leading-relaxed focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
-              />
-              <button
-                type="button"
-                onClick={handleRegenerateFollowup}
-                disabled={isRegenerating}
-                className="inline-flex items-center gap-1.5 rounded border border-sage-200 bg-sage-50 px-2.5 py-1.5 text-xs font-medium text-sage-700 transition-colors hover:bg-sage-100 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isRegenerating ? (
-                  <svg className="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
-                  </svg>
-                ) : (
-                  <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.5m15 11v-5H19.5M6.2 6.2a8 8 0 0111.3 0 7.9 7.9 0 012 3.6M17.8 17.8a8 8 0 01-11.3 0 7.9 7.9 0 01-2-3.6" />
-                  </svg>
-                )}
-                <span>{isRegenerating ? '追問產生中' : '重新生成追問'}</span>
-              </button>
-              <p className="flex items-start gap-1.5 text-xs text-gray-500">
-                <svg className="h-4 w-4 shrink-0 mt-0.5 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                </svg>
-                <span>AI 會根據問題內容自動產生建議的追問方式</span>
-              </p>
-              {regenerateError && (
-                <p className="text-xs text-red-600">{regenerateError}</p>
-              )}
-            </div>
 
             <div className="flex justify-end gap-2 pt-2">
               <button
@@ -350,7 +285,7 @@ function CardItem({
           </div>
         ) : (
           // View mode
-          <div className="flex items-start gap-3">
+          <div className="flex items-center gap-3">
             <div className="flex shrink-0 flex-col items-center gap-2">
               <div className="flex h-9 w-9 items-center justify-center rounded-full border border-sage-200 bg-sage-50 text-sm font-semibold text-sage-700">
                 {index + 1}
@@ -372,15 +307,12 @@ function CardItem({
             </div>
 
             <div className="flex-1 min-w-0">
-              <div className="mb-1 flex items-start justify-between gap-3">
-                <h3 className="text-sm font-medium text-gray-950 leading-snug">{card.questionText}</h3>
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-base font-medium text-gray-950 leading-relaxed">{formatQuestionText(card.questionText)}</h3>
                 <Badge tone={importanceTone[card.importance]} size="sm">
                   {importanceLabel[card.importance]}
                 </Badge>
               </div>
-              {card.suggestedFollowup && (
-                <p className="line-clamp-2 text-xs leading-relaxed text-gray-500">追問：{card.suggestedFollowup}</p>
-              )}
             </div>
           </div>
         )}
@@ -388,11 +320,9 @@ function CardItem({
     </div>
   )
 }
-
 export default function CardEditor({
   cards,
   onUpdate,
-  onRegenerateFollowup,
   onDelete,
   onReorder,
   onCreate,
@@ -471,7 +401,7 @@ export default function CardEditor({
                     <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-blue-100 text-[10px] font-bold text-blue-700">
                       {groupIdx + 1}
                     </span>
-                    <h4 className="text-xs font-semibold text-gray-800">{group.focusText}</h4>
+                    <h4 className="text-sm font-semibold text-gray-800">{formatFocusText(group.focusText)}</h4>
                   </div>
                 )}
                 <div className="space-y-2 p-2">
@@ -483,7 +413,6 @@ export default function CardEditor({
                         card={card}
                         index={index}
                         onUpdate={(form) => onUpdate(card.id, form)}
-                        onRegenerateFollowup={() => onRegenerateFollowup(card.id)}
                         onDelete={() => onDelete(card)}
                         onDragStart={handleDragStart}
                         onDragOver={handleDragOver}
@@ -526,13 +455,4 @@ export default function CardEditor({
       </div>
     </section>
   )
-}
-
-function getErrorMessage(error: unknown) {
-  if (typeof error === 'object' && error !== null && 'response' in error) {
-    const response = (error as { response?: { data?: { detail?: unknown } } }).response
-    if (typeof response?.data?.detail === 'string') return response.data.detail
-  }
-
-  return error instanceof Error ? error.message : '重新生成追問失敗'
 }

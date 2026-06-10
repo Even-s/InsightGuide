@@ -342,6 +342,7 @@ async def match_partial_transcript(
         transcript,
         theme_id,
         partial.speaker,
+        partial.activeCardId,
     )
     return {"accepted": True}
 
@@ -351,6 +352,7 @@ def process_partial_transcript_evaluation_background(
     transcript: str,
     section_id: Optional[str],
     speaker: str,
+    active_card_id: Optional[str] = None,
 ):
     """Background task to process partial transcript evaluation."""
     from app.db.session import SessionLocal
@@ -369,7 +371,8 @@ def process_partial_transcript_evaluation_background(
             session_id=session_id,
             transcript_text=transcript,
             section_id=section_id,
-            speaker=speaker
+            speaker=speaker,
+            active_card_id=active_card_id,
         )
 
         # Emit events for card state changes (use event names frontend expects)

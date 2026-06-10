@@ -5,6 +5,7 @@ After an interview session ends, this service generates:
 2. A full interview transcript organized by theme
 """
 
+from datetime import datetime
 from typing import Dict, Any, List, Optional
 from sqlalchemy.orm import Session
 
@@ -136,57 +137,96 @@ class BRDGenerationService:
     ) -> str:
         """Build formatted transcript markdown."""
         if not utterances:
-            return "# 訪談逐字稿\n\n（無轉錄內容）\n"
+            return "# 訪談逐字稿\n\n（本次訪談無轉錄內容）\n"
 
         theme_map = {t.id: t.title for t in themes}
-        lines = ["# 訪談逐字稿\n"]
-        current_theme_title = None
+        now = datetime.utcnow().strftime("%Y-%m-%d")
+        total_duration = ""
+        if utterances[0].created_at and utterances[-1].created_at:
+            delta = utterances[-1].created_at - utterances[0].created_at
+            minutes = int(delta.total_seconds() // 60)
+            total_duration = f"{minutes} 分鐘"
 
+        lines = []
+        lines.append("# 訪談逐字稿")
+        lines.append("")
+        lines.append(f"| 項目 | 內容 |")
+        lines.append(f"|------|------|")
+        lines.append(f"| 訪談日期 | {now} |")
+        lines.append(f"| 總發言數 | {len(utterances)} 句 |")
+        if total_duration:
+            lines.append(f"| 訪談時長 | {total_duration} |")
+        lines.append(f"| 訪談單元數 | {len(set(theme_map.get(u.section_id, '') for u in utterances))} |")
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
+        current_theme_title = None
         for utt in utterances:
             theme_title = theme_map.get(utt.section_id, "未分類")
             if theme_title != current_theme_title:
                 current_theme_title = theme_title
-                lines.append(f"\n## {current_theme_title}\n")
+                lines.append(f"## {current_theme_title}")
+                lines.append("")
 
-            speaker_label = "訪談者" if utt.speaker == "interviewer" else "受訪者"
+            speaker_label = "🎤 訪談者" if utt.speaker == "interviewer" else "💬 受訪者"
             time_str = utt.created_at.strftime("%H:%M:%S") if utt.created_at else ""
-            lines.append(f"**{speaker_label}** [{time_str}]：{utt.transcript}\n")
+            lines.append(f"**{speaker_label}** `{time_str}`")
+            lines.append("")
+            lines.append(f"> {utt.transcript}")
+            lines.append("")
 
         return "\n".join(lines)
 
     def _render_brd_markdown(
         self, document: Optional[Document], sections: List[Dict], open_issues: List[Dict]
     ) -> str:
-        """Render the BRD as markdown."""
-        title = document.title if document else "BRD 草稿"
-        lines = [f"# {title} — BRD 草稿\n"]
-        lines.append("> 本文件由訪談系統依實際訪談 evidence 自動產出。標示「待補」之段落表示訪談中未取得足夠資訊，不得由 AI 自行補猜。\n")
+        """Render the BRD as a clean, professional markdown document."""
+        title = document.title if document else "需求文件"
+        now = datetime.utcnow().strftime("%Y-%m-%d")
 
+        lines = []
+
+        # Title block
+        lines.append(f"# {title}")
+        lines.append("")
+        lines.append(f"**Business Requirements Document** ｜ 草稿 ｜ {now}")
+        lines.append("")
+        lines.append("---")
+        lines.append("")
+
+        # Main content — each BRD chapter
         for section in sections:
-            lines.append(f"\n## {section['chapter']}\n")
+            chapter = section["chapter"]
+            lines.append(f"## {chapter}")
+            lines.append("")
 
             if section["confirmedItems"]:
                 for item in section["confirmedItems"]:
-                    lines.append(f"### {item['focusText']}\n")
+                    lines.append(f"### {item['focusText']}")
+                    lines.append("")
                     if item["evidence"]:
-                        lines.append(f"> 來源：{item['themeTitle']}\n")
-                        lines.append(f"{item['evidence']}\n")
-                    else:
-                        lines.append("（已確認，但未留存詳細 evidence）\n")
+                        lines.append(item["evidence"])
+                    lines.append("")
+            else:
+                # No confirmed content — leave blank space for future fill
+                lines.append("")
 
-            if section["missingItems"]:
-                lines.append("\n### 待補資訊\n")
-                for item in section["missingItems"]:
-                    lines.append(f"- **{item['focusText']}**（來源：{item['themeTitle']}）\n")
+            lines.append("")
 
+        # Open Issues — compact table at the end
         if open_issues:
-            lines.append("\n---\n\n## Open Issues / 待確認事項\n")
-            lines.append("| # | 訪談單元 | 待確認事項 | 建議追問 | 對應 BRD 章節 |\n")
-            lines.append("|---|---|---|---|---|\n")
+            lines.append("---")
+            lines.append("")
+            lines.append("## 待確認事項")
+            lines.append("")
+            lines.append("| # | 章節 | 待確認項目 | 建議追問 |")
+            lines.append("|:---:|------|------|------|")
             for idx, issue in enumerate(open_issues, 1):
-                brd = ", ".join(issue["brdMapping"][:3])
-                followup = (issue["suggestedFollowup"] or "")[:40]
-                lines.append(f"| {idx} | {issue['themeTitle']} | {issue['focusText']} | {followup} | {brd} |\n")
+                brd = ", ".join(issue["brdMapping"][:2]) or "—"
+                followup = (issue["suggestedFollowup"] or "—")[:50]
+                lines.append(f"| {idx} | {brd} | {issue['focusText']} | {followup} |")
+            lines.append("")
 
         return "\n".join(lines)
 

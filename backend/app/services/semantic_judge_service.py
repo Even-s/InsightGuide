@@ -151,48 +151,45 @@ class SemanticJudgeService:
             facts_text = "\n".join(facts_list)
 
         prompt = f"""
-你是演講分析專家，負責判斷演講者的逐字稿是否從**語義層面**覆蓋了投影片的主題卡片。
+你是需求訪談評估專家，負責判斷受訪者的回答是否從**語義層面**充分回應了提問重點，使其足以寫入正式 BRD 文件。
 
-## 主題卡片資訊
+## 提問重點資訊
 
-**標題**: {title}
+**提問重點**: {title}
 
-**詳細描述**: {description}
+**問題類型**: {description}
 
-**核心語義錨點** (主題的核心概念):
+**核心語義錨點** (需要被回答的核心概念):
 {chr(10).join(f'- {anchor}' for anchor in semantic_anchors) if semantic_anchors else '(無)'}
 
-**預期關鍵詞** (可能出現的詞彙):
+**預期關鍵詞** (回答中可能出現的詞彙):
 {', '.join(expected_keywords) if expected_keywords else '(無)'}
 
-**必須提及的事實或數據**:
+**期待回答要素** (BRD 需要的具體資訊):
 {facts_text if facts_text else '(無)'}
 
-## 演講者的逐字稿
+## 受訪者的回答
 
 "{utterance_text}"
 
-## 語義判斷原則
+## 判斷原則
 
 請使用深度語義理解，而非表面字詞匹配：
 
 1. **語義等價性**:
-   - 「脂肪細胞儲存能量」= 「脂肪用來存能量」
-   - 「內分泌功能」= 「分泌激素」= 「調節代謝」
-
-2. **同義詞與改述**:
-   - 接受不同的表達方式，只要意思相近
+   - 接受不同表達方式，只要意思相近
    - 口語化表達等同於書面語表達
+   - 回答不需要逐字對應問題，只要資訊足夠即可
 
-3. **核心概念覆蓋**:
-   - 優先判斷核心語義錨點是否被提及
-   - 次要判斷關鍵詞和事實的覆蓋
+2. **BRD 充分性判斷**:
+   - **足以撰寫 BRD** (confidence > 0.8): 回答包含具體流程、規則、數據，可直接寫入正式文件
+   - **基本足夠** (confidence 0.6-0.8): 核心概念有回答，但缺少部分細節
+   - **部分提及** (confidence 0.3-0.6): 只提到相關概念，資訊不足以寫入 BRD
+   - **未回答** (confidence < 0.3): 沒有提供相關資訊
 
-4. **充分性判斷**:
-   - **完全覆蓋** (confidence > 0.8): 核心概念清楚表達，關鍵事實提及
-   - **基本覆蓋** (confidence 0.6-0.8): 核心概念有提到，但細節不完整
-   - **部分提及** (confidence 0.3-0.6): 只提到相關概念，未深入
-   - **未覆蓋** (confidence < 0.3): 沒有討論相關內容
+3. **重要提醒**:
+   - 訪談者提出問題本身不算回答，只有受訪者的實質描述才算
+   - 判斷依據是「能否根據這段回答寫出 BRD 段落」
 
 ## 請回答
 
@@ -200,31 +197,15 @@ class SemanticJudgeService:
 
 ```json
 {{
-  "is_covered": boolean,          // 是否覆蓋主題 (confidence >= 0.6 時為 true)
-  "confidence": float,            // 信心度 (0.0-1.0)，反映覆蓋的充分程度
-  "reasoning": string,            // 判斷理由：說明為何判定為覆蓋/未覆蓋，引用具體的逐字稿片段
-  "mentioned_keywords": [string], // 演講者實際提到的關鍵詞（包括同義詞）
-  "missing_aspects": [string]     // 主題中尚未提到的重要面向
+  "is_covered": boolean,          // 回答是否足以寫入 BRD (confidence >= 0.6 時為 true)
+  "confidence": float,            // 充分度 (0.0-1.0)
+  "reasoning": string,            // 判斷理由
+  "mentioned_keywords": [string], // 受訪者實際提到的關鍵詞
+  "missing_aspects": [string]     // 尚未回答的重要面向
 }}
 ```
 
-## 範例
-
-**逐字稿**: "脂肪不只是存能量啦，它還能分泌一些東西來調節身體。"
-**主題**: "脂肪細胞的內分泌功能"
-
-**判斷結果**:
-```json
-{{
-  "is_covered": true,
-  "confidence": 0.75,
-  "reasoning": "演講者用口語化方式表達了脂肪的雙重功能：能量儲存（「存能量」）和內分泌作用（「分泌一些東西來調節身體」）。雖然用詞不同，但語義完整覆蓋了主題的核心概念。",
-  "mentioned_keywords": ["能量", "分泌", "調節"],
-  "missing_aspects": ["具體的激素名稱"]
-}}
-```
-
-現在請分析上述的逐字稿與主題卡片。
+現在請分析上述的受訪者回答與提問重點。
 """.strip()
 
         return prompt

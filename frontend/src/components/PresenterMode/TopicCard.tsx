@@ -3,6 +3,7 @@ import clsx from 'clsx';
 import type { CardState } from '@/types/presentation';
 import type { CardImportance, CardStatus, QuestionCard as TopicCardType } from '@/types/questionCard';
 import Badge from '@/components/common/Badge';
+import { formatFocusText, formatQuestionText } from '@/utils/interviewCopy';
 
 interface TopicCardProps {
   cardState?: CardState;
@@ -30,7 +31,7 @@ export default function TopicCard({ cardState, card, animated = true, cardHeight
 
   const status = cardState?.status ?? questionCard.status;
   const { importance, focusText, questionText, coverageRule } = questionCard;
-  const title = focusText || questionText;
+  const title = formatFocusText(focusText) || formatQuestionText(questionText);
   const evidence = cardState?.evidence ?? questionCard.evidence ?? null;
   const coveredAspectIds = getStringSet(evidence, 'coveredAspectIds');
   const importantPoints = getImportantPoints(coverageRule);
@@ -235,7 +236,7 @@ function getImportantPoints(coverageRule: TopicCardType['coverageRule']): Import
     return facts
       .map((fact, index) => ({
         id: `fact_${index}`,
-        text: fact.text?.trim(),
+        text: formatFocusText(fact.text),
         fallbackIds: [`anchor_${index}`],
       }))
       .filter((point): point is ImportantPoint => Boolean(point.text));
@@ -244,7 +245,7 @@ function getImportantPoints(coverageRule: TopicCardType['coverageRule']): Import
   return (coverageRule.semanticAnchors ?? []).slice(0, 3)
     .map((anchor, index) => ({
       id: `anchor_${index}`,
-      text: anchor.trim(),
+      text: formatFocusText(anchor),
       fallbackIds: [] as string[],
     }))
     .filter((point): point is ImportantPoint => Boolean(point.text));
@@ -335,6 +336,12 @@ function getCardStyles(status: CardStatus, importance: CardImportance) {
   };
 
   switch (status) {
+    case 'listening':
+      styles.bg = 'bg-yellow-50';
+      styles.border = 'border-yellow-200';
+      styles.animation = 'animate-pulse';
+      styles.icon = 'text-yellow-500';
+      break;
     case 'sufficient':
     case 'covered':
       styles.bg = 'bg-sage-50';

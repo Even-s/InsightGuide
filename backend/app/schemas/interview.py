@@ -108,6 +108,7 @@ class PartialTranscriptMatchCreate(BaseModel):
     sectionId: Optional[str] = None
     speaker: Literal["interviewer", "interviewee"] = "interviewee"
     realtimeItemId: Optional[str] = None
+    activeCardId: Optional[str] = None
 
 
 class InterviewSessionWithDocument(BaseModel):

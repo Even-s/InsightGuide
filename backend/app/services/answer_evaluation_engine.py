@@ -3,6 +3,8 @@
 import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+import re
+import json
 from sqlalchemy.orm import Session
 
 from app.services.embedding_service import embedding_service
@@ -183,17 +185,33 @@ class AnswerEvaluationEngine:
                 logger.info("Processed interviewer utterance: %s cards updated", len(updates))
                 return updates
 
-            # Stage 1: Load candidate cards
-            candidate_cards = self._load_candidate_cards(db, session_id, section_id)
-
+            # Stage 1: Load only the active card. A completed utterance should
+            # advance the question that was just asked, not every pending card
+            # in the same interview unit. If partial matching already completed
+            # the active card, there may be no listening card left; in that case
+            # this completed utterance is intentionally ignored.
+            candidate_cards = self._load_candidate_cards(
+                db,
+                session_id,
+                section_id,
+                statuses=['listening'],
+            )
             if not candidate_cards:
-                logger.info("No candidate cards found")
+                logger.info("No active listening card found for completed utterance; skipping")
                 return []
 
             logger.info(f"Found {len(candidate_cards)} candidate cards")
 
-            # Get recent context for better evaluation
-            recent_context = self._get_recent_context(db, session_id, section_id, utterance_text)
+            # Bound completed-answer evaluation to the current active question.
+            # Older answers from previous questions must not complete the card
+            # that was just asked.
+            recent_context = self._get_answer_context_for_cards(
+                db,
+                session_id,
+                section_id,
+                utterance_text,
+                candidate_cards,
+            )
             logger.info(f"Using context window: {len(recent_context)} chars")
 
             # Stage 2: Batch AI sufficiency scoring — one GPT call for all cards
@@ -240,7 +258,8 @@ class AnswerEvaluationEngine:
         session_id: str,
         transcript_text: str,
         section_id: str,
-        speaker: str = "interviewee"
+        speaker: str = "interviewee",
+        active_card_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Process an in-flight transcript buffer without creating an utterance row.
@@ -268,17 +287,47 @@ class AnswerEvaluationEngine:
             # Use a temporary ID for partial transcripts
             temp_utterance_id = f"partial_{datetime.utcnow().timestamp()}"
 
-            return self.process_utterance(
-                db=db,
-                session_id=session_id,
-                utterance_id=temp_utterance_id,
-                utterance_text=transcript_text,
-                section_id=section_id,
-                speaker=speaker
+            candidate_cards = self._load_candidate_cards(
+                db,
+                session_id,
+                section_id,
+                active_card_id=active_card_id,
+                statuses=['listening'],
             )
+            if not candidate_cards:
+                logger.info("No active card found for partial transcript")
+                return []
+
+            judgments = self._batch_judge_answer_sufficiency(
+                transcript_text,
+                candidate_cards,
+                session_id=session_id,
+            )
+
+            updates = []
+            for card_data, judgment in zip(candidate_cards, judgments):
+                update = self._update_card_state(
+                    db=db,
+                    card_state=card_data['state'],
+                    card=card_data['card'],
+                    utterance_id=temp_utterance_id,
+                    utterance_text=transcript_text,
+                    judgment=judgment,
+                )
+                if update:
+                    updates.append(update)
+
+            db.commit()
+            logger.info(
+                "Processed partial transcript for active card: %s/%s cards updated",
+                len(updates),
+                len(candidate_cards),
+            )
+            return updates
 
         except Exception as e:
             logger.error(f"Error processing partial transcript: {str(e)}", exc_info=True)
+            db.rollback()
             return []
 
     def _process_interviewer_question(
@@ -288,59 +337,388 @@ class AnswerEvaluationEngine:
         section_id: str,
         utterance_text: str,
     ) -> List[Dict[str, Any]]:
-        """Give a small confidence bump when the interviewer asks a question related to a card."""
-        candidate_cards = self._load_candidate_cards(db, session_id, section_id)
+        """Mark the best matching card active when the interviewer asks it.
+
+        Interviewer speech should orient the UI only. It must not increase
+        answer confidence or become BRD evidence.
+        """
+        candidate_cards = self._load_candidate_cards(
+            db,
+            session_id,
+            section_id,
+            statuses=[
+                'pending',
+                'listening',
+                'probably_sufficient',
+                'sufficient',
+                'covered',
+                'at_risk',
+                'manually_checked',
+            ],
+        )
         if not candidate_cards:
             return []
 
-        text_lower = utterance_text.lower()
+        best_match = self._find_best_interviewer_card_match(
+            utterance_text,
+            candidate_cards,
+            session_id=session_id,
+        )
+        if not best_match:
+            logger.info("No active card matched interviewer question")
+            return []
+
+        card = best_match["card"]
+        state = best_match["state"]
+        if state.status in ('sufficient', 'covered', 'manually_checked'):
+            logger.info(
+                "Interviewer question matched completed card '%s...'; active card unchanged",
+                card.question_text[:30],
+            )
+            return []
+
         updates = []
-        BUMP = 0.05
 
         for card_info in candidate_cards:
-            card = card_info["card"]
-            state = card_info["state"]
+            other_card = card_info["card"]
+            other_state = card_info["state"]
+            if other_card.id == card.id or other_state.status != "listening":
+                continue
 
-            # Simple keyword overlap check between interviewer's question and card's question_text/focus_text
-            card_keywords = set()
-            for field in [card.question_text, card.focus_text or ""]:
-                card_keywords.update(w for w in field.lower().split() if len(w) > 1)
+            old_status = other_state.status
+            other_state.status = "pending"
+            other_state.updated_at = datetime.utcnow()
+            updates.append({
+                "card_id": other_card.id,
+                "old_status": old_status,
+                "new_status": other_state.status,
+                "confidence": float(other_state.confidence or 0),
+                "evidence": {
+                    "source": "interviewer_question",
+                    "activeOnly": True,
+                    "deactivated": True,
+                },
+                "evidence_transcript": other_state.evidence_transcript,
+            })
 
-            utterance_words = set(w for w in text_lower.split() if len(w) > 1)
-            overlap = len(card_keywords & utterance_words)
+        old_status = state.status
+        current_confidence = float(state.confidence or 0)
+        state.status = "listening"
+        state.updated_at = datetime.utcnow()
+        state.evidence = {
+            **(state.evidence or {}),
+            'activeSource': 'interviewer_question',
+            'activeTranscript': utterance_text,
+            'activeAt': datetime.utcnow().isoformat(),
+        }
+        db.commit()
 
-            if overlap >= 3:
-                current_confidence = float(state.confidence or 0)
-                new_confidence = min(current_confidence + BUMP, 0.15)
-
-                if new_confidence > current_confidence:
-                    old_status = state.status
-                    state.confidence = new_confidence
-                    if state.status == "pending":
-                        state.status = "listening"
-                    db.commit()
-
-                    updates.append({
-                        "card_id": card.id,
-                        "old_status": old_status,
-                        "new_status": state.status,
-                        "confidence": float(new_confidence),
-                        "evidence": {
-                            "source": "interviewer_question",
-                            "matchedTranscript": utterance_text,
-                        },
-                    })
-
-        if updates:
-            logger.info(f"Interviewer question bumped {len(updates)} cards")
-
+        logger.info(
+            "Interviewer question activated card '%s...' without progress",
+            card.question_text[:30],
+        )
+        updates.append({
+            "card_id": card.id,
+            "old_status": old_status,
+            "new_status": state.status,
+            "confidence": current_confidence,
+            "evidence": {
+                "source": "interviewer_question",
+                "matchedTranscript": utterance_text,
+                "activeOnly": True,
+            },
+            "evidence_transcript": state.evidence_transcript,
+        })
         return updates
+
+    def _find_best_interviewer_card_match(
+        self,
+        utterance_text: str,
+        candidate_cards: List[Dict[str, Any]],
+        session_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        semantic_match = self._semantic_interviewer_card_match(
+            utterance_text,
+            candidate_cards,
+            session_id=session_id,
+        )
+        if semantic_match:
+            return semantic_match
+
+        return self._deterministic_interviewer_card_match(utterance_text, candidate_cards)
+
+    def _semantic_interviewer_card_match(
+        self,
+        utterance_text: str,
+        candidate_cards: List[Dict[str, Any]],
+        session_id: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        if len(candidate_cards) < 2:
+            return None
+
+        try:
+            from app.services.openai_service import openai_service
+            from app.services.billing_service import billing_service
+
+            model = "gpt-5.4-mini"
+            card_lines = []
+            card_by_id = {}
+            for index, card_info in enumerate(candidate_cards):
+                card = card_info["card"]
+                state = card_info["state"]
+                coverage_rule = question_card_service.normalize_coverage_rule_for_important_elements(
+                    getattr(card, 'coverage_rule', None) or {}
+                )
+                elements = coverage_rule.get('mustMentionElements', []) or []
+                element_texts = []
+                for element in elements[:5]:
+                    if isinstance(element, dict):
+                        text = element.get('text')
+                    else:
+                        text = str(element)
+                    if text:
+                        element_texts.append(text)
+
+                card_by_id[card.id] = card_info
+                card_lines.append(
+                    "\n".join([
+                        f"{index}. card_id={card.id}",
+                        f"status={state.status}",
+                        f"focus={card.focus_text or ''}",
+                        f"question={card.question_text or ''}",
+                        f"required_elements={element_texts}",
+                        f"expected_keywords={coverage_rule.get('expectedKeywords', []) or []}",
+                    ])
+                )
+
+            prompt = (
+                "請用語意判斷訪問者剛剛問的是哪一張訪談問題卡。\n"
+                "不要使用字面重疊作為主要依據，要判斷問題意圖。\n\n"
+                "判斷規則：\n"
+                "- 目標/目的/想解決什麼問題，通常對應目標卡。\n"
+                "- 支援哪些需求、範圍、邊界、情境、不支援什麼，通常對應範圍卡。\n"
+                "- 優先順序、先做哪些功能、MVP、實施先後，通常對應優先級卡。\n"
+                "- 若訪問者明確重問已完成卡，仍可選已完成卡；系統會維持不推進。\n"
+                "- 若已完成卡與未完成卡字面很像，但訪問者問的是新的子題，請選未完成的新子題卡。\n"
+                "- 若只是口頭轉場、沒有對應任何卡，card_id 回傳 null。\n\n"
+                f"訪問者問題：{utterance_text}\n\n"
+                "候選卡：\n"
+                f"{chr(10).join(card_lines)}\n\n"
+                "請只回覆 JSON："
+                "{\"card_id\": string 或 null, \"confidence\": 0.0-1.0, \"reason\": \"簡短原因\"}"
+            )
+
+            response = openai_service.client.chat.completions.create(
+                model=model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "你是訪談問題卡語意匹配器。只回傳 JSON，不要輸出額外文字。"
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0,
+                response_format={"type": "json_object"},
+            )
+            billing_service.record_chat_completion(
+                presentation_session_id=session_id,
+                operation="interviewer_card_semantic_match",
+                model=model,
+                response=response,
+            )
+
+            content = response.choices[0].message.content or "{}"
+            result = json.loads(content)
+            card_id = result.get("card_id")
+            confidence = float(result.get("confidence", 0) or 0)
+            reason = result.get("reason", "")
+
+            logger.info(
+                "AI interviewer card match: card_id=%s confidence=%.2f reason=%s",
+                card_id,
+                confidence,
+                reason,
+            )
+
+            if not card_id or confidence < 0.45:
+                return None
+
+            return card_by_id.get(card_id)
+        except Exception as exc:
+            logger.warning("AI interviewer card match failed; falling back to deterministic matcher: %s", exc)
+            return None
+
+    def _deterministic_interviewer_card_match(
+        self,
+        utterance_text: str,
+        candidate_cards: List[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        scored = [
+            (self._score_interviewer_card_match(utterance_text, card_info["card"]), card_info)
+            for card_info in candidate_cards
+        ]
+        if not scored:
+            return None
+
+        top_scores = sorted(scored, key=lambda item: item[0], reverse=True)[:3]
+        logger.info(
+            "Interviewer card match candidates: %s",
+            [
+                {
+                    "score": round(candidate_score, 3),
+                    "card_id": candidate_info["card"].id,
+                    "question": (candidate_info["card"].question_text or "")[:40],
+                }
+                for candidate_score, candidate_info in top_scores
+            ],
+        )
+        score, card_info = top_scores[0]
+        if score < 0.18:
+            return None
+
+        state = card_info["state"]
+        if state.status not in ('sufficient', 'covered', 'manually_checked'):
+            return card_info
+
+        for candidate_score, candidate_info in top_scores[1:]:
+            candidate_state = candidate_info["state"]
+            if candidate_state.status in ('sufficient', 'covered', 'manually_checked'):
+                continue
+            if candidate_score >= 0.18 and candidate_score >= score - 0.03:
+                logger.info(
+                    "Interviewer question preferred unfinished card '%s...' over completed tie '%s...'",
+                    candidate_info["card"].question_text[:30],
+                    card_info["card"].question_text[:30],
+                )
+                return candidate_info
+
+        return card_info
+
+    def _score_interviewer_card_match(self, utterance_text: str, card: QuestionCard) -> float:
+        utterance = self._normalize_match_text(utterance_text)
+        if not utterance:
+            return 0.0
+
+        coverage_rule = question_card_service.normalize_coverage_rule_for_important_elements(
+            getattr(card, 'coverage_rule', None) or {}
+        )
+        texts = [card.question_text or "", card.focus_text or ""]
+        texts.extend(coverage_rule.get('expectedKeywords', []) or [])
+        for element in coverage_rule.get('mustMentionElements', []) or []:
+            if isinstance(element, dict):
+                texts.append(element.get('text') or "")
+                texts.extend(element.get('aliases') or [])
+            else:
+                texts.append(str(element))
+
+        texts = self._expand_interviewer_match_texts(texts)
+        best_score = 0.0
+        utterance_bigrams = self._text_bigrams(utterance)
+        for text in texts:
+            candidate = self._normalize_match_text(text)
+            if len(candidate) < 2:
+                continue
+            if candidate in utterance or utterance in candidate:
+                best_score = max(best_score, 1.0)
+                continue
+
+            candidate_bigrams = self._text_bigrams(candidate)
+            if not candidate_bigrams:
+                continue
+            overlap = len(utterance_bigrams & candidate_bigrams)
+            denominator = max(1, min(len(utterance_bigrams), len(candidate_bigrams)))
+            best_score = max(best_score, overlap / denominator)
+
+        candidate_corpus = self._normalize_match_text(" ".join(texts))
+        adjusted_score = best_score + self._intent_match_adjustment(utterance, candidate_corpus)
+        return max(0.0, min(1.0, adjusted_score))
+
+    def _expand_interviewer_match_texts(self, texts: List[str]) -> List[str]:
+        """Add local UI phrasing aliases for interviewer question matching."""
+        expanded = list(texts)
+        normalized_corpus = self._normalize_match_text(" ".join(texts))
+
+        if self._contains_any(normalized_corpus, ["目標", "目的"]):
+            expanded.extend([
+                "這個需求訪談助手第一階段最想解決的是什麼問題",
+                "需求訪談助手在第一個階段想要解決的是什麼問題",
+                "需求訪談助手的業務目標",
+                "第一階段主要目標",
+            ])
+
+        if self._contains_any(normalized_corpus, ["範圍", "支援", "邊界"]):
+            expanded.extend([
+                "這個助手第一階段主要支援哪些需求訪談情境",
+                "需求訪談助手支援哪些需求範圍",
+                "哪些情境先不納入",
+                "支援範圍與邊界",
+            ])
+
+        return expanded
+
+    def _intent_match_adjustment(self, utterance: str, candidate_corpus: str) -> float:
+        """Separate nearby interview intents such as goal vs. support scope."""
+        goal_terms = [
+            "目標",
+            "目的",
+            "解決",
+            "想解決",
+            "想要解決",
+            "達到",
+            "希望",
+            "期待",
+            "業務目標",
+        ]
+        scope_terms = [
+            "範圍",
+            "支援",
+            "不支援",
+            "不納入",
+            "排除",
+            "邊界",
+            "情境",
+            "需求訪談情境",
+            "哪些需求",
+            "哪些情境",
+        ]
+
+        utterance_is_goal = self._contains_any(utterance, goal_terms)
+        utterance_is_scope = self._contains_any(utterance, scope_terms)
+        card_is_goal = self._contains_any(candidate_corpus, goal_terms)
+        card_is_scope = self._contains_any(candidate_corpus, scope_terms)
+
+        adjustment = 0.0
+        if utterance_is_goal and card_is_goal:
+            adjustment += 0.35
+        if utterance_is_goal and card_is_scope and not utterance_is_scope:
+            adjustment -= 0.3
+        if utterance_is_scope and card_is_scope:
+            adjustment += 0.35
+        if utterance_is_scope and card_is_goal and not utterance_is_goal:
+            adjustment -= 0.2
+
+        return adjustment
+
+    def _contains_any(self, text: str, terms: List[str]) -> bool:
+        return any(self._normalize_match_text(term) in text for term in terms)
+
+    @staticmethod
+    def _normalize_match_text(text: str) -> str:
+        return re.sub(r"[\W_]+", "", (text or "").lower())
+
+    @staticmethod
+    def _text_bigrams(text: str) -> set[str]:
+        if len(text) < 2:
+            return set()
+        return {text[index:index + 2] for index in range(len(text) - 1)}
 
     def _load_candidate_cards(
         self,
         db: Session,
         session_id: str,
-        section_id: str
+        section_id: str,
+        active_card_id: Optional[str] = None,
+        statuses: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Load question cards that need evaluation for the current section."""
         # Get all card states for cards in this section that are not yet sufficient
@@ -362,12 +740,16 @@ class AnswerEvaluationEngine:
                 QuestionCard.section_id == section_id,
             )
         ).all()
+        if active_card_id:
+            cards = [card for card in cards if card.id == active_card_id]
+        if not cards:
+            return []
 
         # Get their states
         card_states = db.query(InterviewCardState).filter(
             InterviewCardState.session_id == session_id,
             InterviewCardState.question_card_id.in_([card.id for card in cards]),
-            InterviewCardState.status.in_(['pending', 'listening', 'probably_sufficient', 'at_risk'])
+            InterviewCardState.status.in_(statuses or ['pending', 'listening', 'probably_sufficient', 'at_risk'])
         ).all()
 
         # Build candidate list
@@ -414,6 +796,93 @@ class AnswerEvaluationEngine:
                 current_length += len(text) + 1
 
         return " ".join(context_parts)
+
+    def _get_answer_context_for_cards(
+        self,
+        db: Session,
+        session_id: str,
+        section_id: str,
+        current_text: str,
+        candidate_cards: List[Dict[str, Any]],
+        max_chars: int = 2000,
+    ) -> str:
+        """Build answer context within the boundary of the active question.
+
+        The active boundary is set when an interviewer utterance marks a card as
+        listening. Completed utterances should only be judged with interviewee
+        speech after that point, so prior answers in the same section cannot
+        accidentally complete the current card.
+        """
+        active_since = self._latest_active_at(candidate_cards)
+        if not active_since:
+            logger.info("No active question boundary found; using current completed utterance only")
+            return current_text
+
+        bounded_context = self._get_recent_context_since(
+            db=db,
+            session_id=session_id,
+            section_id=section_id,
+            current_text=current_text,
+            since=active_since,
+            max_chars=max_chars,
+        )
+        logger.info("Bounded answer context since active question at %s", active_since.isoformat())
+        return bounded_context
+
+    def _get_recent_context_since(
+        self,
+        db: Session,
+        session_id: str,
+        section_id: str,
+        current_text: str,
+        since: datetime,
+        max_chars: int = 2000,
+    ) -> str:
+        """Get interviewee context after a question boundary."""
+        recent_utterances = db.query(Utterance).filter(
+            Utterance.session_id == session_id,
+            Utterance.section_id == section_id,
+            Utterance.speaker == "interviewee",
+            Utterance.created_at >= since,
+        ).order_by(
+            Utterance.created_at.desc()
+        ).limit(10).all()
+
+        context_parts = [current_text]
+        current_length = len(current_text)
+
+        for utterance in reversed(recent_utterances):
+            text = utterance.transcript.strip()
+            if text and text != current_text:
+                if current_length + len(text) + 1 > max_chars:
+                    break
+                context_parts.insert(0, text)
+                current_length += len(text) + 1
+
+        return " ".join(context_parts)
+
+    def _latest_active_at(self, candidate_cards: List[Dict[str, Any]]) -> Optional[datetime]:
+        active_times = []
+        for card_info in candidate_cards:
+            state = card_info.get("state")
+            evidence = getattr(state, "evidence", None) or {}
+            active_at = evidence.get("activeAt") if isinstance(evidence, dict) else None
+            parsed = self._parse_iso_datetime(active_at)
+            if parsed:
+                active_times.append(parsed)
+
+        return max(active_times) if active_times else None
+
+    @staticmethod
+    def _parse_iso_datetime(value: Any) -> Optional[datetime]:
+        if isinstance(value, datetime):
+            return value
+        if not isinstance(value, str) or not value.strip():
+            return None
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).replace(tzinfo=None)
+        except ValueError:
+            return None
 
     def _batch_judge_answer_sufficiency(
         self,
@@ -470,7 +939,8 @@ class AnswerEvaluationEngine:
                         "- 0.6-0.8：有實質內容，可作為 BRD 素材\n"
                         "- 0.8-1.0：充分回答，足以產出正式 BRD 段落\n\n"
                         "Return valid JSON only. 回傳格式必須是 JSON：\n"
-                        "{\"cards\": [{\"confidence\": 0.5, \"is_covered\": false, \"covered_element_ids\": [\"element_0\"], \"missing_element_ids\": [\"element_1\"], \"reason\": \"...\"}]}\n"
+                        "{\"cards\": [{\"confidence\": 0.5, \"is_covered\": false, \"covered_element_ids\": [\"element_0\"], \"missing_element_ids\": [\"element_1\"], \"reason\": \"...\", \"suggested_followup\": \"...\"}]}\n"
+                        "若回答不足，suggested_followup 請根據 missing_element_ids 和 reason 產生一題可直接詢問受訪者的追問；若已充分回答則回傳空字串。\n"
                         "cards 陣列的長度必須等於提問重點卡片的數量，順序一一對應。"
                     )},
                     {"role": "user", "content": (
@@ -509,9 +979,10 @@ class AnswerEvaluationEngine:
                         "covered_element_ids": item.get("covered_element_ids", []) or [],
                         "missing_element_ids": item.get("missing_element_ids", []) or [],
                         "reason": item.get("reason", ""),
+                        "suggested_followup": item.get("suggested_followup", "") or "",
                     })
                 else:
-                    judgments.append({"confidence": 0.0, "is_covered": False})
+                    judgments.append({"confidence": 0.0, "is_covered": False, "suggested_followup": ""})
 
             logger.info(f"Batch judgment for {len(candidate_cards)} cards: {[j['confidence'] for j in judgments]}")
             return judgments

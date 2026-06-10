@@ -161,11 +161,12 @@ export const presentationAPI = {
     sessionId: string,
     transcript: string,
     themeId: string,
+    activeCardId: string,
     realtimeItemId?: string
   ): Promise<{ accepted: boolean; reason?: string }> {
     const response = await apiClient.post(
       `/api/interview-sessions/${sessionId}/partial-transcript-match`,
-      { transcript, themeId, sectionId: themeId, realtimeItemId }
+      { transcript, themeId, sectionId: themeId, activeCardId, realtimeItemId }
     );
     return response.data;
   },
