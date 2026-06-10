@@ -5,9 +5,11 @@ After an interview session ends, this service generates:
 2. A full interview transcript organized by theme
 """
 
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from typing import Dict, Any, List, Optional
 from sqlalchemy.orm import Session
+
+TZ_TAIPEI = timezone(timedelta(hours=8))
 
 from app.models.interview_session import InterviewSession, InterviewCardState
 from app.models.interview_theme import InterviewTheme
@@ -144,7 +146,7 @@ class BRDGenerationService:
             return "# 訪談逐字稿\n\n（本次訪談無轉錄內容）\n"
 
         theme_map = {t.id: t.title for t in themes}
-        now = datetime.utcnow().strftime("%Y-%m-%d")
+        now = datetime.now(TZ_TAIPEI).strftime("%Y-%m-%d")
         total_duration = ""
         if utterances[0].created_at and utterances[-1].created_at:
             delta = utterances[-1].created_at - utterances[0].created_at
@@ -173,8 +175,8 @@ class BRDGenerationService:
                 lines.append(f"## {current_theme_title}")
                 lines.append("")
 
-            speaker_label = "🎤 訪談者" if utt.speaker == "interviewer" else "💬 受訪者"
-            time_str = utt.created_at.strftime("%H:%M:%S") if utt.created_at else ""
+            speaker_label = "訪談者" if utt.speaker == "interviewer" else "受訪者"
+            time_str = utt.created_at.replace(tzinfo=timezone.utc).astimezone(TZ_TAIPEI).strftime("%H:%M:%S") if utt.created_at else ""
             lines.append(f"**{speaker_label}** `{time_str}`")
             lines.append("")
             lines.append(f"> {utt.transcript}")
@@ -239,7 +241,7 @@ class BRDGenerationService:
     ) -> str:
         """Render the BRD as a clean, professional markdown document."""
         title = document.title if document else "需求文件"
-        now = datetime.utcnow().strftime("%Y-%m-%d")
+        now = datetime.now(TZ_TAIPEI).strftime("%Y-%m-%d")
 
         lines = []
 

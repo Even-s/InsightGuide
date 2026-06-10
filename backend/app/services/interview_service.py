@@ -471,6 +471,11 @@ class InterviewService:
             desc(InterviewSession.created_at)
         ).limit(limit).offset(offset).all()
 
+        usage_by_session_id = billing_service.summarize_sessions(
+            db,
+            [session.id for session, _ in results],
+        )
+
         # Build response
         sessions = []
         for session, document_title in results:
@@ -479,9 +484,7 @@ class InterviewService:
             if session.started_at:
                 duration = self.calculate_active_duration(session)
 
-            # Get cost
-            cost_usd = billing_service.get_session_cost(db, session.id)
-            ai_usage = billing_service.get_session_ai_usage(db, session.id)
+            ai_usage = usage_by_session_id.get(session.id, billing_service.empty_summary())
 
             session_data = InterviewSessionWithDocument(
                 id=session.id,
@@ -497,7 +500,7 @@ class InterviewService:
                 pausedDurationSeconds=session.paused_duration_seconds or 0,
                 createdAt=session.created_at,
                 duration=duration,
-                costUsd=cost_usd,
+                costUsd=ai_usage["totalCostUsd"],
                 aiUsage=ai_usage
             )
             sessions.append(session_data)

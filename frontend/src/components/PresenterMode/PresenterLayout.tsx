@@ -1,8 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import rehypeSlug from 'rehype-slug'
-import rehypeAutolinkHeadings from 'rehype-autolink-headings'
 import { presentationAPI } from '@/api/presentation'
 import { usePresentationSession } from '@/hooks/usePresentationSession'
 import { useRealtimeTranscription } from '@/hooks/useRealtimeTranscription'
@@ -13,6 +9,7 @@ import type { CardStatus } from '@/types/questionCard'
 import LoadingSpinner from '@/components/common/LoadingSpinner'
 import SessionHeader from './SessionHeader'
 import TranscriptDisplay from './TranscriptDisplay'
+import MarkdownOutput from './MarkdownOutput'
 import { simplifiedToTraditional } from '@/utils/chineseConverter'
 import { formatFocusText, formatQuestionText, formatThemeTitle } from '@/utils/interviewCopy'
 
@@ -912,9 +909,7 @@ function InterviewOutputsPanel({ sessionId, deckId }: { sessionId: string; deckI
 
       {/* Markdown content */}
       <div className="min-h-0 flex-1 overflow-y-auto bg-white px-8 py-6">
-        <div className="mx-auto max-w-3xl prose prose-sm prose-gray prose-headings:text-gray-900 prose-h1:text-xl prose-h2:text-lg prose-h3:text-base prose-blockquote:border-blue-300 prose-blockquote:text-blue-800 prose-blockquote:bg-blue-50 prose-blockquote:px-4 prose-blockquote:py-2 prose-blockquote:rounded">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSlug, rehypeAutolinkHeadings]}>{markdownContent || '（無內容）'}</ReactMarkdown>
-        </div>
+        <MarkdownOutput content={markdownContent} variant={activeTab} />
       </div>
     </div>
   )

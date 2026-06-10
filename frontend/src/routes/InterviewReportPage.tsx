@@ -1,11 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
-import rehypeSlug from 'rehype-slug'
-import rehypeAutolinkHeadings from 'rehype-autolink-headings'
 import { presentationAPI } from '@/api/presentation'
 import Button from '@/components/common/Button'
+import MarkdownOutput from '@/components/PresenterMode/MarkdownOutput'
 
 export default function InterviewReportPage() {
   const { deckId, sessionId } = useParams<{ deckId: string; sessionId: string }>()
@@ -118,11 +115,7 @@ export default function InterviewReportPage() {
 
       {/* Markdown content */}
       <div className="min-h-0 flex-1 overflow-y-auto bg-white px-8 py-6">
-        <div className="mx-auto max-w-3xl prose prose-sm prose-gray prose-headings:text-gray-900 prose-h1:text-xl prose-h2:text-lg prose-h3:text-base prose-blockquote:border-blue-300 prose-blockquote:text-blue-800 prose-blockquote:bg-blue-50 prose-blockquote:px-4 prose-blockquote:py-2 prose-blockquote:rounded">
-          <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeSlug, rehypeAutolinkHeadings]}>
-            {markdownContent || '（無內容）'}
-          </ReactMarkdown>
-        </div>
+        <MarkdownOutput content={markdownContent} variant={activeTab} />
       </div>
     </div>
   )

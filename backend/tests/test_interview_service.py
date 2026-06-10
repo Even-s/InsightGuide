@@ -573,8 +573,9 @@ class TestInterviewService:
         mock_db.query().join().filter().order_by().limit().offset().all.return_value = sessions
 
         with patch('app.services.interview_service.billing_service') as mock_billing:
-            mock_billing.get_session_cost.return_value = 0.5
-            mock_billing.get_session_ai_usage.return_value = {"totalCostUsd": 0.5}
+            mock_billing.summarize_sessions.return_value = {
+                "session-1": {"totalCostUsd": 0.5}
+            }
             result = interview_service.list_sessions(
                 db=mock_db,
                 user_id="user-123",
