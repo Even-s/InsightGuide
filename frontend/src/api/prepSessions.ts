@@ -54,7 +54,7 @@ export interface PresentationSessionForPrep {
   prepSessionId: string;
   deckId: string;
   userId: string;
-  status: 'idle' | 'preparing' | 'ready' | 'presenting' | 'paused' | 'slide_transitioning' | 'recovering' | 'ended' | 'failed';
+  status: 'idle' | 'preparing' | 'ready' | 'interviewing' | 'paused' | 'slide_transitioning' | 'recovering' | 'ended' | 'failed';
   currentSlideId?: string;
   startedAt?: string;
   endedAt?: string;

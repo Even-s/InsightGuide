@@ -172,10 +172,16 @@ class AnswerEvaluationEngine:
                 f"section={section_id}, speaker={speaker}, text='{utterance_text[:50]}...'"
             )
 
-            # Only evaluate interviewee responses
-            if speaker != "interviewee":
-                logger.info("Skipping interviewer utterance")
-                return []
+            is_interviewer = (speaker != "interviewee")
+            if is_interviewer:
+                updates = self._process_interviewer_question(
+                    db=db,
+                    session_id=session_id,
+                    section_id=section_id,
+                    utterance_text=utterance_text,
+                )
+                logger.info("Processed interviewer utterance: %s cards updated", len(updates))
+                return updates
 
             # Stage 1: Load candidate cards
             candidate_cards = self._load_candidate_cards(db, session_id, section_id)
@@ -190,28 +196,24 @@ class AnswerEvaluationEngine:
             recent_context = self._get_recent_context(db, session_id, section_id, utterance_text)
             logger.info(f"Using context window: {len(recent_context)} chars")
 
-            # Stage 2: AI sufficiency scoring for each active card on this section.
-            # This uses accumulated transcript context so the card progress reflects
-            # everything the interviewee has said so far.
+            # Stage 2: Batch AI sufficiency scoring — one GPT call for all cards
+            judgments = self._batch_judge_answer_sufficiency(
+                recent_context, candidate_cards, session_id=session_id
+            )
+
             updates = []
-            for card_data in candidate_cards:
+            for card_data, judgment in zip(candidate_cards, judgments):
                 card = card_data['card']
                 card_state = card_data['state']
 
-                judgment = self._judge_answer_sufficiency(
-                    recent_context,
-                    card,
-                    session_id=session_id,
-                )
-
-                # Update card state if score is high enough
                 update = self._update_card_state(
                     db=db,
                     card_state=card_state,
                     card=card,
                     utterance_id=utterance_id,
                     utterance_text=utterance_text,
-                    judgment=judgment
+                    judgment=judgment,
+                    is_interviewer=is_interviewer,
                 )
 
                 if update:
@@ -279,6 +281,61 @@ class AnswerEvaluationEngine:
             logger.error(f"Error processing partial transcript: {str(e)}", exc_info=True)
             return []
 
+    def _process_interviewer_question(
+        self,
+        db: Session,
+        session_id: str,
+        section_id: str,
+        utterance_text: str,
+    ) -> List[Dict[str, Any]]:
+        """Give a small confidence bump when the interviewer asks a question related to a card."""
+        candidate_cards = self._load_candidate_cards(db, session_id, section_id)
+        if not candidate_cards:
+            return []
+
+        text_lower = utterance_text.lower()
+        updates = []
+        BUMP = 0.05
+
+        for card_info in candidate_cards:
+            card = card_info["card"]
+            state = card_info["state"]
+
+            # Simple keyword overlap check between interviewer's question and card's question_text/focus_text
+            card_keywords = set()
+            for field in [card.question_text, card.focus_text or ""]:
+                card_keywords.update(w for w in field.lower().split() if len(w) > 1)
+
+            utterance_words = set(w for w in text_lower.split() if len(w) > 1)
+            overlap = len(card_keywords & utterance_words)
+
+            if overlap >= 3:
+                current_confidence = float(state.confidence or 0)
+                new_confidence = min(current_confidence + BUMP, 0.15)
+
+                if new_confidence > current_confidence:
+                    old_status = state.status
+                    state.confidence = new_confidence
+                    if state.status == "pending":
+                        state.status = "listening"
+                    db.commit()
+
+                    updates.append({
+                        "card_id": card.id,
+                        "old_status": old_status,
+                        "new_status": state.status,
+                        "confidence": float(new_confidence),
+                        "evidence": {
+                            "source": "interviewer_question",
+                            "matchedTranscript": utterance_text,
+                        },
+                    })
+
+        if updates:
+            logger.info(f"Interviewer question bumped {len(updates)} cards")
+
+        return updates
+
     def _load_candidate_cards(
         self,
         db: Session,
@@ -296,10 +353,14 @@ class AnswerEvaluationEngine:
         if not session:
             return []
 
-        # Get all question cards for this section
+        from sqlalchemy import or_
+        # Get question cards matching by theme_id or section_id
         cards = db.query(QuestionCard).filter(
             QuestionCard.document_id == session.document_id,
-            QuestionCard.section_id == section_id
+            or_(
+                QuestionCard.interview_theme_id == section_id,
+                QuestionCard.section_id == section_id,
+            )
         ).all()
 
         # Get their states
@@ -354,6 +415,112 @@ class AnswerEvaluationEngine:
 
         return " ".join(context_parts)
 
+    def _batch_judge_answer_sufficiency(
+        self,
+        context: str,
+        candidate_cards: List[Dict[str, Any]],
+        session_id: str
+    ) -> List[Dict[str, Any]]:
+        """Batch judge all cards in a single GPT call."""
+        import json
+        from app.services.openai_service import openai_service
+
+        cards_description = []
+        for i, card_data in enumerate(candidate_cards):
+            card = card_data['card']
+            coverage_rule = question_card_service.normalize_coverage_rule_for_important_elements(
+                getattr(card, 'coverage_rule', None) or {}
+            )
+            expected_keywords = coverage_rule.get('expectedKeywords', []) or []
+            must_mention_elements = coverage_rule.get('mustMentionElements', []) or []
+            semantic_anchors = coverage_rule.get('semanticAnchors', []) or []
+            element_lines = []
+            for element_index, element in enumerate(must_mention_elements):
+                if isinstance(element, dict):
+                    text = element.get('text')
+                    aliases = element.get('aliases') or []
+                else:
+                    text = str(element)
+                    aliases = []
+                if text:
+                    alias_text = f" aliases={aliases}" if aliases else ""
+                    element_lines.append(f"element_{element_index}: {text}{alias_text}")
+
+            cards_description.append(
+                "\n".join([
+                    f"{i}: focus=\"{card.focus_text or card.question_text}\"",
+                    f"question=\"{card.question_text}\"",
+                    f"required_elements={element_lines}",
+                    f"expected_keywords={expected_keywords}",
+                    f"semantic_anchors={semantic_anchors}",
+                ])
+            )
+
+        cards_list = "\n".join(cards_description)
+
+        try:
+            response = openai_service.client.chat.completions.create(
+                model="gpt-5.4-mini",
+                messages=[
+                    {"role": "system", "content": (
+                        "你是 BRD 訪談評估系統。判斷受訪者的回答是否充分回應了每個提問重點。\n"
+                        "對每張卡片回傳 confidence（0.0-1.0）：\n"
+                        "- 0.0-0.3：完全沒提到相關內容\n"
+                        "- 0.3-0.6：稍微提及但不足以寫入 BRD\n"
+                        "- 0.6-0.8：有實質內容，可作為 BRD 素材\n"
+                        "- 0.8-1.0：充分回答，足以產出正式 BRD 段落\n\n"
+                        "Return valid JSON only. 回傳格式必須是 JSON：\n"
+                        "{\"cards\": [{\"confidence\": 0.5, \"is_covered\": false, \"covered_element_ids\": [\"element_0\"], \"missing_element_ids\": [\"element_1\"], \"reason\": \"...\"}]}\n"
+                        "cards 陣列的長度必須等於提問重點卡片的數量，順序一一對應。"
+                    )},
+                    {"role": "user", "content": (
+                        f"受訪者說的話：\n{context[:2000]}\n\n"
+                        f"提問重點卡片（共 {len(candidate_cards)} 張）：\n{cards_list}\n\n"
+                        f"請為每張卡片評分，回傳 {len(candidate_cards)} 個結果。只輸出 JSON。"
+                    )},
+                ],
+                temperature=0,
+                response_format={"type": "json_object"},
+            )
+
+            content = response.choices[0].message.content
+            result = json.loads(content)
+            logger.info(f"Batch judgment raw response: {content[:300]}")
+
+            # Parse result — handle various response formats
+            if isinstance(result, list):
+                judgments_raw = result
+            else:
+                # Try common wrapper keys
+                for key in ["cards", "results", "judgments", "evaluations"]:
+                    if key in result and isinstance(result[key], list):
+                        judgments_raw = result[key]
+                        break
+                else:
+                    judgments_raw = []
+
+            judgments = []
+            for i in range(len(candidate_cards)):
+                if i < len(judgments_raw):
+                    item = judgments_raw[i]
+                    judgments.append({
+                        "confidence": item.get("confidence", 0.0),
+                        "is_covered": item.get("is_covered", False),
+                        "covered_element_ids": item.get("covered_element_ids", []) or [],
+                        "missing_element_ids": item.get("missing_element_ids", []) or [],
+                        "reason": item.get("reason", ""),
+                    })
+                else:
+                    judgments.append({"confidence": 0.0, "is_covered": False})
+
+            logger.info(f"Batch judgment for {len(candidate_cards)} cards: {[j['confidence'] for j in judgments]}")
+            return judgments
+
+        except Exception as e:
+            logger.error(f"Batch judgment failed: {e}", exc_info=True)
+            # Fallback: return zeros
+            return [{"confidence": 0.0, "is_covered": False}] * len(candidate_cards)
+
     def _judge_answer_sufficiency(
         self,
         context: str,
@@ -386,33 +553,68 @@ class AnswerEvaluationEngine:
         card: QuestionCard,
         utterance_id: str,
         utterance_text: str,
-        judgment: Dict[str, Any]
+        judgment: Dict[str, Any],
+        is_interviewer: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """Update card state based on sufficiency judgment."""
         old_status = card_state.status
-        sufficiency_score = judgment.get('sufficiency_score', 0.0)
-        is_sufficient = judgment.get('is_sufficient', False)
+        # Don't downgrade already completed cards
+        if old_status in ('sufficient', 'covered', 'manually_checked'):
+            return None
 
-        # Determine new status
-        new_status = old_status
-        if is_sufficient:
-            new_status = "sufficient"
-        elif sufficiency_score >= 0.62:
-            new_status = "probably_sufficient"
-        elif old_status == "pending":
-            new_status = "listening"
+        ai_confidence = judgment.get('sufficiency_score', None) or judgment.get('confidence', 0.0)
+        is_covered = judgment.get('is_sufficient', None) or judgment.get('is_covered', False)
+        current_confidence = float(card_state.confidence or 0)
+        covered_element_ids = set(judgment.get('covered_element_ids', []) or [])
+        missing_element_ids = set(judgment.get('missing_element_ids', []) or [])
+        if covered_element_ids or missing_element_ids:
+            covered, missing = self._normalize_completion_element_ids(
+                card=card,
+                completion={
+                    'covered_element_ids': list(covered_element_ids),
+                    'missing_element_ids': list(missing_element_ids),
+                },
+                completion_percentage=ai_confidence * 100,
+                is_sufficient=bool(is_covered),
+            )
+        else:
+            covered, missing = [], []
 
-        # Only update if status changed
-        if new_status == old_status:
+        if ai_confidence < 0.3:
+            return None
+
+        if is_interviewer:
+            new_confidence = min(current_confidence + 0.05, 0.15)
+            new_status = "listening" if old_status == "pending" else old_status
+        else:
+            new_confidence = max(current_confidence, ai_confidence)
+            if is_covered or ai_confidence >= 0.85:
+                new_status = "sufficient"
+            elif ai_confidence >= 0.62:
+                new_status = "probably_sufficient"
+            elif old_status == "pending":
+                new_status = "listening"
+            else:
+                new_status = old_status
+
+        # Only update if something changed
+        if new_status == old_status and new_confidence <= current_confidence:
             return None
 
         # Update card state
         card_state.status = new_status
-        card_state.confidence = sufficiency_score
-        card_state.evidence_transcript = utterance_text
+        card_state.confidence = new_confidence
+        if not is_interviewer:
+            existing_evidence = card_state.evidence_transcript or ""
+            card_state.evidence_transcript = f"{existing_evidence}\n{utterance_text}".strip()
         card_state.evidence = {
             'judgment': judgment,
             'utterance_id': utterance_id,
+            'accumulated_confidence': new_confidence,
+            'matchedTranscript': utterance_text,
+            'coveredElementIds': covered,
+            'missingElementIds': missing,
+            'coveredAspectIds': covered,
             'timestamp': datetime.utcnow().isoformat()
         }
         card_state.updated_at = datetime.utcnow()
@@ -423,7 +625,7 @@ class AnswerEvaluationEngine:
 
         logger.info(
             f"Updated card state for question '{card.question_text[:30]}...': "
-            f"{old_status} -> {new_status} (score: {sufficiency_score:.2f})"
+            f"{old_status} -> {new_status} (score: {ai_confidence:.2f})"
         )
 
         return {
@@ -431,7 +633,9 @@ class AnswerEvaluationEngine:
             'card_state_id': card_state.id,
             'old_status': old_status,
             'new_status': new_status,
-            'confidence': sufficiency_score,
+            'confidence': new_confidence,
+            'evidence': card_state.evidence,
+            'evidence_transcript': card_state.evidence_transcript,
             'judgment': judgment
         }
 

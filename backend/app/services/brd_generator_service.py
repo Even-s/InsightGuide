@@ -3,12 +3,11 @@
 import logging
 import uuid
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any
 from sqlalchemy.orm import Session
 
 from app.models.brd import BRDDraft, Requirement, BRDStatus, RequirementType, RequirementPriority
 from app.models.interview_session import InterviewSession, InterviewCardState
-from app.models.question_card import QuestionCard
 from app.models.utterance import Utterance
 from app.services.openai_service import openai_service
 
@@ -138,7 +137,7 @@ class BRDGeneratorService:
         ).order_by(Utterance.created_at).all()
 
         full_transcript = "\n".join([
-            f"[{u.created_at.strftime('%H:%M:%S')}] {u.text}"
+            f"[{u.created_at.strftime('%H:%M:%S')}] {u.transcript}"
             for u in utterances
         ])
 

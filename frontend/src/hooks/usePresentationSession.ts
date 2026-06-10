@@ -1,6 +1,28 @@
 import { useState, useEffect, useCallback } from 'react';
 import { presentationAPI } from '../api/presentation';
-import type { PresentationSession, Slide } from '../types/presentation';
+import type { PresentationSession, SessionStatus, Slide } from '../types/presentation';
+import apiClient from '../api/client';
+
+interface InterviewTheme {
+  id: string
+  themeNumber: number
+  title: string
+  rationale: string
+  brdMapping: string[]
+  priority: number
+  estimatedMinutes: number | null
+  orderIndex: number
+  isEnabled: boolean
+  cards: Array<{
+    id: string
+    focusText: string
+    questionText: string
+    importance: string
+    suggestedFollowup: string
+    expectedAnswerElements: string[]
+    brdMapping: string[]
+  }>
+}
 
 function parseApiDate(value?: string | null) {
   if (!value) return null;
@@ -12,19 +34,18 @@ function parseApiDate(value?: string | null) {
 function calculateActiveElapsedMs(session: PresentationSession) {
   const startedAt = parseApiDate(session.startedAt);
   if (!startedAt) return 0;
-
   const pausedDurationMs = Math.max(0, session.pausedDurationSeconds ?? 0) * 1000;
   const pausedAt = session.status === 'paused' ? parseApiDate(session.pausedAt) : null;
   const endedAt = session.status === 'ended' ? parseApiDate(session.endedAt) : null;
   const effectiveEnd = pausedAt ?? endedAt ?? Date.now();
-
   return Math.max(0, effectiveEnd - startedAt - pausedDurationMs);
 }
 
 export function usePresentationSession(sessionId: string) {
   const [session, setSession] = useState<PresentationSession | null>(null);
+  const [themes, setThemes] = useState<InterviewTheme[]>([]);
   const [slides, setSlides] = useState<Slide[]>([]);
-  const [currentSlideIndex, setCurrentSlideIndex] = useState(0);
+  const [currentThemeIndex, setCurrentThemeIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
@@ -33,26 +54,18 @@ export function usePresentationSession(sessionId: string) {
       setIsLoading(true);
       const sessionData = await presentationAPI.getSession(sessionId);
 
-      // Check if session has been running for too long (> 1 hours)
       if (sessionData.startedAt && sessionData.status.match(/presenting|paused/)) {
         const elapsedHours = calculateActiveElapsedMs(sessionData) / (1000 * 60 * 60);
-
-        if (elapsedHours > 1) {
+        if (elapsedHours > 2) {
           const shouldEnd = window.confirm(
-            `此 Session 已運行 ${Math.floor(elapsedHours)} 小時。\n` +
-            `建議結束舊 Session 並重新開始。\n\n` +
-            `• 點擊「確定」= 結束並返回編輯頁面\n` +
-            `• 點擊「取消」= 繼續使用（不建議）`
+            `此 Session 已運行 ${Math.floor(elapsedHours)} 小時。\n建議結束舊 Session 並重新開始。`
           );
-
           if (shouldEnd) {
-            // End the session and go back to editor
             try {
               await presentationAPI.endSession(sessionId);
             } catch (err) {
-              console.error('Failed to end session:', err);
+              console.warn('Failed to end stale session before redirect:', err);
             }
-            // Redirect back to editor to create a fresh session
             window.location.href = `/editor/${sessionData.documentId}`;
             return;
           }
@@ -61,12 +74,16 @@ export function usePresentationSession(sessionId: string) {
 
       setSession(sessionData);
 
-      const slidesData: Slide[] = await presentationAPI.getSlides(sessionData.documentId);
-      setSlides(slidesData);
-
-      if (sessionData.currentSectionId) {
-      const index = slidesData.findIndex((s) => s.id === sessionData.currentSectionId);
-        setCurrentSlideIndex(index >= 0 ? index : 0);
+      // Load themes from interview plan
+      try {
+        const planResponse = await apiClient.get(`/api/documents/${sessionData.documentId}/interview-plan`);
+        const plan = planResponse.data;
+        const enabledThemes = (plan.themes || []).filter((t: InterviewTheme) => t.isEnabled);
+        setThemes(enabledThemes);
+      } catch {
+        // Fallback: load slides for legacy mode
+        const slidesData = await presentationAPI.getSlides(sessionData.documentId);
+        setSlides(slidesData);
       }
 
       setIsLoading(false);
@@ -76,27 +93,27 @@ export function usePresentationSession(sessionId: string) {
     }
   }, [sessionId]);
 
-  useEffect(() => {
-    loadSession();
-  }, [loadSession]);
+  useEffect(() => { loadSession(); }, [loadSession]);
+
+  const currentTheme = themes[currentThemeIndex] ?? null;
+  const currentSlide = slides[currentThemeIndex] ?? null;
 
   const startPresenting = useCallback(async () => {
     try {
-      const updated = await presentationAPI.updateSession(sessionId, {
-        status: 'presenting',
-        currentSectionId: slides[currentSlideIndex]?.id
-      });
+      const payload: { status: SessionStatus; currentSectionId?: string } = { status: 'interviewing' }
+      const themeOrSlideId = currentTheme?.id ?? currentSlide?.id
+      if (themeOrSlideId) payload.currentSectionId = themeOrSlideId
+
+      const updated = await presentationAPI.updateSession(sessionId, payload);
       setSession(updated);
     } catch (err) {
-      console.error('Failed to start presenting:', err);
+      console.error('Failed to start:', err);
     }
-  }, [sessionId, slides, currentSlideIndex]);
+  }, [sessionId, currentTheme, currentSlide]);
 
   const pausePresenting = useCallback(async () => {
     try {
-      const updated = await presentationAPI.updateSession(sessionId, {
-        status: 'paused'
-      });
+      const updated = await presentationAPI.updateSession(sessionId, { status: 'paused' });
       setSession(updated);
     } catch (err) {
       console.error('Failed to pause:', err);
@@ -104,34 +121,31 @@ export function usePresentationSession(sessionId: string) {
   }, [sessionId]);
 
   const nextSlide = useCallback(async () => {
-    if (currentSlideIndex < slides.length - 1) {
-      const newIndex = currentSlideIndex + 1;
-      setCurrentSlideIndex(newIndex);
-
+    const maxIndex = themes.length > 0 ? themes.length - 1 : slides.length - 1;
+    if (currentThemeIndex < maxIndex) {
+      const newIndex = currentThemeIndex + 1;
+      setCurrentThemeIndex(newIndex);
+      const nextId = themes[newIndex]?.id ?? slides[newIndex]?.id;
       try {
-        await presentationAPI.updateSession(sessionId, {
-          currentSectionId: slides[newIndex].id
-        });
+        await presentationAPI.updateSession(sessionId, { currentSectionId: nextId });
       } catch (err) {
-        console.error('Failed to update slide:', err);
+        console.warn('Failed to update current section:', err);
       }
     }
-  }, [sessionId, slides, currentSlideIndex]);
+  }, [sessionId, themes, slides, currentThemeIndex]);
 
   const previousSlide = useCallback(async () => {
-    if (currentSlideIndex > 0) {
-      const newIndex = currentSlideIndex - 1;
-      setCurrentSlideIndex(newIndex);
-
+    if (currentThemeIndex > 0) {
+      const newIndex = currentThemeIndex - 1;
+      setCurrentThemeIndex(newIndex);
+      const prevId = themes[newIndex]?.id ?? slides[newIndex]?.id;
       try {
-        await presentationAPI.updateSession(sessionId, {
-          currentSectionId: slides[newIndex].id
-        });
+        await presentationAPI.updateSession(sessionId, { currentSectionId: prevId });
       } catch (err) {
-        console.error('Failed to update slide:', err);
+        console.warn('Failed to update current section:', err);
       }
     }
-  }, [sessionId, slides, currentSlideIndex]);
+  }, [sessionId, themes, slides, currentThemeIndex]);
 
   const endSession = useCallback(async () => {
     try {
@@ -149,23 +163,22 @@ export function usePresentationSession(sessionId: string) {
       if (e.key === 'ArrowLeft') previousSlide();
       if (e.key === ' ') {
         e.preventDefault();
-        if (session?.status === 'presenting') {
-          pausePresenting();
-        } else if (session?.status === 'paused') {
-          startPresenting();
-        }
+        if (session?.status === 'interviewing') pausePresenting();
+        else if (session?.status === 'paused') startPresenting();
       }
     };
-
     window.addEventListener('keydown', handleKeyPress);
     return () => window.removeEventListener('keydown', handleKeyPress);
   }, [session, nextSlide, previousSlide, startPresenting, pausePresenting]);
 
   return {
     session,
+    themes,
+    currentTheme,
+    currentThemeIndex,
     slides,
-    currentSlide: slides[currentSlideIndex] || null,
-    currentSlideIndex,
+    currentSlide,
+    currentSlideIndex: currentThemeIndex,
     isLoading,
     error,
     startPresenting,

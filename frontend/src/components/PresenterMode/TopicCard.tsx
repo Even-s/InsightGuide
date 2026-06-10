@@ -29,7 +29,8 @@ export default function TopicCard({ cardState, card, animated = true, cardHeight
   if (!questionCard) return null;
 
   const status = cardState?.status ?? questionCard.status;
-  const { importance, questionText: title, coverageRule } = questionCard;
+  const { importance, focusText, questionText, coverageRule } = questionCard;
+  const title = focusText || questionText;
   const evidence = cardState?.evidence ?? questionCard.evidence ?? null;
   const coveredAspectIds = getStringSet(evidence, 'coveredAspectIds');
   const importantPoints = getImportantPoints(coverageRule);
@@ -40,7 +41,8 @@ export default function TopicCard({ cardState, card, animated = true, cardHeight
   )).length;
   const aspectProgress = talkingPointIds.length > 0 ? coveredTalkingPointCount / talkingPointIds.length : null;
   const confidence = aspectProgress ?? cardState?.confidence ?? questionCard.confidence;
-  const displayConfidence = confidence ?? (status === 'covered' ? 1 : 0);
+  const isCompleted = isCompletedStatus(status);
+  const displayConfidence = confidence ?? (isCompleted ? 1 : 0);
   const waterLevel = Math.max(0, Math.min(100, displayConfidence * 100));
 
   const cardStyles = getCardStyles(status, importance);
@@ -143,7 +145,7 @@ export default function TopicCard({ cardState, card, animated = true, cardHeight
           // 邊框：統一寬度，只改變顏色
           'border',
           displayConfidence > 0
-            ? (status === 'covered' ? 'border-sage-300' : 'border-sage-200')
+            ? (isCompleted ? 'border-sage-300' : 'border-sage-200')
             : cardStyles.border,
           animated && cardStyles.animation,
           // 正在講時突出顯示 - 使用陰影和顏色，但邊框保持單一寬度
@@ -173,7 +175,7 @@ export default function TopicCard({ cardState, card, animated = true, cardHeight
             <div
               className={clsx(
                 'absolute inset-0',
-                status === 'covered'
+                isCompleted
                   ? 'bg-sage-200/45'
                   : 'bg-sage-100/55'
               )}
@@ -189,7 +191,7 @@ export default function TopicCard({ cardState, card, animated = true, cardHeight
           {StatusIcon && <StatusIcon className={clsx('mt-0.5 h-5 w-5 shrink-0', cardStyles.icon)} />}
           <h3 className={clsx(
             'min-w-0 break-words text-lg font-bold leading-relaxed tracking-wide',
-            status === 'covered' ? 'text-natural-400 line-through' : 'text-natural-700'
+            isCompleted ? 'text-natural-400 line-through' : 'text-natural-700'
           )}>
             {title}
           </h3>
@@ -300,7 +302,7 @@ function TalkingPointItem({
       emphasized && 'font-medium',
       isCovered
         ? 'text-natural-400 line-through decoration-sage-500 decoration-2'
-        : status === 'covered'
+        : isCompletedStatus(status)
           ? 'text-natural-500'
           : isActive
             ? 'text-natural-700 font-medium'
@@ -310,7 +312,7 @@ function TalkingPointItem({
         'shrink-0 text-lg leading-relaxed',
         isCovered
           ? 'text-sage-500'
-          : status === 'covered'
+          : isCompletedStatus(status)
             ? 'text-sage-500'
             : isActive
               ? 'text-sage-400'
@@ -333,11 +335,13 @@ function getCardStyles(status: CardStatus, importance: CardImportance) {
   };
 
   switch (status) {
+    case 'sufficient':
     case 'covered':
       styles.bg = 'bg-sage-50';
       styles.border = 'border-sage-200';
       styles.icon = 'text-sage-500';
       break;
+    case 'probably_sufficient':
     case 'probably_covered':
       styles.bg = 'bg-wood-50';
       styles.border = 'border-wood-200';
@@ -366,8 +370,10 @@ function getCardStyles(status: CardStatus, importance: CardImportance) {
 
 function getStatusIcon(status: CardStatus) {
   switch (status) {
+    case 'sufficient':
     case 'covered':
       return CheckCircleIcon;
+    case 'probably_sufficient':
     case 'probably_covered':
       return CheckIcon;
     case 'at_risk':
@@ -377,6 +383,10 @@ function getStatusIcon(status: CardStatus) {
     default:
       return null;
   }
+}
+
+function isCompletedStatus(status: CardStatus) {
+  return status === 'sufficient' || status === 'covered' || status === 'manually_checked';
 }
 
 function ImportanceBadge({ importance }: { importance: CardImportance }) {

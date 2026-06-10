@@ -227,6 +227,8 @@ class InterviewService:
         session = self.get_session(db, session_id)
         old_section_id = session.current_section_id
 
+        logger.info(f"update_session payload: status={update_data.status}, currentSectionId={update_data.currentSectionId}")
+
         if update_data.status:
             old_status = session.status
             now = datetime.utcnow()
@@ -251,7 +253,11 @@ class InterviewService:
                 session.ended_at = now
 
         if update_data.currentSectionId is not None:
-            session.current_section_id = update_data.currentSectionId
+            new_id = update_data.currentSectionId
+            if new_id.startswith("theme_"):
+                session.current_theme_id = new_id
+            else:
+                session.current_section_id = new_id
 
         db.commit()
         db.refresh(session)
@@ -391,10 +397,14 @@ class InterviewService:
         session = self.get_session(db, session_id)
 
         utterance_id = f"utt_{uuid.uuid4().hex[:12]}"
+        # Only store section_id if it's actually a section (not a theme)
+        raw_section_id = utterance_data.sectionId
+        section_id = raw_section_id if raw_section_id and not raw_section_id.startswith("theme_") else None
+
         utterance = Utterance(
             id=utterance_id,
             session_id=session_id,
-            section_id=utterance_data.sectionId,
+            section_id=section_id,
             speaker=utterance_data.speaker,
             transcript=utterance_data.transcript,
             started_at=utterance_data.startedAt,

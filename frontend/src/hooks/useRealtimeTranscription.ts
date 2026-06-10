@@ -136,7 +136,7 @@ export function useRealtimeTranscription({
 
     const trimmed = buffer.trim()
     const looksComplete = /[。！？!?]\s*$/.test(trimmed)
-    const delayMs = looksComplete ? 450 : 1300
+    const delayMs = looksComplete ? 800 : 2500
 
     deltaFlushTimeoutRef.current = window.setTimeout(() => {
       flushDeltaBuffer()

@@ -3,7 +3,7 @@
  * Generate and view Business Requirements Document from completed interview
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import axios from 'axios'
 
@@ -48,13 +48,9 @@ export default function BRDGenerationPage() {
   const [error, setError] = useState<string | null>(null)
   const [generating, setGenerating] = useState(false)
 
-  useEffect(() => {
-    if (sessionId) {
-      checkExistingBRD()
-    }
-  }, [sessionId])
+  const checkExistingBRD = useCallback(async () => {
+    if (!sessionId) return
 
-  const checkExistingBRD = async () => {
     try {
       const response = await axios.get(`${API_URL}/api/brd/session/${sessionId}`)
       setBrd(response.data)
@@ -63,8 +59,8 @@ export default function BRDGenerationPage() {
       if (response.data.status === 'generating') {
         setTimeout(checkExistingBRD, 2000)
       }
-    } catch (err: any) {
-      if (err.response?.status === 404) {
+    } catch (err: unknown) {
+      if (axios.isAxiosError(err) && err.response?.status === 404) {
         // No BRD exists yet
         setBrd(null)
       } else {
@@ -73,7 +69,13 @@ export default function BRDGenerationPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [sessionId])
+
+  useEffect(() => {
+    if (sessionId) {
+      checkExistingBRD()
+    }
+  }, [sessionId, checkExistingBRD])
 
   const generateBRD = async () => {
     if (!sessionId) return
@@ -88,8 +90,9 @@ export default function BRDGenerationPage() {
 
       // Start polling for updates
       setTimeout(checkExistingBRD, 2000)
-    } catch (err: any) {
-      setError(err.response?.data?.detail || 'Failed to generate BRD')
+    } catch (err: unknown) {
+      const detail = axios.isAxiosError(err) ? err.response?.data?.detail : null
+      setError(typeof detail === 'string' ? detail : 'Failed to generate BRD')
       setGenerating(false)
     }
   }

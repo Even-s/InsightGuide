@@ -15,7 +15,7 @@ export interface SessionWithDeck {
   deckId: string;
   deckTitle: string;
   userId: string;
-  status: 'idle' | 'preparing' | 'ready' | 'presenting' | 'paused' | 'slide_transitioning' | 'recovering' | 'ended' | 'failed';
+  status: 'idle' | 'preparing' | 'ready' | 'interviewing' | 'paused' | 'slide_transitioning' | 'recovering' | 'ended' | 'failed';
   currentSlideId?: string;
   startedAt?: string;
   endedAt?: string;
@@ -70,7 +70,7 @@ export const sessionsAPI = {
     const total = response.data.total; // Use total from API response
 
     const active = sessions.filter((s) =>
-      ['idle', 'preparing', 'ready', 'presenting', 'paused'].includes(s.status)
+      ['idle', 'preparing', 'ready', 'interviewing', 'paused'].includes(s.status)
     ).length;
     const ended = sessions.filter((s) => s.status === 'ended').length;
 

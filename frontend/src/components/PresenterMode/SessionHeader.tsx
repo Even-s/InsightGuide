@@ -67,7 +67,7 @@ export default function SessionHeader({
       return
     }
 
-    if (session.status !== 'presenting') {
+    if (session.status !== 'interviewing') {
       setElapsedSeconds(calculateActiveElapsedSeconds(session))
       return
     }
@@ -100,7 +100,7 @@ export default function SessionHeader({
       <div className="min-w-0">
         <div className="flex items-center gap-4 mb-1">
           <h1 className="text-xl font-medium text-natural-700 tracking-wide leading-relaxed">InsightGuide</h1>
-          <Badge tone={session?.status === 'presenting' ? 'green' : 'blue'}>
+          <Badge tone={session?.status === 'interviewing' ? 'green' : 'blue'}>
             {statusLabels[session?.status ?? 'idle'] ?? session?.status}
           </Badge>
         </div>
@@ -130,7 +130,7 @@ export default function SessionHeader({
           >
             {isPreparingToPresent ? '準備中' : '開始'}
           </Button>
-        ) : session?.status === 'presenting' ? (
+        ) : session?.status === 'interviewing' ? (
           <Button
             variant="secondary"
             size="sm"

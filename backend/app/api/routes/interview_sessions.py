@@ -202,6 +202,10 @@ async def create_utterance(
     This endpoint receives transcripts from the frontend Realtime client
     and stores them for answer evaluation.
     """
+    # Auto-classify speaker using rule-based heuristics (instant, no API call)
+    from app.services.openai_service import openai_service
+    utterance.speaker = openai_service.classify_speaker(utterance.transcript)
+
     logger.info(f"Creating utterance for session {session_id} (speaker: {utterance.speaker}): {utterance.transcript[:50]}...")
 
     try:
@@ -212,14 +216,16 @@ async def create_utterance(
             utterance,
         )
 
-        # Only process interviewee responses
-        if utterance.speaker == "interviewee":
+        theme_id = utterance.themeId or utterance_obj.section_id
+        # Process both speakers: interviewee for full evaluation,
+        # interviewer for small progress bump (question was asked)
+        if utterance.speaker in ("interviewee", "interviewer"):
             background_tasks.add_task(
                 process_utterance_evaluation_background,
                 session_id,
                 utterance_obj.id,
                 utterance_obj.transcript,
-                utterance_obj.section_id,
+                theme_id,
                 utterance_obj.speaker,
             )
 
@@ -261,16 +267,26 @@ def process_utterance_evaluation_background(
             speaker=speaker
         )
 
-        # Emit events for card state changes
+        # Emit events for card state changes (use event names frontend expects)
+        STATUS_TO_EVENT = {
+            "sufficient": "CARD_COVERED",
+            "probably_sufficient": "CARD_PROBABLY_COVERED",
+            "listening": "CARD_LISTENING",
+            "at_risk": "CARD_AT_RISK",
+            "skipped": "CARD_SKIPPED",
+        }
         for update in updates:
-            event_service.emit_event(
-                f"session_{session_id}",
+            event_type = STATUS_TO_EVENT.get(update["new_status"], "CARD_LISTENING")
+            event_service.publish_sync(
+                session_id,
                 {
-                    "type": "CARD_STATE_UPDATED",
-                    "cardId": update["card_id"],
-                    "oldStatus": update["old_status"],
-                    "newStatus": update["new_status"],
+                    "type": event_type,
+                    "card_id": update["card_id"],
+                    "old_status": update["old_status"],
+                    "new_status": update["new_status"],
                     "confidence": update["confidence"],
+                    "evidence": update.get("evidence"),
+                    "evidenceTranscript": update.get("evidence_transcript"),
                 }
             )
 
@@ -319,13 +335,12 @@ async def match_partial_transcript(
     if partial.speaker != "interviewee":
         return {"accepted": False, "reason": "only interviewee responses are evaluated"}
 
-    # Partial matching can be slow and should not delay script progression.
-    # The background task opens its own DB session after the response returns.
+    theme_id = partial.themeId or partial.sectionId
     background_tasks.add_task(
         process_partial_transcript_evaluation_background,
         session_id,
         transcript,
-        partial.sectionId,
+        theme_id,
         partial.speaker,
     )
     return {"accepted": True}
@@ -357,16 +372,26 @@ def process_partial_transcript_evaluation_background(
             speaker=speaker
         )
 
-        # Emit events for card state changes
+        # Emit events for card state changes (use event names frontend expects)
+        STATUS_TO_EVENT = {
+            "sufficient": "CARD_COVERED",
+            "probably_sufficient": "CARD_PROBABLY_COVERED",
+            "listening": "CARD_LISTENING",
+            "at_risk": "CARD_AT_RISK",
+            "skipped": "CARD_SKIPPED",
+        }
         for update in updates:
-            event_service.emit_event(
-                f"session_{session_id}",
+            event_type = STATUS_TO_EVENT.get(update["new_status"], "CARD_LISTENING")
+            event_service.publish_sync(
+                session_id,
                 {
-                    "type": "CARD_STATE_UPDATED",
-                    "cardId": update["card_id"],
-                    "oldStatus": update["old_status"],
-                    "newStatus": update["new_status"],
+                    "type": event_type,
+                    "card_id": update["card_id"],
+                    "old_status": update["old_status"],
+                    "new_status": update["new_status"],
                     "confidence": update["confidence"],
+                    "evidence": update.get("evidence"),
+                    "evidenceTranscript": update.get("evidence_transcript"),
                 }
             )
 
@@ -474,6 +499,23 @@ async def get_session_report(session_id: str, db: Session = Depends(get_db)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to generate report",
         )
+
+
+@router.post("/{session_id}/outputs/generate")
+async def generate_session_outputs(session_id: str, db: Session = Depends(get_db)):
+    """Generate BRD document and transcript after interview ends.
+
+    Returns structured BRD (markdown) and full transcript (markdown).
+    BRD sections with insufficient evidence are marked as '待補'.
+    """
+    from app.services.brd_generation_service import brd_generation_service
+
+    logger.info(f"Generating BRD and transcript for session {session_id}")
+    try:
+        result = brd_generation_service.generate_outputs(db, session_id)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
 @router.post("/{session_id}/report")

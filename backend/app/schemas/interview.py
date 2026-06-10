@@ -93,6 +93,7 @@ class UtteranceSchema(BaseModel):
 class UtteranceCreate(BaseModel):
     """Schema for creating an utterance."""
     transcript: str
+    themeId: Optional[str] = None
     sectionId: Optional[str] = None
     speaker: Literal["interviewer", "interviewee"] = "interviewee"
     startedAt: Optional[datetime] = None
@@ -103,7 +104,8 @@ class UtteranceCreate(BaseModel):
 class PartialTranscriptMatchCreate(BaseModel):
     """Schema for streaming partial transcript matching."""
     transcript: str = Field(min_length=1, max_length=4000)
-    sectionId: str
+    themeId: Optional[str] = None
+    sectionId: Optional[str] = None
     speaker: Literal["interviewer", "interviewee"] = "interviewee"
     realtimeItemId: Optional[str] = None
 

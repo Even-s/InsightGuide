@@ -2,157 +2,86 @@ import { useEffect, useMemo, useState, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
 import { deckApi } from '@/api/decks'
 import { questionCardsAPI, type QuestionCardFormData } from '@/api/questionCards'
-import { useDeckEvents, type AnalysisCompleteEvent, type CardCreatedEvent } from '@/hooks/useDeckEvents'
+import { useDeckEvents, type AnalysisCompleteEvent } from '@/hooks/useDeckEvents'
 import CardEditor from '@/components/EditorMode/CardEditor'
-import SlidePreview from '@/components/EditorMode/SlidePreview'
 import Button from '@/components/common/Button'
 import LoadingSpinner from '@/components/common/LoadingSpinner'
-import { formatTokenCount, formatUsdCost } from '@/utils/formatters'
-import type { Slide } from '@/types/presentation'
+import apiClient from '@/api/client'
 import type { QuestionCard } from '@/types/questionCard'
 
-type ApiRecord = Record<string, unknown>
-
-function asString(value: unknown) {
-  return typeof value === 'string' ? value : undefined
+interface InterviewTheme {
+  id: string
+  themeNumber: number
+  title: string
+  rationale: string
+  brdMapping: string[]
+  priority: number
+  estimatedMinutes: number | null
+  orderIndex: number
+  isRequired: boolean
+  isEnabled: boolean
+  userNotes: string | null
+  cards: ThemeCard[]
 }
 
-function asNumber(value: unknown) {
-  return typeof value === 'number' ? value : 0
+interface ThemeCard {
+  id: string
+  focusText: string
+  questionText: string
+  questionType: string
+  importance: string
+  suggestedFollowup: string
+  expectedAnswerElements: string[]
+  brdMapping: string[]
+  estimatedSeconds: number
+  orderIndex: number
+  status: string
+  confidence: number | null
+  createdBy: string
 }
 
-function normalizeImageUrl(value: unknown) {
-  const url = asString(value)
-  if (!url) return undefined
-  return url.replace('http://minio:9000', 'http://localhost:9000')
-}
-
-function normalizeSlide(raw: ApiRecord): Slide {
-  return {
-    id: asString(raw.id) ?? '',
-    deckId: asString(raw.deckId) ?? asString(raw.deck_id) ?? '',
-    pageNumber: asNumber(raw.pageNumber ?? raw.page_number),
-    title: asString(raw.title),
-    imageUrl: normalizeImageUrl(raw.imageUrl ?? raw.image_url),
-    extractedText: asString(raw.extractedText) ?? asString(raw.extracted_text),
-    aiSummary: asString(raw.aiSummary) ?? asString(raw.ai_summary),
-    topicCardsCount: asNumber(raw.topicCardsCount ?? raw.topic_cards_count),
-  }
+interface InterviewPlan {
+  documentId: string
+  status: string
+  interviewObjective: string | null
+  priorityOrder: number[]
+  priorityReasoning: string | null
+  themes: InterviewTheme[]
+  totalCards: number
 }
 
 export default function EditorPage() {
   const { deckId } = useParams<{ deckId: string }>()
-  const [slides, setSlides] = useState<Slide[]>([])
+  const [plan, setPlan] = useState<InterviewPlan | null>(null)
   const [cards, setCards] = useState<QuestionCard[]>([])
-  const [selectedSlideId, setSelectedSlideId] = useState<string>('')
+  const [selectedThemeId, setSelectedThemeId] = useState<string>('')
   const [isLoading, setIsLoading] = useState(true)
-  const [processingStatus, setProcessingStatus] = useState<string | null>(null)
-  const [processingMessage, setProcessingMessage] = useState<string | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
-  const [progress, setProgress] = useState<{
-    currentCard: number
-    currentSlide: number
-    totalSlides: number
-    percentage: number
-  } | null>(null)
-  const [deckAnalysisCost, setDeckAnalysisCost] = useState<{
-    costUsd: number
-    totalTokens: number
-  }>({ costUsd: 0, totalTokens: 0 })
+  const [error, setError] = useState<string | null>(null)
 
-  const refreshEditorData = useCallback(async () => {
-    if (!deckId) return null
+  const loadPlan = useCallback(async () => {
+    if (!deckId) return
+    const response = await apiClient.get(`/api/documents/${deckId}/interview-plan`)
+    const data: InterviewPlan = response.data
+    setPlan(data)
 
-    const [analysis, deckCards] = await Promise.all([
-      deckApi.getDeckAnalysis(deckId),
-      questionCardsAPI.getDocumentCards(deckId),
-    ])
-    const normalizedSlides = Array.isArray(analysis.slides)
-      ? analysis.slides.map((slide) => normalizeSlide(slide))
-      : []
-
-    setSlides(normalizedSlides)
-    setCards(deckCards)
-    setDeckAnalysisCost({
-      costUsd: analysis.cost_usd ?? 0,
-      totalTokens: analysis.ai_usage?.totalTokens ?? 0,
-    })
-    setSelectedSlideId((current) => {
-      if (current && normalizedSlides.some((slide) => slide.id === current)) return current
-      return normalizedSlides[0]?.id ?? ''
-    })
-
-    return analysis
-  }, [deckId])
-
-  // Fetch a single new card by ID
-  const fetchNewCard = useCallback(async (cardId: string) => {
-    try {
-      const card = await questionCardsAPI.getCard(cardId)
-      setCards((previous) => {
-        // Check if card already exists
-        const exists = previous.some((c) => c.id === cardId)
-        if (exists) {
-          return previous
-        }
-        // Add new card and sort by slide page number and order index
-        return [...previous, card].sort(
-          (a, b) => a.sectionNumber - b.sectionNumber || a.orderIndex - b.orderIndex
-        )
-      })
-      setSlides((previous) =>
-        previous.map((slide) =>
-          slide.id === card.sectionId
-            ? { ...slide, topicCardsCount: Math.max(slide.topicCardsCount ?? 0, (card.orderIndex ?? 0) + 1) }
-            : slide
-        )
-      )
-    } catch (err) {
-      console.error('Failed to fetch new card:', err)
+    if (data.themes.length > 0 && !selectedThemeId) {
+      setSelectedThemeId(data.themes[0].id)
     }
-  }, [])
 
-  // SSE event handlers
-  useDeckEvents(deckId, {
-    onCardCreated: useCallback((data: CardCreatedEvent) => {
-      console.log('📋 New card created, fetching...', data.card_id)
-      setIsAnalyzing(true)
-      setProgress({
-        currentCard: data.progress.current_card,
-        currentSlide: data.progress.current_slide,
-        totalSlides: data.progress.total_slides,
-        percentage: data.progress.percentage
-      })
-      // Fetch the new card
-      fetchNewCard(data.card_id)
-      refreshEditorData().catch((err) => console.error('Failed to refresh editor data:', err))
-    }, [fetchNewCard, refreshEditorData]),
+    // Also load full cards for editing
+    const fullCards = await questionCardsAPI.getDocumentCards(deckId)
+    setCards(fullCards)
 
-    onAnalysisComplete: useCallback((data: AnalysisCompleteEvent) => {
-      console.log('✅ Analysis complete!', data)
-      setIsAnalyzing(false)
-      setProgress(null)
-      setProcessingStatus(null)
-      setProcessingMessage(null)
-      refreshEditorData().catch((err) => console.error('Failed to refresh completed analysis:', err))
-    }, [refreshEditorData]),
-
-    onError: useCallback((error: Error) => {
-      console.error('SSE error:', error)
-      // Don't set error state, just log it
-    }, [])
-  })
+    return data
+  }, [deckId, selectedThemeId])
 
   useEffect(() => {
     if (!deckId) return
 
     let isMounted = true
-    let retryTimer: number | undefined
 
-    const readyStatuses = new Set(['uploaded', 'converted', 'analyzing', 'analyzed'])
-
-    async function loadEditor() {
+    async function init() {
       try {
         setIsLoading(true)
         setError(null)
@@ -160,159 +89,109 @@ export default function EditorPage() {
         const deckStatus = await deckApi.getDeckStatus(deckId!)
         if (!isMounted) return
 
-        setProcessingStatus(deckStatus.status)
-        setProcessingMessage(deckStatus.message ?? null)
-
         if (deckStatus.status === 'failed') {
-          setError(deckStatus.message ?? 'Deck processing failed')
+          setError(deckStatus.message ?? 'Analysis failed')
           setIsLoading(false)
           return
         }
 
-        if (!readyStatuses.has(deckStatus.status)) {
-          setIsLoading(false)
-          retryTimer = window.setTimeout(loadEditor, 5000)
-          return
-        }
-
-        const analysis = await refreshEditorData()
-
-        if (!isMounted) return
-
-        // Set analyzing state if still analyzing (SSE will handle updates)
-        if (deckStatus.status === 'analyzing' || analysis?.status === 'analyzing') {
+        if (deckStatus.status === 'analyzing') {
           setIsAnalyzing(true)
-          setProcessingStatus(null)
-          setProcessingMessage(null)
-        } else {
-          setIsAnalyzing(false)
-          setProcessingStatus(null)
-          setProcessingMessage(null)
         }
 
-        // Note: PrepSession is now auto-created when deck is uploaded
-        // No need to create it here anymore
-      } catch (err) {
-        if (isMounted) {
-          const message = getErrorMessage(err)
-          if (message.includes('not ready for analysis')) {
-            setIsLoading(false)
-            retryTimer = window.setTimeout(loadEditor, 5000)
-            return
-          }
-          setError(message)
+        if (deckStatus.status === 'analyzed') {
+          await loadPlan()
         }
+      } catch (err) {
+        if (isMounted) setError(getErrorMessage(err))
       } finally {
         if (isMounted) setIsLoading(false)
       }
     }
 
-    loadEditor()
+    init()
+    return () => { isMounted = false }
+  }, [deckId, loadPlan])
 
-    return () => {
-      isMounted = false
-      if (retryTimer) window.clearTimeout(retryTimer)
-    }
-  }, [deckId, refreshEditorData])
+  // SSE: refresh when analysis completes
+  useDeckEvents(deckId, {
+    onAnalysisComplete: useCallback((_data: AnalysisCompleteEvent) => {
+      setIsAnalyzing(false)
+      loadPlan().catch(console.error)
+    }, [loadPlan]),
+    onError: useCallback(() => {}, []),
+  })
 
+  // Poll during analysis
   useEffect(() => {
     if (!deckId || !isAnalyzing) return
-
-    let isMounted = true
     const interval = window.setInterval(async () => {
       try {
-        const [deckStatus, analysis] = await Promise.all([
-          deckApi.getDeckStatus(deckId),
-          refreshEditorData(),
-        ])
-
-        if (!isMounted) return
-
-        if (deckStatus.status === 'analyzed' || analysis?.status === 'analyzed') {
+        const status = await deckApi.getDeckStatus(deckId)
+        if (status.status === 'analyzed') {
           setIsAnalyzing(false)
-          setProgress(null)
-          setProcessingStatus(null)
-          setProcessingMessage(null)
+          await loadPlan()
         }
+      } catch { /* ignore */ }
+    }, 5000)
+    return () => window.clearInterval(interval)
+  }, [deckId, isAnalyzing, loadPlan])
 
-        if (deckStatus.status === 'failed') {
-          setIsAnalyzing(false)
-          setError(deckStatus.message ?? 'Deck processing failed')
-        }
-      } catch (err) {
-        console.warn('Background editor refresh failed:', err)
-      }
-    }, 2500)
-
-    return () => {
-      isMounted = false
-      window.clearInterval(interval)
-    }
-  }, [deckId, isAnalyzing, refreshEditorData])
-
-  const selectedSlide = slides.find((slide) => slide.id === selectedSlideId) ?? null
-  const slideCards = useMemo(
-    () => cards.filter((card) => card.sectionId === selectedSlideId).sort((a, b) => a.orderIndex - b.orderIndex),
-    [cards, selectedSlideId],
+  const selectedTheme = plan?.themes.find((t) => t.id === selectedThemeId) ?? null
+  const themeCards = useMemo(
+    () => cards.filter((c) => c.interviewThemeId === selectedThemeId).sort((a, b) => a.orderIndex - b.orderIndex),
+    [cards, selectedThemeId],
   )
 
   async function updateCard(cardId: string, form: QuestionCardFormData) {
     const updated = await questionCardsAPI.updateCard(cardId, form)
-    setCards((previous) => previous.map((card) => (card.id === updated.id ? updated : card)))
+    setCards((prev) => prev.map((c) => (c.id === updated.id ? updated : c)))
   }
 
-  async function regenerateCardScript(cardId: string) {
+  async function regenerateFollowup(cardId: string) {
     const updated = await questionCardsAPI.regenerateFollowup(cardId)
-    setCards((previous) => previous.map((card) => (card.id === updated.id ? updated : card)))
+    setCards((prev) => prev.map((c) => (c.id === updated.id ? updated : c)))
     return updated
   }
 
   async function createCard() {
-    if (!selectedSlide) return
+    if (!selectedTheme) return
+    const firstSectionId = selectedTheme.cards[0]?.id ? undefined : undefined
     const newCard = await questionCardsAPI.createCard({
-      sectionId: selectedSlide.id,
+      sectionId: firstSectionId ?? selectedThemeId,
       questionText: '新問題',
       suggestedFollowup: '請輸入追問內容',
       importance: 'must',
     })
-    setCards((previous) => [...previous, newCard])
+    setCards((prev) => [...prev, newCard])
   }
 
   async function deleteCard(card: QuestionCard) {
     await questionCardsAPI.deleteCard(card.id)
-    setCards((previous) => previous.filter((item) => item.id !== card.id))
+    setCards((prev) => prev.filter((c) => c.id !== card.id))
   }
 
-  async function reorderCards(reorderedSlideCards: QuestionCard[]) {
+  async function reorderCards(reordered: QuestionCard[]) {
     const updated = await questionCardsAPI.reorderSectionCards(
-      selectedSlideId,
-      reorderedSlideCards.map((item) => item.id)
+      selectedThemeId,
+      reordered.map((c) => c.id)
     )
-    setCards((previous) => {
-      const otherCards = previous.filter((item) => item.sectionId !== selectedSlideId)
-      return [...otherCards, ...updated].sort(
-        (a, b) => a.sectionNumber - b.sectionNumber || a.orderIndex - b.orderIndex
-      )
+    setCards((prev) => {
+      const others = prev.filter((c) => c.interviewThemeId !== selectedThemeId)
+      return [...others, ...updated]
     })
   }
 
-  if (isLoading) {
-    return <LoadingSpinner label="載入編輯器..." />
-  }
+  if (isLoading) return <LoadingSpinner label="載入編輯器..." />
 
-  if (processingStatus) {
+  if (isAnalyzing) {
     return (
       <div className="flex h-screen items-center justify-center bg-gray-50 p-6">
         <div className="w-full max-w-md rounded border border-gray-200 bg-white p-6 text-center">
           <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-gray-200 border-t-blue-600" />
-          <p className="text-lg font-semibold text-gray-950">文件處理中</p>
-          <p className="mt-2 text-sm text-gray-600">
-            {processingMessage ?? `目前狀態：${processingStatus}`}
-          </p>
-          <p className="mt-3 text-xs text-gray-500">系統會自動重新檢查，完成後進入準備模式。</p>
-          <div className="mt-5">
-            <Button variant="secondary" onClick={() => window.location.reload()}>手動重試</Button>
-          </div>
+          <p className="text-lg font-semibold text-gray-950">正在分析文件</p>
+          <p className="mt-2 text-sm text-gray-600">系統正在產生訪談單元與提問重點...</p>
+          <p className="mt-3 text-xs text-gray-500">完成後將自動載入。</p>
         </div>
       </div>
     )
@@ -330,93 +209,133 @@ export default function EditorPage() {
     )
   }
 
+  if (!plan || plan.themes.length === 0) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-50 p-6">
+        <div className="max-w-md rounded border border-gray-200 bg-white p-6 text-center">
+          <p className="text-lg font-semibold text-gray-950">尚無訪談單元</p>
+          <p className="mt-2 text-sm text-gray-600">請先上傳 BRD 初稿，系統將自動產生訪談計畫。</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="flex h-screen flex-col bg-gray-50">
-      <header className="flex h-16 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-5">
+      {/* Header */}
+      <header className="flex h-14 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-5">
         <div>
-          <h1 className="text-lg font-semibold text-gray-950">準備模式</h1>
-          <div className="flex items-center gap-2">
-            <p className="text-xs text-gray-500">Deck {deckId}</p>
-            <span className="rounded border border-gray-200 bg-gray-50 px-2 py-0.5 text-xs text-gray-600">
-              分析成本 {formatUsdCost(deckAnalysisCost.costUsd)} · {formatTokenCount(deckAnalysisCost.totalTokens)} tokens
-            </span>
-            {isAnalyzing && progress && (
-              <span className="flex items-center gap-1.5 rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-700">
-                <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500" />
-                正在生成卡片 {progress.currentCard} 張 ({progress.percentage}%)
-              </span>
-            )}
-            {isAnalyzing && !progress && (
-              <span className="flex items-center gap-1.5 rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-700">
-                <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-blue-500" />
-                正在生成卡片...
-              </span>
-            )}
-          </div>
+          <h1 className="text-base font-semibold text-gray-950">準備模式</h1>
+          <p className="text-xs text-gray-500">
+            {plan.themes.length} 個訪談單元 · {plan.totalCards} 個提問重點
+          </p>
         </div>
         <Button onClick={() => window.location.assign(`/interview/${deckId}`)}>開始訪談</Button>
       </header>
 
-      <main className="grid min-h-0 flex-1 grid-cols-[14rem_minmax(0,1fr)_24rem] overflow-hidden">
-        {/* Left sidebar - Slide thumbnails */}
+      {/* Interview objective banner */}
+      {plan.interviewObjective && (
+        <div className="border-b border-blue-100 bg-blue-50 px-5 py-2">
+          <p className="text-xs text-blue-800">
+            <span className="font-medium">訪談目標：</span>{plan.interviewObjective}
+          </p>
+        </div>
+      )}
+
+      <main className="grid min-h-0 flex-1 grid-cols-[15rem_minmax(0,1fr)] overflow-hidden">
+        {/* Left: Theme list */}
         <aside className="min-h-0 overflow-y-auto border-r border-gray-200 bg-white p-3">
-          <h2 className="mb-3 px-1 text-sm font-semibold text-gray-700">段落</h2>
-          <div className="space-y-2">
-            {slides.map((slide) => (
+          <h2 className="mb-3 px-1 text-sm font-semibold text-gray-700">訪談單元</h2>
+          <div className="space-y-1">
+            {plan.themes.map((theme) => (
               <button
-                key={slide.id}
+                key={theme.id}
                 type="button"
-                onClick={() => setSelectedSlideId(slide.id)}
-                className={`w-full rounded border p-2 text-left transition-colors ${
-                  selectedSlideId === slide.id ? 'border-blue-400 bg-blue-50' : 'border-gray-200 bg-white hover:bg-gray-50'
+                onClick={() => setSelectedThemeId(theme.id)}
+                className={`w-full rounded-lg px-3 py-2.5 text-left transition-colors ${
+                  selectedThemeId === theme.id
+                    ? 'border border-blue-400 bg-blue-50'
+                    : 'border border-transparent hover:bg-gray-50'
                 }`}
               >
-                {slide.imageUrl ? (
-                  <div className="mb-2 aspect-video overflow-hidden rounded border border-gray-200 bg-gray-100">
-                    <img src={slide.imageUrl} alt={`Slide ${slide.pageNumber}`} className="h-full w-full object-cover" />
-                  </div>
-                ) : (
-                  <div className="mb-2 flex aspect-video items-center justify-center rounded border border-dashed border-gray-300 bg-gray-50 text-xs text-gray-400">
-                    No preview
-                  </div>
-                )}
-                <p className="text-sm font-medium text-gray-950">段落 {slide.pageNumber}</p>
-                <p className="mt-0.5 line-clamp-1 text-xs text-gray-600">{slide.title || '未命名'}</p>
+                <div className="flex items-center gap-2">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-100 text-xs font-medium text-gray-600">
+                    {theme.themeNumber}
+                  </span>
+                  <span className="text-sm font-medium text-gray-900 line-clamp-1">{theme.title}</span>
+                </div>
+                <div className="mt-1 flex items-center gap-2 pl-7">
+                  <span className="text-xs text-gray-500">{theme.cards.length} 題</span>
+                  {theme.estimatedMinutes && (
+                    <span className="text-xs text-gray-400">~{theme.estimatedMinutes}min</span>
+                  )}
+                  {theme.priority <= 3 && (
+                    <span className="rounded bg-amber-50 px-1 py-0.5 text-[10px] font-medium text-amber-700">優先</span>
+                  )}
+                </div>
               </button>
             ))}
           </div>
         </aside>
 
-        {/* Center - Large slide preview */}
-        <section className="flex min-h-0 flex-col overflow-hidden p-4">
-          <SlidePreview slide={selectedSlide} />
-        </section>
-
-        {/* Right sidebar - Cards editor with inline editing */}
-        <aside className="flex min-h-0 flex-col border-l border-gray-200 bg-white">
-          {isAnalyzing && slideCards.length === 0 && (
-            <div className="flex items-center justify-center p-6 text-center">
+        {/* Right: Theme content + inline card editor */}
+        <section className="flex min-h-0 flex-col overflow-y-auto p-5">
+          {selectedTheme ? (
+            <div className="mx-auto w-full max-w-3xl space-y-5">
               <div>
-                <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-gray-200 border-t-blue-600" />
-                <p className="text-sm font-medium text-gray-700">AI 正在分析段落</p>
-                <p className="mt-1 text-xs text-gray-500">卡片將即時出現，無需重新整理</p>
-                {progress && (
-                  <p className="mt-2 text-xs font-medium text-blue-600">
-                    進度：{progress.currentSlide}/{progress.totalSlides} 段落 · {progress.currentCard} 個問題
-                  </p>
+                <h2 className="text-lg font-semibold text-gray-950">
+                  {selectedTheme.themeNumber}. {selectedTheme.title}
+                </h2>
+                {selectedTheme.estimatedMinutes && (
+                  <p className="mt-1 text-xs text-gray-500">預估 {selectedTheme.estimatedMinutes} 分鐘</p>
                 )}
               </div>
+
+              {/* Rationale */}
+              <div className="rounded-lg border border-gray-200 bg-white p-4">
+                <h3 className="mb-2 text-sm font-semibold text-gray-700">提問依據</h3>
+                <p className="text-sm leading-relaxed text-gray-600 whitespace-pre-wrap">
+                  {selectedTheme.rationale}
+                </p>
+              </div>
+
+              {/* BRD Mapping */}
+              {selectedTheme.brdMapping.length > 0 && (
+                <div className="rounded-lg border border-gray-200 bg-white p-4">
+                  <h3 className="mb-2 text-sm font-semibold text-gray-700">對應 BRD 章節</h3>
+                  <div className="flex flex-wrap gap-1.5">
+                    {selectedTheme.brdMapping.map((section) => (
+                      <span key={section} className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-0.5 text-xs text-gray-700">
+                        {section}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Inline card editor below rationale */}
+              <div className="rounded-lg border border-gray-200 bg-white">
+                <div className="border-b border-gray-100 px-4 py-3">
+                  <h3 className="text-sm font-semibold text-gray-700">
+                    訪談問題 ({themeCards.length})
+                  </h3>
+                </div>
+                <CardEditor
+                  cards={themeCards}
+                  onUpdate={updateCard}
+                  onRegenerateFollowup={regenerateFollowup}
+                  onDelete={deleteCard}
+                  onReorder={reorderCards}
+                  onCreate={createCard}
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-center justify-center h-full text-sm text-gray-400">
+              請選擇訪談單元
             </div>
           )}
-          <CardEditor
-            cards={slideCards}
-            onUpdate={updateCard}
-            onRegenerateFollowup={regenerateCardScript}
-            onDelete={deleteCard}
-            onReorder={reorderCards}
-            onCreate={createCard}
-          />
-        </aside>
+        </section>
       </main>
     </div>
   )
@@ -427,6 +346,5 @@ function getErrorMessage(error: unknown) {
     const response = (error as { response?: { data?: { detail?: unknown } } }).response
     if (typeof response?.data?.detail === 'string') return response.data.detail
   }
-
   return error instanceof Error ? error.message : 'Failed to load editor'
 }

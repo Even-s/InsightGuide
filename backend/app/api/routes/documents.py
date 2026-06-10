@@ -166,6 +166,74 @@ async def get_document_analysis(document_id: str, db: Session = Depends(get_db))
     )
 
 
+@router.get("/{document_id}/interview-plan")
+async def get_interview_plan(document_id: str, db: Session = Depends(get_db)):
+    """Get the interview plan: themes + question cards grouped by theme."""
+    from app.models.interview_theme import InterviewTheme
+    from app.models.question_card import QuestionCard
+
+    document = document_service.get_document(db, document_id)
+
+    themes = db.query(InterviewTheme).filter(
+        InterviewTheme.document_id == document_id
+    ).order_by(InterviewTheme.order_index).all()
+
+    all_cards = db.query(QuestionCard).filter(
+        QuestionCard.document_id == document_id,
+        QuestionCard.interview_theme_id.isnot(None)
+    ).order_by(QuestionCard.order_index).all()
+
+    cards_by_theme = {}
+    for card in all_cards:
+        cards_by_theme.setdefault(card.interview_theme_id, []).append(card)
+
+    themes_data = []
+    for theme in themes:
+        theme_cards = cards_by_theme.get(theme.id, [])
+        themes_data.append({
+            "id": theme.id,
+            "themeNumber": theme.theme_number,
+            "title": theme.title,
+            "rationale": theme.rationale,
+            "brdMapping": theme.brd_mapping or [],
+            "priority": theme.priority,
+            "estimatedMinutes": theme.estimated_minutes,
+            "sourceSectionIds": theme.source_section_ids or [],
+            "orderIndex": theme.order_index,
+            "isRequired": theme.is_required,
+            "isEnabled": theme.is_enabled,
+            "userNotes": theme.user_notes,
+            "cards": [
+                {
+                    "id": c.id,
+                    "focusText": c.focus_text,
+                    "questionText": c.question_text,
+                    "questionType": c.question_type,
+                    "importance": c.importance,
+                    "suggestedFollowup": c.suggested_followup,
+                    "expectedAnswerElements": c.expected_answer_elements or [],
+                    "brdMapping": c.brd_mapping or [],
+                    "estimatedSeconds": c.estimated_seconds,
+                    "orderIndex": c.order_index,
+                    "status": c.status,
+                    "confidence": float(c.confidence) if c.confidence else None,
+                    "createdBy": c.created_by,
+                }
+                for c in theme_cards
+            ],
+        })
+
+    return {
+        "documentId": document.id,
+        "status": document.status,
+        "interviewObjective": document.interview_objective,
+        "priorityOrder": document.interview_priority_order or [],
+        "priorityReasoning": document.interview_priority_reasoning,
+        "themes": themes_data,
+        "totalCards": len(all_cards),
+    }
+
+
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_document(document_id: str, db: Session = Depends(get_db)):
     """Delete a document and all associated files and data."""

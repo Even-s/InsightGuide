@@ -32,194 +32,231 @@ def _convert_keys_to_camel(obj):
 @celery_app.task(name="analyze_document", bind=True, max_retries=3)
 def analyze_document(self, document_id: str):
     """
-    Analyze requirements document using OpenAI API and generate question cards.
+    Theme-first document analysis pipeline.
 
-    This worker implements document analysis functionality:
-    1. Load document and sections from database
-    2. Call OpenAI API to analyze each section
-    3. Generate section summaries
-    4. Generate question cards for each section
-    5. Generate expected answer elements
-    6. Generate suggested followup questions
-    7. Save results to database
-    8. Update document status to 'analyzed'
+    Flow:
+    1. Load document + sections
+    2. Phase 1: Full-text analysis → generate InterviewThemes
+    3. Phase 2: For each theme → generate QuestionCards
+    4. Update document status
     """
     logger.info(f"Starting document analysis for document {document_id}")
     db = SessionLocal()
 
     try:
-        # 1. Load document and verify it's ready for analysis
+        from app.services.event_service import event_service
+        from app.models.interview_theme import InterviewTheme
+        from app.models.question_card import QuestionCard
+        import uuid
+
+        # 1. Load document
         document = db.query(Document).filter(Document.id == document_id).first()
         if not document:
             logger.error(f"Document {document_id} not found")
             return {"status": "error", "message": "Document not found"}
 
         if document.status not in ["uploaded", "converted", "analyzing"]:
-            logger.warning(
-                f"Document {document_id} is not ready for analysis. "
-                f"Current status: {document.status}"
-            )
-            return {
-                "status": "skipped",
-                "message": f"Document status is {document.status}, not ready for analysis"
-            }
+            return {"status": "skipped", "message": f"Document status is {document.status}"}
 
-        # Update document status to analyzing
         document.status = "analyzing"
         db.commit()
         logger.info(f"Updated document {document_id} status to 'analyzing'")
 
-        # 2. Load or create sections for this document
+        # 2. Load or create sections
         sections = section_service.get_sections_by_document(db, document_id)
         if not sections:
-            logger.info(f"No sections found for document {document_id}, extracting from file...")
+            logger.info(f"No sections found, extracting from file...")
             sections = _extract_sections_from_file(db, document)
             if not sections:
-                logger.error(f"Failed to extract sections from document {document_id}")
                 document.status = "failed"
                 db.commit()
-                return {"status": "error", "message": "No sections could be extracted from file"}
+                return {"status": "error", "message": "No sections could be extracted"}
 
-        logger.info(f"Found {len(sections)} sections to analyze for document {document_id}")
+        logger.info(f"Found {len(sections)} sections for document {document_id}")
 
-        # 3. Analyze each section
+        # Build full document text for theme analysis
+        full_text = "\n\n".join(
+            f"## {s.title or f'Section {s.section_number}'}\n{s.extracted_text or ''}"
+            for s in sections
+        )
+
+        # 3. Phase 1: Generate interview themes from full document
+        logger.info("Phase 1: Generating interview themes...")
+        try:
+            event_service.publish_sync(document_id, {
+                'type': 'ANALYSIS_PROGRESS',
+                'message': '正在分析文件，產生訪談單元...',
+                'phase': 'themes',
+            })
+        except Exception:
+            pass
+
+        theme_result = openai_service.generate_interview_themes(
+            document_title=document.title,
+            full_text=full_text,
+            sections=sections,
+        )
+
+        # Save interview metadata to document
+        document.interview_objective = theme_result.get("interview_objective", "")
+        document.interview_priority_order = theme_result.get("priority_order", [])
+        document.interview_priority_reasoning = theme_result.get("priority_reasoning", "")
+        db.commit()
+
+        # Create InterviewTheme records
+        themes_data = theme_result.get("themes", [])
+        section_map = {s.section_number: s for s in sections}
+        created_themes = []
+
+        for theme_data in themes_data:
+            theme_id = f"theme_{uuid.uuid4().hex[:12]}"
+            source_section_numbers = theme_data.get("source_section_numbers", [])
+            source_section_ids = [
+                section_map[n].id for n in source_section_numbers if n in section_map
+            ]
+
+            theme = InterviewTheme(
+                id=theme_id,
+                document_id=document_id,
+                theme_number=theme_data.get("theme_number", 0),
+                title=theme_data.get("title", "Untitled"),
+                rationale=theme_data.get("rationale", ""),
+                brd_mapping=theme_data.get("brd_mapping", []),
+                priority=theme_data.get("priority", 99),
+                estimated_minutes=theme_data.get("estimated_minutes"),
+                source_section_ids=source_section_ids,
+                order_index=theme_data.get("theme_number", 0),
+                is_required=True,
+                is_enabled=True,
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+            )
+            db.add(theme)
+            created_themes.append(theme)
+
+        db.commit()
+        logger.info(f"Created {len(created_themes)} interview themes")
+
+        try:
+            event_service.publish_sync(document_id, {
+                'type': 'THEMES_CREATED',
+                'theme_count': len(created_themes),
+            })
+        except Exception:
+            pass
+
+        # 4. Phase 2: For each theme, generate question cards
+        logger.info("Phase 2: Generating question cards per theme...")
         total_cards = 0
-        total_sections = len(sections)
+        total_themes = len(created_themes)
+        document_summary = theme_result.get("interview_objective", document.title)
 
-        # Import event service for SSE
-        from app.services.event_service import event_service
-
-        for section_index, section in enumerate(sections):
+        for theme_index, theme in enumerate(created_themes):
             try:
-                logger.info(
-                    f"Analyzing section {section.id} "
-                    f"(section {section.section_number}/{len(sections)})"
-                )
+                logger.info(f"Generating cards for theme {theme.theme_number}: {theme.title}")
 
-                existing_cards = question_card_service.get_question_cards_by_section(db, section.id)
-                if section.ai_summary and existing_cards:
-                    total_cards += len(existing_cards)
-                    logger.info(
-                        f"Skipping section {section.id}; summary and "
-                        f"{len(existing_cards)} question cards already exist"
-                    )
-                    continue
-
-                # Get section text for analysis
-                if not section.extracted_text:
-                    logger.warning(f"Section {section.id} has no text content, skipping")
-                    continue
-
-                # Build the analysis prompt for this section
-                analysis_prompt = build_section_analysis_prompt(
-                    section.title or f"Section {section.section_number}",
-                    section.extracted_text,
-                    document.title
-                )
-
-                # Send progress event
                 try:
                     event_service.publish_sync(document_id, {
                         'type': 'ANALYSIS_PROGRESS',
-                        'current_section': section_index + 1,
-                        'total_sections': total_sections,
-                        'total_cards': total_cards,
-                        'message': f"Analyzing section {section.section_number}"
+                        'message': f'正在為「{theme.title}」產生提問重點...',
+                        'phase': 'cards',
+                        'current_theme': theme_index + 1,
+                        'total_themes': total_themes,
+                        'percentage': int((theme_index + 1) / total_themes * 100),
                     })
                 except Exception:
                     pass
 
-                # Call OpenAI to analyze the section
-                logger.info(f"Calling OpenAI to analyze section {section.id}")
-                analysis_result = openai_service.analyze_document_section(
-                    section_text=section.extracted_text,
-                    section_title=section.title,
+                # Collect source section text
+                source_text_parts = []
+                for sec_id in (theme.source_section_ids or []):
+                    sec = db.query(Section).filter(Section.id == sec_id).first()
+                    if sec and sec.extracted_text:
+                        source_text_parts.append(f"### {sec.title or ''}\n{sec.extracted_text}")
+
+                source_sections_text = "\n\n".join(source_text_parts) if source_text_parts else full_text[:4000]
+
+                # Call OpenAI to generate cards for this theme
+                cards_result = openai_service.generate_theme_question_cards(
                     document_title=document.title,
-                    section_number=section.section_number
+                    document_summary=document_summary,
+                    theme_title=theme.title,
+                    theme_rationale=theme.rationale,
+                    theme_brd_mapping=theme.brd_mapping or [],
+                    source_sections_text=source_sections_text,
                 )
 
-                # Update section with AI summary
-                if analysis_result.get("summary"):
-                    section.ai_summary = analysis_result["summary"]
-                    db.commit()
-                    logger.info(f"Updated section {section.id} with AI summary")
+                # Create QuestionCard records
+                cards_data = cards_result.get("cards", [])
+                first_source_section_id = (theme.source_section_ids or [None])[0]
 
-                # Generate question cards for this section
-                if analysis_result.get("questions"):
-                    questions = analysis_result["questions"]
-                    logger.info(f"Generating {len(questions)} question cards for section {section.id}")
+                for card_index, card_data in enumerate(cards_data):
+                    try:
+                        raw_importance = card_data.get("importance", "should")
+                        importance = "must" if raw_importance in ("must", "high", "critical") else "should"
 
-                    from app.schemas.question_card import QuestionCardCreate
+                        raw_coverage = card_data.get("coverage_rule")
+                        coverage_rule = _convert_keys_to_camel(raw_coverage) if raw_coverage else {
+                            "semanticAnchors": [],
+                            "expectedKeywords": [],
+                            "mustMentionElements": [],
+                            "thresholds": {"probablySufficient": 0.65, "sufficient": 0.80}
+                        }
 
-                    for question_data in questions:
-                        try:
-                            # Normalize importance: OpenAI may return "high"/"medium"/"low"
-                            raw_importance = question_data.get("importance", "should")
-                            importance = "must" if raw_importance in ("must", "high", "critical") else "should"
+                        card_id = f"qcard_{uuid.uuid4().hex[:12]}"
+                        card = QuestionCard(
+                            id=card_id,
+                            document_id=document_id,
+                            interview_theme_id=theme.id,
+                            section_id=first_source_section_id,
+                            section_number=theme.theme_number,
+                            focus_text=card_data.get("focus_text", ""),
+                            question_text=(card_data.get("question_text", "") or "")[:200] or "Untitled",
+                            question_type=card_data.get("question_type", "clarification"),
+                            importance=importance,
+                            coverage_rule=coverage_rule,
+                            suggested_followup=card_data.get("suggested_followup", ""),
+                            expected_answer_elements=card_data.get("expected_answer_elements", []),
+                            brd_mapping=card_data.get("brd_mapping", []),
+                            estimated_seconds=90,
+                            order_index=card_index,
+                            status="pending",
+                            ui={"color": "default", "isVisible": True, "isPinned": False, "displayMode": "full"},
+                            created_by="ai",
+                            created_at=datetime.utcnow(),
+                            updated_at=datetime.utcnow(),
+                        )
+                        db.add(card)
+                        total_cards += 1
 
-                            raw_coverage = question_data.get("coverage_rule")
-                            coverage_rule = _convert_keys_to_camel(raw_coverage) if raw_coverage else None
+                    except Exception as card_err:
+                        logger.error(f"Failed to create card for theme {theme.id}: {card_err}", exc_info=True)
+                        continue
 
-                            card_create = QuestionCardCreate(
-                                sectionId=section.id,
-                                questionText=question_data.get("question_text", "")[:200] or "Untitled Question",
-                                questionType=question_data.get("question_type", "clarification"),
-                                importance=importance,
-                                suggestedFollowup=question_data.get("suggested_followup") or "Could you elaborate on that?",
-                                expectedAnswerElements=question_data.get("expected_answer_elements", []),
-                                coverageRule=coverage_rule,
-                            )
-                            card = question_card_service.create_question_card(
-                                db=db,
-                                document_id=document_id,
-                                section_id=section.id,
-                                section_number=section.section_number,
-                                card_data=card_create,
-                                created_by="ai"
-                            )
-                            total_cards += 1
-
-                            # Send card created event
-                            try:
-                                event_service.publish_sync(document_id, {
-                                    'type': 'CARD_CREATED',
-                                    'card_id': card.id,
-                                    'section_id': section.id,
-                                    'progress': {
-                                        'current_card': total_cards,
-                                        'current_slide': section_index + 1,
-                                        'total_slides': total_sections,
-                                        'percentage': int((section_index + 1) / total_sections * 100)
-                                    }
-                                })
-                            except Exception:
-                                pass
-
-                            logger.info(f"Created question card {card.id} for section {section.id}")
-
-                        except Exception as card_error:
-                            logger.error(
-                                f"Failed to create question card for section {section.id}: {card_error}",
-                                exc_info=True
-                            )
-                            continue
-
-                # Commit any remaining changes for this section
                 db.commit()
+                logger.info(f"Created {len(cards_data)} cards for theme {theme.title}")
 
-            except Exception as section_error:
-                logger.error(
-                    f"Failed to analyze section {section.id}: {section_error}",
-                    exc_info=True
-                )
+                try:
+                    event_service.publish_sync(document_id, {
+                        'type': 'THEME_CARDS_CREATED',
+                        'theme_id': theme.id,
+                        'theme_title': theme.title,
+                        'card_count': len(cards_data),
+                        'total_cards': total_cards,
+                    })
+                except Exception:
+                    pass
+
+            except Exception as theme_err:
+                logger.error(f"Failed to generate cards for theme {theme.id}: {theme_err}", exc_info=True)
                 continue
 
-        # 4. Update document status to analyzed and prep session to ready
+        # 5. Finalize
         document.status = "analyzed"
         document.updated_at = datetime.utcnow()
         db.commit()
 
-        # Update associated prep session to ready
+        # Update prep session to ready
         try:
             from app.models.prep_session import PrepSession
             prep_session = db.query(PrepSession).filter(PrepSession.id == document_id).first()
@@ -233,31 +270,29 @@ def analyze_document(self, document_id: str):
 
         logger.info(
             f"Document analysis complete for {document_id}. "
-            f"Generated {total_cards} question cards across {total_sections} sections"
+            f"Generated {len(created_themes)} themes, {total_cards} cards"
         )
 
-        # Send completion event
         try:
             event_service.publish_sync(document_id, {
                 'type': 'ANALYSIS_COMPLETE',
                 'document_id': document_id,
+                'total_themes': len(created_themes),
                 'total_cards': total_cards,
-                'total_sections': total_sections,
             })
-        except Exception as evt_err:
-            logger.warning(f"Failed to publish analysis complete event: {evt_err}")
+        except Exception:
+            pass
 
         return {
             "status": "success",
             "document_id": document_id,
-            "total_sections": total_sections,
+            "total_themes": len(created_themes),
             "total_cards": total_cards,
         }
 
     except Exception as e:
         logger.error(f"Document analysis failed for {document_id}: {e}", exc_info=True)
 
-        # Update document status to failed
         try:
             document = db.query(Document).filter(Document.id == document_id).first()
             if document:
@@ -266,7 +301,6 @@ def analyze_document(self, document_id: str):
         except Exception:
             pass
 
-        # Retry if we haven't exceeded max retries
         raise self.retry(exc=e, countdown=60)
 
     finally:

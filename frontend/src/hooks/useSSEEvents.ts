@@ -6,8 +6,10 @@ interface SSEEvent {
   title?: string;
   old_status?: string;
   new_status?: string;
+  status?: string;
   confidence?: number;
   evidence?: Record<string, unknown>;
+  evidenceTranscript?: string;
 }
 
 interface UseSSEEventsOptions {
@@ -30,7 +32,7 @@ export function useSSEEvents(sessionId: string, options: UseSSEEventsOptions = {
   useEffect(() => {
     if (!sessionId) return;
 
-    const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8001';
+    const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:8002';
     const eventSource = new EventSource(
       `${apiBaseUrl}/api/events/sessions/${sessionId}/stream`
     );

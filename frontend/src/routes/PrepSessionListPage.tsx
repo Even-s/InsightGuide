@@ -257,7 +257,7 @@ export default function PrepSessionListPage() {
         return 'bg-sage-200 text-sage-700';
       case 'archived':
         return 'bg-cream-200 text-natural-700';
-      case 'presenting':
+      case 'interviewing':
         return 'bg-sage-100 text-sage-600';
       case 'ended':
         return 'bg-cream-200 text-natural-600';

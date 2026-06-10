@@ -108,7 +108,7 @@ export default function SessionReportEnhanced({
   const fetchReportData = useCallback(async () => {
     try {
       setLoading(true)
-      const response = await apiClient.get<ReportData>(`/api/presentation-sessions/${sessionId}/report`)
+      const response = await apiClient.get<ReportData>(`/api/interview-sessions/${sessionId}/report`)
       setReportData(response.data)
     } catch (err) {
       console.error('Error fetching report:', err)
@@ -127,7 +127,7 @@ export default function SessionReportEnhanced({
       setExportError(null)
       setExportingFormat(format)
       const response = await apiClient.post<ReportExportResponse>(
-        `/api/presentation-sessions/${sessionId}/report/export/${format}`
+        `/api/interview-sessions/${sessionId}/report/export/${format}`
       )
       const link = document.createElement('a')
       link.href = response.data.download_url

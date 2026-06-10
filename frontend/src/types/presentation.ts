@@ -8,7 +8,7 @@ export type SessionStatus =
   | 'idle'
   | 'preparing'
   | 'ready'
-  | 'presenting'
+  | 'interviewing'
   | 'paused'
   | 'slide_transitioning'
   | 'recovering'

@@ -3,6 +3,7 @@
 from app.models.user import User
 from app.models.document import Document
 from app.models.section import Section
+from app.models.interview_theme import InterviewTheme
 from app.models.question_card import QuestionCard
 from app.models.prep_session import PrepSession
 from app.models.interview_session import InterviewSession, InterviewCardState
@@ -14,6 +15,7 @@ __all__ = [
     "User",
     "Document",
     "Section",
+    "InterviewTheme",
     "QuestionCard",
     "PrepSession",
     "InterviewSession",

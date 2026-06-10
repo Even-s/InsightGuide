@@ -40,7 +40,7 @@ function normalizeCardState(raw: ApiRecord): PresentationCardState {
     topicCardId: asString(raw.questionCardId) ?? asString(raw.topicCardId) ?? '',
     status: raw.status as PresentationCardState['status'],
     confidence: typeof raw.confidence === 'number' ? raw.confidence : null,
-    coveredAt: asString(raw.coveredAt) ?? null,
+    coveredAt: asString(raw.coveredAt) ?? asString(raw.answeredAt) ?? null,
     evidenceTranscript: asString(raw.evidenceTranscript) ?? null,
     evidence: raw.evidence && typeof raw.evidence === 'object' ? raw.evidence as Record<string, unknown> : null,
     createdAt: asString(raw.createdAt) ?? '',
@@ -145,14 +145,14 @@ export const presentationAPI = {
   async createUtterance(
     sessionId: string,
     transcript: string,
-    slideId: string,
+    themeId: string,
     realtimeItemId?: string,
     startedAt?: string,
     endedAt?: string
   ) {
     const response = await apiClient.post(
       `/api/interview-sessions/${sessionId}/utterances`,
-      { transcript, slideId, realtimeItemId, startedAt, endedAt }
+      { transcript, themeId, sectionId: themeId, realtimeItemId, startedAt, endedAt }
     );
     return response.data;
   },
@@ -160,13 +160,21 @@ export const presentationAPI = {
   async matchPartialTranscript(
     sessionId: string,
     transcript: string,
-    slideId: string,
+    themeId: string,
     realtimeItemId?: string
   ): Promise<{ accepted: boolean; reason?: string }> {
     const response = await apiClient.post(
       `/api/interview-sessions/${sessionId}/partial-transcript-match`,
-      { transcript, slideId, realtimeItemId }
+      { transcript, themeId, sectionId: themeId, realtimeItemId }
     );
+    return response.data;
+  },
+
+  async generateOutputs(sessionId: string): Promise<{
+    brd: { markdown: string; openIssuesCount: number }
+    transcript: { markdown: string; utteranceCount: number }
+  }> {
+    const response = await apiClient.post(`/api/interview-sessions/${sessionId}/outputs/generate`);
     return response.data;
   }
 };

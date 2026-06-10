@@ -103,7 +103,7 @@ class ReportAnalyticsService:
         }
 
         for state in card_states:
-            status = state.status
+            status = self._canonical_report_status(state.status)
             if status in status_counts:
                 status_counts[status] += 1
 
@@ -123,11 +123,11 @@ class ReportAnalyticsService:
 
         must_covered = sum(
             1 for s in must_cards
-            if s.status in ["covered", "probably_covered"]
+            if self._is_acceptably_covered(s.status)
         )
         should_covered = sum(
             1 for s in should_cards
-            if s.status in ["covered", "probably_covered"]
+            if self._is_acceptably_covered(s.status)
         )
 
         stats = {
@@ -182,18 +182,18 @@ class ReportAnalyticsService:
                 "type": "utterance",
                 "description": f"Spoke: {utterance.transcript[:50]}...",
                 "transcript": utterance.transcript,
-                "slide_id": utterance.slide_id,
+                "slide_id": utterance.section_id,
             })
 
         # Get card state changes
         card_states = db.query(InterviewCardState).filter(
             InterviewCardState.session_id == session_id,
-            InterviewCardState.covered_at.isnot(None)
-        ).order_by(InterviewCardState.covered_at).all()
+            InterviewCardState.answered_at.isnot(None)
+        ).order_by(InterviewCardState.answered_at).all()
 
         for state in card_states:
             timeline.append({
-                "timestamp": state.covered_at.isoformat() + "Z",
+                "timestamp": state.answered_at.isoformat() + "Z",
                 "type": "card_covered",
                 "description": f"Topic covered: {state.topic_card.title}",
                 "card_id": state.topic_card_id,
@@ -243,9 +243,9 @@ class ReportAnalyticsService:
                 "confidence": float(state.confidence) if state.confidence else 0,
                 "slide_page": topic_card.slide_page_number,
                 "estimated_seconds": topic_card.estimated_seconds,
-                "covered_at": state.covered_at.isoformat() + "Z" if state.covered_at else None,
+                "covered_at": state.answered_at.isoformat() + "Z" if state.answered_at else None,
                 "evidence_transcript": state.evidence_transcript,
-                "success": state.status in ["covered", "probably_covered"],
+                "success": self._is_acceptably_covered(state.status),
             }
 
             topic_analysis.append(analysis)
@@ -294,10 +294,10 @@ class ReportAnalyticsService:
                 total_characters / duration_minutes if duration_minutes > 0 else 0
             )
 
-        # Count unique slides visited
-        slides_visited = db.query(func.count(func.distinct(Utterance.slide_id))).filter(
+        # Count unique sections visited. The report keeps the legacy field name.
+        slides_visited = db.query(func.count(func.distinct(Utterance.section_id))).filter(
             Utterance.session_id == session.id,
-            Utterance.slide_id.isnot(None)
+            Utterance.section_id.isnot(None)
         ).scalar() or 0
 
         metrics = {
@@ -328,13 +328,13 @@ class ReportAnalyticsService:
 
         utterances = db.query(Utterance).filter(
             Utterance.session_id == session_id,
-            Utterance.slide_id.isnot(None)
+            Utterance.section_id.isnot(None)
         ).order_by(Utterance.created_at).all()
 
         slide_times = {}
 
         for i, utterance in enumerate(utterances):
-            slide_id = utterance.slide_id
+            slide_id = utterance.section_id
             if slide_id not in slide_times:
                 slide_times[slide_id] = {
                     "first_utterance": utterance.created_at,
@@ -494,6 +494,21 @@ class ReportAnalyticsService:
     def _calculate_duration(self, session: InterviewSession) -> Optional[int]:
         """Calculate session duration in seconds."""
         return interview_service.calculate_active_duration(session, session.ended_at)
+
+    @staticmethod
+    def _canonical_report_status(status: str) -> str:
+        """Keep report API fields stable while accepting the BRD status vocabulary."""
+        if status == "sufficient":
+            return "covered"
+        if status == "probably_sufficient":
+            return "probably_covered"
+        if status in {"covered", "probably_covered", "at_risk", "skipped"}:
+            return status
+        return "pending"
+
+    @classmethod
+    def _is_acceptably_covered(cls, status: str) -> bool:
+        return cls._canonical_report_status(status) in {"covered", "probably_covered"}
 
 
 # Singleton instance

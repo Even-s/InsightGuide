@@ -1,5 +1,6 @@
 """OpenAI API integration service for slide analysis and topic card generation."""
 
+import json
 import logging
 from typing import List, Dict, Any, Optional
 from openai import OpenAI
@@ -493,6 +494,248 @@ class OpenAIService:
 
         except Exception as e:
             logger.error(f"Failed to analyze document section: {e}")
+            raise
+
+    def classify_speaker(self, transcript: str) -> str:
+        """
+        Classify whether a transcript is from the interviewer or interviewee.
+        Uses GPT-5.4-mini for accurate semantic classification.
+        """
+        try:
+            response = self.client.chat.completions.create(
+                model="gpt-5.4-mini",
+                messages=[
+                    {"role": "system", "content": (
+                        "判斷以下語句是「訪問者提問」還是「受訪者回答」。\n"
+                        "訪問者特徵：提出問題、請求描述/確認、使用疑問句、引導話題。\n"
+                        "受訪者特徵：描述現況、提供資訊、說明流程、回答問題、陳述事實。\n"
+                        "只回傳一個字：interviewer 或 interviewee"
+                    )},
+                    {"role": "user", "content": transcript[:200]},
+                ],
+                temperature=0,
+                max_completion_tokens=10,
+            )
+            result = response.choices[0].message.content.strip().lower()
+            if "interviewer" in result:
+                return "interviewer"
+            return "interviewee"
+        except Exception as e:
+            logger.warning(f"Speaker classification failed: {e}")
+            return "interviewee"
+
+    def generate_interview_themes(
+        self,
+        document_title: str,
+        full_text: str,
+        sections: list,
+    ) -> Dict[str, Any]:
+        """
+        Phase 1: Analyze full BRD document and generate interview themes.
+
+        Returns dict with interview_objective, themes[], priority_order, priority_reasoning.
+        """
+        logger.info(f"Generating interview themes for: {document_title}")
+
+        section_list = "\n".join(
+            f"- Section {s.section_number}: {s.title or '(untitled)'}"
+            for s in sections
+        )
+
+        system_prompt = """你是一位資深的商業分析師（BA），擅長從需求初稿中找出資訊缺口，並設計訪談策略。
+
+你的任務是：分析整份 BRD 初稿，產出一份結構化的「訪談單元規劃」。
+
+每個訪談單元代表一個需要在訪談中釐清的主題領域。你應該：
+1. 找出初稿中的缺口、模糊處、假設、待確認事項
+2. 將這些缺口整理成 8-13 個訪談單元（含開場與結尾）
+3. 為每個單元寫出「提問依據」—— 說明為什麼需要問這個主題
+4. 標註每個單元對應的 BRD 章節
+5. 排出訪談優先順序
+6. 避免逐段照抄原文標題，應以「訪談邏輯」重新組織
+
+訪談單元的典型結構：
+- 第 0 單元：訪談開場與範圍確認
+- 中間單元：核心業務規則、使用者角色、流程、例外、資料需求等
+- 最後一單元：訪談結尾確認（待補事項、假設條件、下一步）
+
+輸出格式（JSON）：
+{
+  "interview_objective": "本次訪談的主要目標（1-2句）",
+  "themes": [
+    {
+      "theme_number": 0,
+      "title": "訪談開場與範圍確認",
+      "rationale": "初版只定義需求方向...尚未明確第一階段範圍、是否採 MVP",
+      "brd_mapping": ["需求背景", "需求範圍", "MVP 定義"],
+      "priority": 3,
+      "estimated_minutes": 5,
+      "source_section_numbers": [1, 2]
+    }
+  ],
+  "priority_order": [1, 3, 5, 6, 7],
+  "priority_reasoning": "若訪談時間有限，建議優先..."
+}
+
+注意：
+- theme_number 從 0 開始
+- priority 越小越優先（1 = 最重要）
+- priority_order 是 theme_number 的排列，表示建議的訪談順序
+- source_section_numbers 指向原始文件的段落編號
+- rationale 必須說明「為什麼要問」，不是「這段在講什麼」
+- brd_mapping 應使用常見 BRD 章節名稱
+"""
+
+        user_prompt = f"""文件標題：{document_title}
+
+段落列表：
+{section_list}
+
+完整文件內容：
+{full_text[:12000]}
+
+請分析這份 BRD 初稿，產出訪談單元規劃。以 JSON 格式回傳。
+"""
+
+        try:
+            model = "gpt-4o"
+            response = self.client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.4,
+                response_format={"type": "json_object"},
+            )
+
+            content = response.choices[0].message.content
+            result = json.loads(content)
+
+            logger.info(f"Generated {len(result.get('themes', []))} interview themes")
+            return result
+
+        except Exception as e:
+            logger.error(f"Failed to generate interview themes: {e}")
+            raise
+
+    def generate_theme_question_cards(
+        self,
+        document_title: str,
+        document_summary: str,
+        theme_title: str,
+        theme_rationale: str,
+        theme_brd_mapping: list,
+        source_sections_text: str,
+    ) -> Dict[str, Any]:
+        """
+        Phase 2: Generate question cards for a single interview theme.
+
+        Returns dict with cards[].
+        """
+        logger.info(f"Generating question cards for theme: {theme_title}")
+
+        system_prompt = """你是一位資深商業分析師，負責為特定訪談單元設計「提問主題」與「建議提問」。
+
+你的輸出結構是「主題 → 問題」的階層：
+- 一個訪談單元下有 3-6 個提問主題（focus_text）
+- 每個提問主題下有 1-3 個具體的建議提問（question_text）
+- 同一個提問主題下的問題應循序漸進：先問大方向，再深入細節
+
+每張卡片的欄位：
+- focus_text：提問主題（這組問題要補齊什麼 BRD 資訊）。同一主題下的多張卡片 focus_text 必須完全相同。
+- question_text：建議提問（訪談者可以怎麼問）
+- question_type：問題類型
+- importance：重要度（must = 必問, should = 選問）
+- expected_answer_elements：期待回答要素
+- suggested_followup：追問方向
+- brd_mapping：對應 BRD 區塊
+- coverage_rule：判斷回答是否充分的規則
+
+輸出格式（JSON）：
+{
+  "cards": [
+    {
+      "focus_text": "釐清服務優先級的判斷因素",
+      "question_text": "BU 認為服務優先級最重要的判斷因素有哪些？",
+      "question_type": "clarification",
+      "importance": "must",
+      "expected_answer_elements": ["主要排序因子", "因子優先順序"],
+      "suggested_followup": "這些因素是由誰決定的？",
+      "brd_mapping": ["排序規則", "商業規則"],
+      "coverage_rule": {
+        "semantic_anchors": ["服務優先級", "判斷因素"],
+        "expected_keywords": ["KYC", "資產", "交易頻率"],
+        "must_mention_elements": [
+          {"text": "說明主要排序因子", "required": true, "aliases": [], "subpoints": []}
+        ],
+        "thresholds": {"probably_sufficient": 0.65, "sufficient": 0.80}
+      }
+    },
+    {
+      "focus_text": "釐清服務優先級的判斷因素",
+      "question_text": "若 KYC、資產級距與交易頻率互相衝突，排序應以哪個為主？",
+      "question_type": "clarification",
+      "importance": "must",
+      "expected_answer_elements": ["因子衝突時決策原則", "是否有權重"],
+      "suggested_followup": "是否已有既定服務規則或過去人工排序邏輯可以提供？",
+      "brd_mapping": ["排序規則"],
+      "coverage_rule": {
+        "semantic_anchors": ["衝突", "優先順序", "權重"],
+        "expected_keywords": ["衝突", "優先", "權重", "規則"],
+        "must_mention_elements": [
+          {"text": "說明衝突時優先原則", "required": true, "aliases": ["以哪個為主"], "subpoints": []}
+        ],
+        "thresholds": {"probably_sufficient": 0.65, "sufficient": 0.80}
+      }
+    }
+  ]
+}
+
+規則：
+- 同一 focus_text 下的問題字串必須完全一致（系統用它來分組）
+- 每個訪談單元產出 3-6 個提問主題，每個主題 1-3 個問題，總計 8-15 張卡片
+- question_type: clarification, validation, exploration, edge_case, constraint, priority
+- importance: must（核心缺口）或 should（補充資訊）
+- focus_text 是系統判斷回答是否充分的核心
+- 不得要求完整帳號、身分證字號等敏感個資
+- cards 陣列的順序必須是「適合實際對話的提問順序」：先問全局性、背景性的問題，再問細節與規則，最後問確認與例外。模擬一位資深 BA 在訪談現場自然的對話節奏。
+- 同一 focus_text 下的問題也要按由淺入深排列：先問開放式大問題，再問確認細節、邊界條件。
+"""
+
+        user_prompt = f"""文件標題：{document_title}
+文件摘要：{document_summary}
+
+訪談單元：{theme_title}
+提問依據：{theme_rationale}
+對應 BRD 章節：{', '.join(theme_brd_mapping)}
+
+來源段落內容：
+{source_sections_text[:8000]}
+
+請為這個訪談單元產生提問重點卡。以 JSON 格式回傳。
+"""
+
+        try:
+            model = "gpt-4o"
+            response = self.client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.4,
+                response_format={"type": "json_object"},
+            )
+
+            content = response.choices[0].message.content
+            result = json.loads(content)
+
+            logger.info(f"Generated {len(result.get('cards', []))} cards for theme: {theme_title}")
+            return result
+
+        except Exception as e:
+            logger.error(f"Failed to generate theme question cards: {e}")
             raise
 
     def _get_document_analysis_system_prompt(self) -> str:

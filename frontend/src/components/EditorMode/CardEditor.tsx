@@ -22,11 +22,6 @@ const importanceLabel = {
   should: '選問',
 }
 
-const createdByLabel = {
-  ai: 'AI',
-  user: '使用者',
-  system: '系統',
-} as const
 
 interface CardItemProps {
   card: QuestionCard
@@ -377,19 +372,14 @@ function CardItem({
             </div>
 
             <div className="flex-1 min-w-0">
-              <div className="mb-3 flex items-start justify-between gap-3">
-                <h3 className="text-base font-semibold text-gray-950 leading-snug">{card.questionText}</h3>
-                <div className="flex shrink-0 gap-1.5">
-                  <Badge tone={card.createdBy === 'ai' ? 'blue' : 'gray'} size="sm">
-                    {createdByLabel[card.createdBy]}
-                  </Badge>
-                  <Badge tone={importanceTone[card.importance]} size="sm">
-                    {importanceLabel[card.importance]}
-                  </Badge>
-                </div>
+              <div className="mb-1 flex items-start justify-between gap-3">
+                <h3 className="text-sm font-medium text-gray-950 leading-snug">{card.questionText}</h3>
+                <Badge tone={importanceTone[card.importance]} size="sm">
+                  {importanceLabel[card.importance]}
+                </Badge>
               </div>
               {card.suggestedFollowup && (
-                <p className="line-clamp-3 text-sm leading-relaxed text-gray-600">追問：{card.suggestedFollowup}</p>
+                <p className="line-clamp-2 text-xs leading-relaxed text-gray-500">追問：{card.suggestedFollowup}</p>
               )}
             </div>
           </div>
@@ -448,34 +438,65 @@ export default function CardEditor({
     setDragOverIndex(null)
   }
 
+  // Group cards by focusText into topic clusters
+  const topicGroups: { focusText: string; cards: typeof cards }[] = []
+  let currentGroup: typeof topicGroups[number] | null = null
+
+  for (const card of cards) {
+    const focus = card.focusText || ''
+    if (!currentGroup || currentGroup.focusText !== focus) {
+      currentGroup = { focusText: focus, cards: [card] }
+      topicGroups.push(currentGroup)
+    } else {
+      currentGroup.cards.push(card)
+    }
+  }
+
   return (
     <section className="flex h-full min-h-0 flex-col bg-white">
       <div className="flex shrink-0 items-center border-b border-gray-200 px-3 py-2.5">
         <div>
           <h2 className="text-sm font-semibold text-gray-950">訪談問題</h2>
-          <p className="text-xs text-gray-500">{cards.length} 個問題，拖曳卡片調整訪談順序</p>
+          <p className="text-xs text-gray-500">{topicGroups.length} 個主題 · {cards.length} 個問題</p>
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
+      <div className="min-h-0 flex-1 overflow-y-auto p-4">
         {cards.length > 0 ? (
-          <>
-            {cards.map((card, index) => (
-              <CardItem
-                key={card.id}
-                card={card}
-                index={index}
-                onUpdate={(form) => onUpdate(card.id, form)}
-                onRegenerateFollowup={() => onRegenerateFollowup(card.id)}
-                onDelete={() => onDelete(card)}
-                onDragStart={handleDragStart}
-                onDragOver={handleDragOver}
-                onDragLeave={handleDragLeave}
-                onDrop={handleDrop}
-                onDragEnd={handleDragEnd}
-                isDragging={draggedIndex === index}
-                isDragOver={dragOverIndex === index}
-              />
+          <div className="space-y-5">
+            {topicGroups.map((group, groupIdx) => (
+              <div key={groupIdx} className="rounded-lg border border-gray-100 bg-gray-50/50">
+                {group.focusText && (
+                  <div className="flex items-center gap-2 border-b border-gray-100 px-3 py-2">
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-blue-100 text-[10px] font-bold text-blue-700">
+                      {groupIdx + 1}
+                    </span>
+                    <h4 className="text-xs font-semibold text-gray-800">{group.focusText}</h4>
+                  </div>
+                )}
+                <div className="space-y-2 p-2">
+                  {group.cards.map((card) => {
+                    const index = cards.indexOf(card)
+                    return (
+                      <CardItem
+                        key={card.id}
+                        card={card}
+                        index={index}
+                        onUpdate={(form) => onUpdate(card.id, form)}
+                        onRegenerateFollowup={() => onRegenerateFollowup(card.id)}
+                        onDelete={() => onDelete(card)}
+                        onDragStart={handleDragStart}
+                        onDragOver={handleDragOver}
+                        onDragLeave={handleDragLeave}
+                        onDrop={handleDrop}
+                        onDragEnd={handleDragEnd}
+                        isDragging={draggedIndex === index}
+                        isDragOver={dragOverIndex === index}
+                      />
+                    )
+                  })}
+                </div>
+              </div>
             ))}
 
             {/* Add new card button at bottom */}
@@ -489,7 +510,7 @@ export default function CardEditor({
               </svg>
               新增問題
             </button>
-          </>
+          </div>
         ) : (
           <button
             type="button"

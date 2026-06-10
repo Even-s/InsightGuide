@@ -45,8 +45,10 @@ def convert_card_to_schema(card) -> QuestionCardSchema:
     return QuestionCardSchema(
         id=card.id,
         documentId=card.document_id,
+        interviewThemeId=card.interview_theme_id,
         sectionId=card.section_id,
         sectionNumber=card.section_number,
+        focusText=card.focus_text,
         questionText=card.question_text,
         questionType=card.question_type,
         importance=card.importance,

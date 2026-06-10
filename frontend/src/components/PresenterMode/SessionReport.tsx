@@ -10,14 +10,14 @@ interface SessionReportProps {
 
 export default function SessionReport({ cardStates, onBackToEditor, onRestart }: SessionReportProps) {
   const total = cardStates.length
-  const covered = cardStates.filter((card) => card.status === 'covered' || card.status === 'manually_checked').length
-  const probable = cardStates.filter((card) => card.status === 'probably_covered').length
+  const covered = cardStates.filter(isCompletedCard).length
+  const probable = cardStates.filter(isProbablyCompletedCard).length
   const atRisk = cardStates.filter((card) => card.status === 'at_risk').length
   const skipped = cardStates.filter((card) => card.status === 'skipped').length
   const completion = total > 0 ? (covered + probable) / total : 0
 
   const missedMustCards = cardStates.filter(
-    (card) => card.questionCard.importance === 'must' && !['covered', 'manually_checked', 'probably_covered'].includes(card.status),
+    (card) => card.questionCard.importance === 'must' && !isAcceptablyCoveredCard(card),
   )
 
   return (
@@ -69,6 +69,22 @@ export default function SessionReport({ cardStates, onBackToEditor, onRestart }:
       </section>
     </main>
   )
+}
+
+function isCompletedCard(card: CardState) {
+  return (
+    card.status === 'sufficient' ||
+    card.status === 'covered' ||
+    card.status === 'manually_checked'
+  )
+}
+
+function isProbablyCompletedCard(card: CardState) {
+  return card.status === 'probably_sufficient' || card.status === 'probably_covered'
+}
+
+function isAcceptablyCoveredCard(card: CardState) {
+  return isCompletedCard(card) || isProbablyCompletedCard(card)
 }
 
 function Metric({ label, value }: { label: string; value: number }) {

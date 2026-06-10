@@ -25,7 +25,10 @@ export default function TopicCardsPanel({
   const activeCardRef = useRef<HTMLDivElement>(null)
 
   const visibleCards = currentSlideId
-    ? cardStates.filter((cardState) => cardState.questionCard.sectionId === currentSlideId)
+    ? cardStates.filter((cardState) =>
+        cardState.questionCard.sectionId === currentSlideId ||
+        cardState.questionCard.interviewThemeId === currentSlideId
+      )
     : cardStates
   const orderedVisibleCards = [...visibleCards].sort(comparePresentationOrder)
 
@@ -141,5 +144,9 @@ function getCompletedTimestamp(cardState: CardState) {
 }
 
 function isCompletedCard(cardState: CardState) {
-  return cardState.status === 'covered' || cardState.status === 'manually_checked'
+  return (
+    cardState.status === 'sufficient' ||
+    cardState.status === 'covered' ||
+    cardState.status === 'manually_checked'
+  )
 }

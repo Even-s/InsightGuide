@@ -1,7 +1,7 @@
 """Document model."""
 
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, ForeignKey, Text
+from sqlalchemy import Column, String, DateTime, ForeignKey, Text, JSON
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base
@@ -21,9 +21,15 @@ class Document(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # Interview plan metadata (populated by AI after theme generation)
+    interview_objective = Column(Text, nullable=True)
+    interview_priority_order = Column(JSON, nullable=True)
+    interview_priority_reasoning = Column(Text, nullable=True)
+
     # Relationships
     user = relationship("User", back_populates="documents")
     sections = relationship("Section", back_populates="document", cascade="all, delete-orphan")
+    interview_themes = relationship("InterviewTheme", back_populates="document", cascade="all, delete-orphan")
     question_cards = relationship("QuestionCard", back_populates="document", cascade="all, delete-orphan")
     prep_sessions = relationship("PrepSession", back_populates="document", cascade="all, delete-orphan")
     interview_sessions = relationship("InterviewSession", back_populates="document", cascade="all, delete-orphan")

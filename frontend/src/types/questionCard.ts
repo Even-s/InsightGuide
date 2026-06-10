@@ -77,8 +77,10 @@ export interface CardUI {
 export interface QuestionCard {
   id: string
   documentId: string
+  interviewThemeId?: string
   sectionId: string
   sectionNumber: number
+  focusText?: string
   questionText: string
   questionType: QuestionType
   importance: CardImportance

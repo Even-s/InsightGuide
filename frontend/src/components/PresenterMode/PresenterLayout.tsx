@@ -9,8 +9,6 @@ import type { CardStatus } from '@/types/questionCard'
 import LoadingSpinner from '@/components/common/LoadingSpinner'
 import SessionHeader from './SessionHeader'
 import SessionReportEnhanced from '../SessionReport/SessionReportEnhanced'
-import SlideViewer from './SlideViewer'
-import TopicCardsPanel from './TopicCardsPanel'
 import TranscriptDisplay from './TranscriptDisplay'
 import { simplifiedToTraditional } from '@/utils/chineseConverter'
 
@@ -21,11 +19,11 @@ interface PresenterLayoutProps {
 
 export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutProps) {
   const [cardStates, setCardStates] = useState<CardState[]>([])
-  const [cardsLoading, setCardsLoading] = useState(true)
+  const [, setCardsLoading] = useState(true)
   const [transcriptHistory, setTranscriptHistory] = useState<string[]>([]) // 保留最近 3 句
   const [pendingTranscript, setPendingTranscript] = useState('')
   const [transcriptionError, setTranscriptionError] = useState<string | null>(null)
-  const [slideOrientation, setSlideOrientation] = useState<'landscape' | 'portrait' | 'unknown'>('unknown')
+  const [slideOrientation] = useState<'landscape' | 'portrait' | 'unknown'>('unknown')
   const [isPreparingToPresent, setIsPreparingToPresent] = useState(false)
   const hasConfirmedScriptPreview = true
   const scriptReadiness = { isReady: true, isPreparing: false, error: null as string | null }
@@ -35,8 +33,10 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
 
   const {
     session,
+    themes,
+    currentTheme,
+    currentThemeIndex,
     currentSlide,
-    currentSlideIndex,
     slides,
     isLoading,
     error,
@@ -48,20 +48,22 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
   } = usePresentationSession(sessionId)
 
   const currentSlideRef = useRef(currentSlide)
+  const currentThemeRef = useRef(currentTheme)
   const isPresentingRef = useRef(false)
   const hasRequestedInitialPreparationRef = useRef(false)
   const partialTranscriptRef = useRef('')
-  const lastPartialMatchTextRef = useRef('')
   const partialMatchTimeoutRef = useRef<number | null>(null)
   const partialMatchInFlightRef = useRef(false)
   const pendingPartialMatchRef = useRef<string | null>(null)
+  const lastPartialMatchTextRef = useRef('')
 
   useEffect(() => {
     currentSlideRef.current = currentSlide
-  }, [currentSlide])
+    currentThemeRef.current = currentTheme
+  }, [currentSlide, currentTheme])
 
   useEffect(() => {
-    isPresentingRef.current = session?.status === 'presenting'
+    isPresentingRef.current = session?.status === 'interviewing'
   }, [session?.status])
 
   useEffect(() => {
@@ -87,11 +89,11 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
   }, [loadCardStates])
 
   useSSEEvents(sessionId, {
-    onCardListening: (data) => updateCardFromEvent(data.card_id, 'listening', data.confidence, data.evidence),
-    onCardCovered: (data) => updateCardFromEvent(data.card_id, 'covered', data.confidence, data.evidence),
-    onCardProbablyCovered: (data) => updateCardFromEvent(data.card_id, 'probably_covered', data.confidence, data.evidence),
-    onCardAtRisk: (data) => updateCardFromEvent(data.card_id, 'at_risk', data.confidence, data.evidence),
-    onCardSkipped: (data) => updateCardFromEvent(data.card_id, 'skipped', data.confidence, data.evidence),
+    onCardListening: (data) => updateCardFromEvent(data.card_id, statusFromEvent(data, 'listening'), data.confidence, data.evidence, data.evidenceTranscript),
+    onCardCovered: (data) => updateCardFromEvent(data.card_id, statusFromEvent(data, 'sufficient'), data.confidence, data.evidence, data.evidenceTranscript),
+    onCardProbablyCovered: (data) => updateCardFromEvent(data.card_id, statusFromEvent(data, 'probably_sufficient'), data.confidence, data.evidence, data.evidenceTranscript),
+    onCardAtRisk: (data) => updateCardFromEvent(data.card_id, statusFromEvent(data, 'at_risk'), data.confidence, data.evidence, data.evidenceTranscript),
+    onCardSkipped: (data) => updateCardFromEvent(data.card_id, statusFromEvent(data, 'skipped'), data.confidence, data.evidence, data.evidenceTranscript),
     onMatchingError: (data) => {
       console.error('Topic matching error received:', data)
       setTranscriptionError(`Topic matching failed: ${data.error}`)
@@ -105,7 +107,9 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
     endedAt?: string
   }) => {
     let text = payload.transcript.trim()
+    const activeTheme = currentThemeRef.current
     const activeSlide = currentSlideRef.current
+    const activeId = activeTheme?.id ?? activeSlide?.id
 
     partialTranscriptRef.current = ''
     lastPartialMatchTextRef.current = ''
@@ -115,36 +119,29 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
       partialMatchTimeoutRef.current = null
     }
 
-    if (!text || !activeSlide || !isPresentingRef.current) {
+    if (!text || !activeId || !isPresentingRef.current) {
       setPendingTranscript('')
       return
     }
 
-    // 強制轉換簡體中文為繁體中文
     text = simplifiedToTraditional(text)
 
-    // UI 保留最近 3 句（改善使用體驗）
     setTranscriptHistory((prev) => {
       const newHistory = [...prev, text]
-      // 只保留最近 3 句
       return newHistory.slice(-3)
     })
     setPendingTranscript('')
     setTranscriptionError(null)
 
-    console.log('[PresenterLayout] 新轉錄（準備存入資料庫）:', text)
-
+    // Save utterance — backend will classify speaker and evaluate
     presentationAPI.createUtterance(
       sessionId,
       text,
-      activeSlide.id,
+      activeId,
       payload.itemId,
       payload.startedAt,
       payload.endedAt
     )
-      .then(() => {
-        console.log('[PresenterLayout] 轉錄已存入資料庫:', text)
-      })
       .catch((err) => {
         console.error('Failed to save utterance:', err)
         setTranscriptionError(err instanceof Error ? err.message : 'Failed to save transcript')
@@ -152,10 +149,12 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
   }, [sessionId])
 
   const sendPartialTranscriptMatch = useCallback((text: string, itemId?: string) => {
+    const activeTheme = currentThemeRef.current
     const activeSlide = currentSlideRef.current
+    const activeId = activeTheme?.id ?? activeSlide?.id
     const trimmed = text.trim()
 
-    if (!activeSlide || !isPresentingRef.current || trimmed.length < 12) return
+    if (!activeId || !isPresentingRef.current || trimmed.length < 12) return
     if (trimmed === lastPartialMatchTextRef.current) return
     if (trimmed.length - lastPartialMatchTextRef.current.length < 8) return
 
@@ -167,7 +166,7 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
     partialMatchInFlightRef.current = true
     lastPartialMatchTextRef.current = trimmed
 
-    presentationAPI.matchPartialTranscript(sessionId, trimmed, activeSlide.id, itemId)
+    presentationAPI.matchPartialTranscript(sessionId, trimmed, activeId, itemId)
       .catch((err) => {
         console.warn('[PresenterLayout] Partial transcript matching failed:', err)
       })
@@ -188,7 +187,7 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
 
     partialMatchTimeoutRef.current = window.setTimeout(() => {
       sendPartialTranscriptMatch(text, itemId)
-    }, 750)
+    }, 800)
   }, [sendPartialTranscriptMatch])
 
   const {
@@ -203,11 +202,8 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
       setTranscriptionError(null)
       setPendingTranscript('正在聽取...')
       partialTranscriptRef.current = ''
-      lastPartialMatchTextRef.current = ''
-      pendingPartialMatchRef.current = null
     },
     onTranscriptDelta: (delta, itemId) => {
-      // 即時轉換簡體為繁體
       const convertedDelta = simplifiedToTraditional(delta)
       setPendingTranscript((previous) => {
         const nextTranscript =
@@ -223,14 +219,26 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
     onTranscriptCompleted: handleTranscriptCompleted,
   })
 
-  const handleStartRequested = useCallback(() => {
-    if (session?.status === 'presenting') return
+  const handleStartRequested = useCallback(async () => {
+    if (session?.status === 'interviewing') return
     setTranscriptionError(null)
     setIsPreparingToPresent(true)
-    if (realtimeStatus === 'idle' || realtimeStatus === 'error') {
-      startTranscription()
+
+    try {
+      // Start session first (so isPresentingRef becomes true)
+      await startPresenting()
+
+      // Then start transcription
+      if (realtimeStatus === 'idle' || realtimeStatus === 'error') {
+        startTranscription()
+      }
+    } catch (err) {
+      console.error('Failed to start interview:', err)
+      setTranscriptionError(err instanceof Error ? err.message : 'Failed to start')
+    } finally {
+      setIsPreparingToPresent(false)
     }
-  }, [realtimeStatus, session?.status, startTranscription])
+  }, [realtimeStatus, session?.status, startPresenting, startTranscription])
 
   useEffect(() => {
     if (hasRequestedInitialPreparationRef.current) return
@@ -246,11 +254,11 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
 
 
   useEffect(() => {
-    if (session?.status === 'presenting' && realtimeStatus === 'idle') {
+    if (session?.status === 'interviewing' && realtimeStatus === 'idle') {
       startTranscription()
     }
 
-    if (session?.status !== 'presenting' && !isPreparingToPresent && realtimeStatus !== 'idle') {
+    if (session?.status !== 'interviewing' && !isPreparingToPresent && realtimeStatus !== 'idle') {
       stopTranscription()
     }
 
@@ -330,48 +338,141 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
       />
 
       {session?.status === 'ended' ? (
-        <SessionReportEnhanced
-          sessionId={sessionId}
-          cardStates={cardStates}
-          onBackToEditor={() => window.location.assign(`/editor/${deckId}`)}
-          onRestart={() => window.location.assign(`/presenter/${deckId}`)}
-        />
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          <InterviewOutputsPanel sessionId={sessionId} />
+          <SessionReportEnhanced
+            sessionId={sessionId}
+            cardStates={cardStates}
+            onBackToEditor={() => window.location.assign(`/editor/${deckId}`)}
+            onRestart={() => window.location.assign(`/presenter/${deckId}`)}
+          />
+        </div>
       ) : (
         <>
-          <main className="flex min-h-0 flex-1 overflow-hidden">
-            {/* 投影片區域 - 動態寬度 */}
-            <div className={`min-w-0 p-4 transition-all duration-300 ${layoutConfig.slideArea.width}`}>
-              <SlideViewer
-                slide={currentSlide}
-                currentSlideIndex={currentSlideIndex}
-                totalSlides={slides.length}
-                onPrevious={previousSlide}
-                onNext={nextSlide}
-                onOrientationChange={setSlideOrientation}
-              />
+          <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            {/* Theme nav bar */}
+            <div className="flex shrink-0 items-center justify-between border-b border-gray-200 bg-white px-5 py-2.5">
+              <button type="button" onClick={previousSlide} disabled={currentThemeIndex === 0}
+                className="rounded-lg px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 disabled:opacity-30">
+                ← 上一單元
+              </button>
+              <div className="text-center">
+                <p className="text-sm font-semibold text-gray-900">
+                  {currentTheme ? `${currentTheme.themeNumber}. ${currentTheme.title}` : `段落 ${currentSlide?.pageNumber ?? ''}`}
+                </p>
+                <p className="text-xs text-gray-500">
+                  單元 {currentThemeIndex + 1} / {themes.length || slides.length}
+                </p>
+              </div>
+              <button type="button" onClick={nextSlide} disabled={currentThemeIndex >= (themes.length || slides.length) - 1}
+                className="rounded-lg px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 disabled:opacity-30">
+                下一單元 →
+              </button>
             </div>
 
-            {/* 右側：卡片 + 建議逐字稿 - 動態寬度和高度分配 */}
-            <div className={`flex min-h-0 shrink-0 flex-col overflow-hidden pb-3 transition-all duration-300 ${layoutConfig.cardsArea.width}`}>
-              {/* 卡片區域 - 動態高度 */}
-              <div className={`min-h-0 overflow-hidden rounded-xl border border-cream-300 shadow-natural m-4 mb-0 ${layoutConfig.cardsArea.height}`}>
-                {cardsLoading ? (
-                  <div className="h-full bg-white">
-                    <LoadingSpinner label="載入卡片..." />
-                  </div>
-                ) : (
-                  <TopicCardsPanel
-                    cardStates={cardStates}
-                    currentSlideId={currentSlide?.id}
-                    slideOrientation={slideOrientation}
-                    cardHeight={layoutConfig.cardsLayout.cardHeight}
-                    cardWidth={layoutConfig.cardsLayout.cardWidth}
-                    onMarkStatus={markCardStatus}
-                  />
-                )}
-              </div>
+            {/* Questions with inline strikethrough status */}
+            <div className="min-h-0 flex-1 overflow-y-auto bg-gray-50 px-6 py-5">
+              {currentTheme ? (
+                <div className="mx-auto max-w-3xl space-y-4">
+                  {(() => {
+                    const cardStateMap = new Map(cardStates.map(cs => [cs.questionCard.id, cs.status]))
+                    const completedStatuses = new Set(['sufficient', 'covered', 'manually_checked'])
 
-              {/* Script panel removed */}
+                    const groups: { focus: string; cards: typeof currentTheme.cards }[] = []
+                    let cur: typeof groups[number] | null = null
+                    for (const card of currentTheme.cards) {
+                      const f = card.focusText || ''
+                      if (!cur || cur.focus !== f) {
+                        cur = { focus: f, cards: [card] }
+                        groups.push(cur)
+                      } else {
+                        cur.cards.push(card)
+                      }
+                    }
+
+                    return groups.map((group, gi) => {
+                      const groupCardStates = group.cards.map(c => {
+                        const cs = cardStates.find(s => s.questionCard.id === c.id)
+                        return { card: c, status: cardStateMap.get(c.id) ?? 'pending', confidence: cs?.confidence ?? 0 }
+                      })
+                      const groupDone = groupCardStates.every(c => completedStatuses.has(c.status))
+                      const groupConfidenceSum = groupCardStates.reduce((sum, c) => sum + (completedStatuses.has(c.status) ? 1 : (c.confidence ?? 0)), 0)
+                      const groupProgress = groupCardStates.length > 0 ? Math.round((groupConfidenceSum / groupCardStates.length) * 100) : 0
+
+                      return (
+                        <div key={gi} className={`relative rounded-xl border shadow-sm overflow-hidden ${groupDone ? 'border-green-200' : 'border-gray-200'}`}>
+                          {/* Water fill background for the whole group */}
+                          <div
+                            className="pointer-events-none absolute inset-x-0 bottom-0 z-0 transition-[height] duration-1000 ease-out"
+                            style={{ height: `${groupProgress}%` }}
+                            aria-hidden="true"
+                          >
+                            <div className={`absolute inset-0 ${groupDone ? 'bg-green-100/60' : 'bg-blue-50/50'}`} />
+                          </div>
+
+                          {/* Content on top */}
+                          <div className="relative z-10">
+                            {group.focus && (
+                              <div className={`border-b px-5 py-2.5 ${groupDone ? 'border-green-200' : 'border-blue-100'}`}>
+                                <div className="flex items-center justify-between">
+                                  <p className={`text-sm font-semibold ${groupDone ? 'text-green-800 line-through' : 'text-blue-900'}`}>
+                                    {groupDone && '✓ '}{group.focus}
+                                  </p>
+                                  {groupProgress > 0 && !groupDone && (
+                                    <span className="text-xs font-medium text-blue-600">{groupProgress}%</span>
+                                  )}
+                                </div>
+                              </div>
+                            )}
+                            <ol className="divide-y divide-gray-100/80">
+                              {groupCardStates.map(({ card, status, confidence }, qi) => {
+                                const isDone = completedStatuses.has(status)
+                                const isListening = status === 'listening'
+                                const itemProgress = isDone ? 100 : Math.round((confidence ?? 0) * 100)
+
+                                return (
+                                  <li key={card.id} className={`flex items-start gap-4 px-5 py-4 transition-all ${isListening ? 'bg-yellow-50/70' : ''}`}>
+                                    <span className={`mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-sm font-semibold ${
+                                      isDone ? 'bg-green-100 text-green-700' : isListening ? 'bg-yellow-200 text-yellow-800 animate-pulse' : 'bg-gray-100 text-gray-600'
+                                    }`}>
+                                      {isDone ? '✓' : qi + 1}
+                                    </span>
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex items-start justify-between gap-3">
+                                        <p className={`text-base leading-relaxed ${isDone ? 'text-gray-400 line-through' : 'text-gray-900'}`}>
+                                          {card.questionText}
+                                        </p>
+                                        {!isDone && card.importance === 'must' && (
+                                          <span className="mt-0.5 shrink-0 rounded bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">必問</span>
+                                        )}
+                                      </div>
+                                      {!isDone && card.suggestedFollowup && (
+                                        <p className="mt-1.5 text-sm text-gray-500">追問：{card.suggestedFollowup}</p>
+                                      )}
+                                      {!isDone && (
+                                        <div className="mt-2 h-1.5 w-full rounded-full bg-gray-200">
+                                          <div
+                                            className="h-1.5 rounded-full bg-blue-400 transition-[width] duration-700 ease-out"
+                                            style={{ width: `${itemProgress}%` }}
+                                          />
+                                        </div>
+                                      )}
+                                    </div>
+                                  </li>
+                                )
+                              })}
+                            </ol>
+                          </div>
+                        </div>
+                      )
+                    })
+                  })()}
+                </div>
+              ) : currentSlide ? (
+                <div className="mx-auto max-w-3xl">
+                  <p className="text-base text-gray-700 whitespace-pre-wrap">{currentSlide.extractedText}</p>
+                </div>
+              ) : null}
             </div>
           </main>
 
@@ -397,6 +498,7 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
     status: CardState['status'],
     confidence?: number,
     evidence?: unknown,
+    evidenceTranscriptFromEvent?: string,
   ) {
     console.log('📋 updateCardFromEvent called:', {
       cardId,
@@ -420,7 +522,9 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
     })
 
     const evidenceTranscript =
-      evidence && typeof evidence === 'object' && 'matchedTranscript' in evidence
+      evidenceTranscriptFromEvent
+        ? evidenceTranscriptFromEvent
+        : evidence && typeof evidence === 'object' && 'matchedTranscript' in evidence
         ? String((evidence as { matchedTranscript?: unknown }).matchedTranscript ?? '')
         : ''
 
@@ -447,41 +551,6 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
     )
   }
 
-  async function markCardStatus(cardState: CardState, status: CardStatus) {
-    const confidence = status === 'covered' ? 1 : status === 'pending' ? null : cardState.confidence ?? null
-    const evidenceTranscript = status === 'covered'
-      ? 'Manually marked during presentation'
-      : status === 'pending'
-        ? null
-        : cardState.evidenceTranscript ?? null
-
-    const updated = await presentationAPI.updateCardState(sessionId, cardState.id, {
-      status,
-      confidence,
-      evidenceTranscript,
-      evidence: status === 'covered'
-        ? { matchedTranscript: evidenceTranscript, source: 'manual' }
-        : status === 'pending'
-          ? null
-          : cardState.evidence ?? null,
-    })
-
-    setCardStates((previous) =>
-      previous.map((previousState) =>
-        previousState.id === updated.id
-          ? {
-              ...previousState,
-              ...updated,
-              questionCard: {
-                ...previousState.questionCard,
-                status: updated.status,
-                confidence: updated.confidence ?? undefined,
-              },
-            }
-          : previousState,
-      ),
-    )
-  }
 }
 
 function PreparingOverlay() {
@@ -491,6 +560,105 @@ function PreparingOverlay() {
         <div className="mb-4 h-11 w-11 animate-spin rounded-full border-2 border-cream-200 border-t-sage-500" />
         <p className="text-base font-medium tracking-wide text-natural-700">準備中</p>
       </div>
+    </div>
+  )
+}
+
+function statusFromEvent(
+  data: { new_status?: string; status?: string },
+  fallback: CardStatus,
+): CardStatus {
+  const status = data.new_status ?? data.status
+  if (
+    status === 'pending' ||
+    status === 'listening' ||
+    status === 'probably_sufficient' ||
+    status === 'sufficient' ||
+    status === 'probably_covered' ||
+    status === 'covered' ||
+    status === 'at_risk' ||
+    status === 'skipped' ||
+    status === 'manually_checked' ||
+    status === 'disabled'
+  ) {
+    return status
+  }
+  return fallback
+}
+
+function InterviewOutputsPanel({ sessionId }: { sessionId: string }) {
+  const [isGenerating, setIsGenerating] = useState(false)
+  const [outputs, setOutputs] = useState<{
+    brd?: { markdown: string; openIssuesCount: number }
+    transcript?: { markdown: string; utteranceCount: number }
+  } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  async function handleGenerate() {
+    setIsGenerating(true)
+    setError(null)
+    try {
+      const response = await presentationAPI.generateOutputs(sessionId)
+      setOutputs(response)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to generate outputs')
+    } finally {
+      setIsGenerating(false)
+    }
+  }
+
+  function downloadMarkdown(content: string, filename: string) {
+    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  return (
+    <div className="shrink-0 border-b border-gray-200 bg-white px-6 py-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-base font-semibold text-gray-900">訪談產出</h2>
+          <p className="text-xs text-gray-500">產生 BRD 草稿與訪談逐字稿</p>
+        </div>
+        {!outputs ? (
+          <button
+            type="button"
+            onClick={handleGenerate}
+            disabled={isGenerating}
+            className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {isGenerating ? '正在產生...' : '產生 BRD 與逐字稿'}
+          </button>
+        ) : (
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => downloadMarkdown(outputs.brd!.markdown, 'BRD_草稿.md')}
+              className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+            >
+              下載 BRD
+            </button>
+            <button
+              type="button"
+              onClick={() => downloadMarkdown(outputs.transcript!.markdown, '訪談逐字稿.md')}
+              className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+            >
+              下載逐字稿
+            </button>
+          </div>
+        )}
+      </div>
+      {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
+      {outputs && (
+        <div className="mt-3 flex gap-4 text-xs text-gray-500">
+          <span>BRD：{outputs.brd?.openIssuesCount ?? 0} 項待補</span>
+          <span>逐字稿：{outputs.transcript?.utteranceCount ?? 0} 句</span>
+        </div>
+      )}
     </div>
   )
 }

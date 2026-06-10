@@ -40,10 +40,9 @@ class RealtimeService:
                         "input": {
                             "noise_reduction": {"type": "near_field"},
                             "transcription": {
-                                "model": settings.REALTIME_TRANSCRIPTION_MODEL,  # gpt-realtime-whisper
-                                "language": "zh",  # API only supports "zh", not "zh-TW"
-                                "delay": "minimal",
-                                # Do NOT add "prompt" - it gets transcribed as if spoken
+                                "model": settings.REALTIME_TRANSCRIPTION_MODEL,
+                                "language": "zh",
+                                "delay": "medium",
                             },
                         }
                     },

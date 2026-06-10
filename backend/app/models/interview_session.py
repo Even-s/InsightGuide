@@ -18,6 +18,7 @@ class InterviewSession(Base):
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     status = Column(String, nullable=False, default="idle", index=True)  # idle, preparing, ready, interviewing, paused, ended, failed
     current_section_id = Column(String, ForeignKey("sections.id"), nullable=True)
+    current_theme_id = Column(String, ForeignKey("interview_themes.id"), nullable=True)
     started_at = Column(DateTime, nullable=True)
     ended_at = Column(DateTime, nullable=True)
     paused_at = Column(DateTime, nullable=True)

@@ -59,8 +59,10 @@ class QuestionCardSchema(BaseModel):
     """Question Card schema."""
     id: str
     documentId: str
-    sectionId: str
-    sectionNumber: int = Field(ge=1)
+    interviewThemeId: Optional[str] = None
+    sectionId: Optional[str] = None
+    sectionNumber: Optional[int] = None
+    focusText: Optional[str] = None
     questionText: str = Field(min_length=1, max_length=200)
     questionType: Literal[
         "clarification", "validation", "exploration",

@@ -33,7 +33,7 @@ export default function SessionTable({
 
   const getStatusBadgeClass = (status: string) => {
     switch (status) {
-      case 'presenting':
+      case 'interviewing':
         return 'bg-sage-200 text-sage-700';
       case 'paused':
         return 'bg-wood-100 text-wood-600';

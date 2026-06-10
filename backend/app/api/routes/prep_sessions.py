@@ -51,10 +51,10 @@ def convert_presentation_session_to_schema(session, db: Optional[Session] = None
     return InterviewSessionSchema(
         id=session.id,
         prepSessionId=session.prep_session_id,
-        deckId=session.document_id,
+        documentId=session.document_id,
         userId=session.user_id,
         status=session.status,
-        currentSlideId=session.current_slide_id,
+        currentSectionId=session.current_section_id,
         startedAt=session.started_at,
         endedAt=session.ended_at,
         pausedAt=session.paused_at,
