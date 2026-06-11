@@ -52,7 +52,7 @@ export default class ErrorBoundary extends Component<Props, State> {
       }
 
       return (
-        <div className="flex min-h-screen items-center justify-center bg-gray-50 p-6">
+        <div className="flex min-h-screen items-center justify-center bg-cream-100 p-6">
           <div className="w-full max-w-2xl rounded-lg border border-red-200 bg-white p-8 shadow-lg">
             <div className="mb-4 flex items-center gap-3">
               <div className="flex h-12 w-12 items-center justify-center rounded-full bg-red-100">
@@ -61,8 +61,8 @@ export default class ErrorBoundary extends Component<Props, State> {
                 </svg>
               </div>
               <div>
-                <h1 className="text-2xl font-bold text-gray-900">發生錯誤</h1>
-                <p className="text-sm text-gray-500">應用程式遇到意外錯誤</p>
+                <h1 className="text-2xl font-bold text-natural-700">發生錯誤</h1>
+                <p className="text-sm text-natural-400">應用程式遇到意外錯誤</p>
               </div>
             </div>
 
@@ -76,14 +76,14 @@ export default class ErrorBoundary extends Component<Props, State> {
 
               {import.meta.env.DEV && this.state.errorInfo && (
                 <details className="mt-4">
-                  <summary className="cursor-pointer text-sm font-medium text-gray-700 hover:text-gray-900">
+                  <summary className="cursor-pointer text-sm font-medium text-natural-600 hover:text-natural-700">
                     顯示詳細錯誤資訊
                   </summary>
-                  <div className="mt-2 rounded-lg bg-gray-100 p-4">
-                    <pre className="overflow-auto text-xs text-gray-800">
+                  <div className="mt-2 rounded-lg bg-cream-200 p-4">
+                    <pre className="overflow-auto text-xs text-natural-700">
                       {this.state.error?.stack}
                     </pre>
-                    <pre className="mt-2 overflow-auto text-xs text-gray-600">
+                    <pre className="mt-2 overflow-auto text-xs text-natural-500">
                       {this.state.errorInfo.componentStack}
                     </pre>
                   </div>

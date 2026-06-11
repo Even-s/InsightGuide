@@ -39,5 +39,5 @@ class QuestionCard(Base):
     document = relationship("Document", back_populates="question_cards")
     section = relationship("Section", back_populates="question_cards")
     interview_theme = relationship("InterviewTheme", back_populates="question_cards", foreign_keys=[interview_theme_id])
-    card_states = relationship("InterviewCardState", back_populates="question_card")
-    requirements = relationship("Requirement", back_populates="question_card")
+    card_states = relationship("InterviewCardState", back_populates="question_card", cascade="all, delete-orphan", passive_deletes=True)
+    requirements = relationship("Requirement", back_populates="question_card", cascade="all, delete-orphan", passive_deletes=True)

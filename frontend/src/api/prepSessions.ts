@@ -13,14 +13,19 @@ export interface PrepSessionWithDeck {
   id: string;
   deckId: string;
   deckTitle: string;
+  documentId?: string;
+  documentTitle?: string;
   userId: string;
   title?: string;
   status: 'preparing' | 'ready' | 'archived';
   createdAt: string;
   updatedAt: string;
   presentationSessionsCount: number;
+  interviewSessionsCount?: number;
   deckCostUsd: number;
+  documentCostUsd?: number;
   deckAiUsage: AIUsageSummary;
+  documentAiUsage?: AIUsageSummary;
 }
 
 export interface PrepSessionListResponse {
@@ -63,6 +68,49 @@ export interface PresentationSessionForPrep {
   aiUsage: AIUsageSummary;
 }
 
+type PrepSessionApiResponse = PrepSessionWithDeck & {
+  deckId?: string;
+  deckTitle?: string;
+  documentId?: string;
+  documentTitle?: string;
+  title?: string;
+  presentationSessionsCount?: number;
+  interviewSessionsCount?: number;
+  deckCostUsd?: number;
+  documentCostUsd?: number;
+  deckAiUsage?: AIUsageSummary;
+  documentAiUsage?: AIUsageSummary;
+};
+
+function normalizePrepSession(raw: PrepSessionApiResponse): PrepSessionWithDeck {
+  const deckId = raw.deckId ?? raw.documentId ?? '';
+  const deckTitle = raw.deckTitle ?? raw.documentTitle ?? raw.title ?? deckId;
+  const presentationSessionsCount = raw.presentationSessionsCount ?? raw.interviewSessionsCount ?? 0;
+  const deckCostUsd = raw.deckCostUsd ?? raw.documentCostUsd ?? 0;
+  const deckAiUsage = raw.deckAiUsage ?? raw.documentAiUsage ?? {
+    inputTokens: 0,
+    cachedInputTokens: 0,
+    outputTokens: 0,
+    totalTokens: 0,
+    realtimeSeconds: 0,
+    totalCostUsd: 0,
+  };
+
+  return {
+    ...raw,
+    deckId,
+    deckTitle,
+    documentId: raw.documentId ?? deckId,
+    documentTitle: raw.documentTitle ?? deckTitle,
+    presentationSessionsCount,
+    interviewSessionsCount: raw.interviewSessionsCount ?? presentationSessionsCount,
+    deckCostUsd,
+    documentCostUsd: raw.documentCostUsd ?? deckCostUsd,
+    deckAiUsage,
+    documentAiUsage: raw.documentAiUsage ?? deckAiUsage,
+  };
+}
+
 export const prepSessionsAPI = {
   async listPrepSessions(params: PrepSessionListParams = {}): Promise<PrepSessionListResponse> {
     const response = await apiClient.get('/api/prep-sessions/', {
@@ -75,22 +123,28 @@ export const prepSessionsAPI = {
         order: params.order || 'desc',
       },
     });
-    return response.data;
+    return {
+      ...response.data,
+      prepSessions: (response.data.prepSessions ?? []).map(normalizePrepSession),
+    };
   },
 
   async createPrepSession(data: PrepSessionCreate): Promise<PrepSessionWithDeck> {
-    const response = await apiClient.post('/api/prep-sessions/', data);
-    return response.data;
+    const response = await apiClient.post('/api/prep-sessions/', {
+      documentId: data.deckId,
+      title: data.title,
+    });
+    return normalizePrepSession(response.data);
   },
 
   async getPrepSession(prepSessionId: string): Promise<PrepSessionWithDeck> {
     const response = await apiClient.get(`/api/prep-sessions/${prepSessionId}`);
-    return response.data;
+    return normalizePrepSession(response.data);
   },
 
   async updatePrepSession(prepSessionId: string, data: PrepSessionUpdate): Promise<PrepSessionWithDeck> {
     const response = await apiClient.patch(`/api/prep-sessions/${prepSessionId}`, data);
-    return response.data;
+    return normalizePrepSession(response.data);
   },
 
   async deletePrepSession(prepSessionId: string): Promise<void> {
@@ -117,7 +171,7 @@ export const prepSessionsAPI = {
       params: { limit: 1000, offset: 0 },
     });
 
-    const prepSessions = response.data.prepSessions as PrepSessionWithDeck[];
+    const prepSessions: PrepSessionWithDeck[] = (response.data.prepSessions ?? []).map(normalizePrepSession);
     const total = response.data.total;
 
     const preparing = prepSessions.filter((s) => s.status === 'preparing').length;

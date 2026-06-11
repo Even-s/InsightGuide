@@ -254,8 +254,19 @@ def process_utterance_evaluation_background(
     db = SessionLocal()
     try:
         if not section_id:
-            logger.warning(f"Utterance {utterance_id} has no section_id, skipping evaluation")
-            return
+            from app.models.interview_session import InterviewSession as IS
+            from app.models.interview_theme import InterviewTheme
+            session_obj = db.query(IS).filter(IS.id == session_id).first()
+            if session_obj:
+                first_theme = db.query(InterviewTheme).filter(
+                    InterviewTheme.document_id == session_obj.document_id,
+                    InterviewTheme.is_enabled == True,
+                ).order_by(InterviewTheme.order_index).first()
+                if first_theme:
+                    section_id = first_theme.id
+            if not section_id:
+                logger.warning(f"Utterance {utterance_id} has no section_id and no fallback theme, skipping evaluation")
+                return
 
         # Process utterance and get card state updates
         updates = answer_evaluation_engine.process_utterance(

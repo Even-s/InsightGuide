@@ -19,7 +19,6 @@ from app.services.event_service import event_service
 from app.services.realtime_service import realtime_service
 from app.services.prep_session_service import prep_session_service
 from app.services.ai_card_generator import ai_card_generator
-from app.services.bullet_point_service import bullet_point_service
 from app.services.hallucination_filter import hallucination_filter
 from app.services.report_analytics_service import report_analytics_service
 from app.services.report_export_service import report_export_service
@@ -44,7 +43,6 @@ __all__ = [
     "realtime_service",
     "prep_session_service",
     "ai_card_generator",
-    "bullet_point_service",
     "hallucination_filter",
     "report_analytics_service",
     "report_export_service",

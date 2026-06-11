@@ -489,7 +489,7 @@ export default function PrepSessionListPage() {
                                 {presentationSessions[prepSession.id].map((session) => (
                                   <tr key={session.id} className="text-sm">
                                     <td className="py-2">
-                                      <div className="text-xs font-mono text-gray-500">{session.id}</div>
+                                      <div className="text-xs font-mono text-natural-400">{session.id}</div>
                                     </td>
                                     <td className="py-2">
                                       <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusBadgeColor(session.status)}`}>

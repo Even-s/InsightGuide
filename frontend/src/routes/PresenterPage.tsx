@@ -76,7 +76,7 @@ export default function PresenterPage() {
 
   if (isCreating) {
     return (
-      <div className="h-screen bg-gray-50">
+      <div className="h-screen bg-cream-100">
         <LoadingSpinner label="建立演講 Session..." />
       </div>
     )
@@ -100,10 +100,10 @@ function getErrorMessage(error: unknown) {
 
 function ErrorState({ message }: { message: string }) {
   return (
-    <div className="flex h-screen items-center justify-center bg-gray-50 p-6">
+    <div className="flex h-screen items-center justify-center bg-cream-100 p-6">
       <div className="max-w-md rounded border border-red-200 bg-white p-6 text-center">
         <p className="mb-2 text-lg font-semibold text-red-700">無法進入演講模式</p>
-        <p className="mb-5 text-sm text-gray-600">{message}</p>
+        <p className="mb-5 text-sm text-natural-500">{message}</p>
         <div className="flex justify-center">
           <Button onClick={() => window.location.reload()}>重試</Button>
         </div>

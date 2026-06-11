@@ -1,5 +1,5 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom'
-import DeckUploadPage from './routes/DeckUploadPage'
+import DocumentUploadPage from './routes/DocumentUploadPage'
 import EditorPage from './routes/EditorPage'
 import PresenterPage from './routes/PresenterPage'
 import InterviewReportPage from './routes/InterviewReportPage'
@@ -12,12 +12,10 @@ function App() {
     <Router>
       <div className="min-h-screen bg-cream-100">
         <Routes>
-          {/* Main routes */}
-          <Route path="/" element={<DeckUploadPage />} />
+          <Route path="/" element={<DocumentUploadPage />} />
           <Route path="/sessions" element={<SessionListPage />} />
           <Route path="/prep-sessions" element={<PrepSessionListPage />} />
           <Route path="/editor/:deckId" element={<EditorPage />} />
-          <Route path="/presenter/:deckId" element={<PresenterPage />} />
           <Route path="/interview/:deckId" element={<PresenterPage />} />
           <Route path="/interview/:deckId/report/:sessionId" element={<InterviewReportPage />} />
           <Route path="/interview/:sessionId/brd" element={<BRDGenerationPage />} />

@@ -120,7 +120,7 @@ export default function TopicCard({ cardState, card, animated = true, cardHeight
     <div className="relative h-full overflow-hidden">
       {/* Reset button (revealed on swipe) */}
       <div
-        className="absolute right-0 top-0 flex h-full w-20 items-center justify-center bg-gray-500"
+        className="absolute right-0 top-0 flex h-full w-20 items-center justify-center bg-cream-1000"
         style={{ transform: `translateX(${swipeX + 80}px)` }}
       >
         <button

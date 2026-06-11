@@ -321,10 +321,10 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
 
   if (error) {
     return (
-      <div className="flex h-screen items-center justify-center bg-gray-50 p-6">
+      <div className="flex h-screen items-center justify-center bg-cream-100 p-6">
         <div className="max-w-md rounded border border-red-200 bg-white p-6 text-center">
           <p className="mb-2 text-lg font-semibold text-red-700">載入失敗</p>
-          <p className="text-sm text-gray-600">{error.message}</p>
+          <p className="text-sm text-natural-500">{error.message}</p>
         </div>
       </div>
     )
@@ -340,6 +340,9 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
         deckId={deckId}
         isRecording={isRecording}
         isPreparingToPresent={isStartControlPreparing}
+        currentThemeTitle={currentTheme ? `${currentTheme.themeNumber}. ${formatThemeTitle(currentTheme.title)}` : `段落 ${currentSlide?.pageNumber ?? ''}`}
+        currentThemeIndex={currentThemeIndex}
+        totalThemes={themes.length || slides.length}
         onStart={handleStartRequested}
         onPause={pausePresenting}
         onEnd={endSession}
@@ -349,31 +352,35 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
         <InterviewOutputsPanel sessionId={sessionId} deckId={deckId} />
       ) : (
         <>
-          <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
-            {/* Theme nav bar */}
-            <div className="flex shrink-0 items-center justify-between border-b border-gray-200 bg-white px-5 py-2.5">
-              <button type="button" onClick={previousSlide} disabled={currentThemeIndex === 0}
-                className="rounded-lg px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 disabled:opacity-30">
-                ← 上一單元
-              </button>
-              <div className="text-center">
-                <p className="text-sm font-semibold text-gray-900">
-                  {currentTheme ? `${currentTheme.themeNumber}. ${formatThemeTitle(currentTheme.title)}` : `段落 ${currentSlide?.pageNumber ?? ''}`}
-                </p>
-                <p className="text-xs text-gray-500">
-                  單元 {currentThemeIndex + 1} / {themes.length || slides.length}
-                </p>
-              </div>
-              <button type="button" onClick={nextSlide} disabled={currentThemeIndex >= (themes.length || slides.length) - 1}
-                className="rounded-lg px-3 py-1.5 text-sm text-gray-600 hover:bg-gray-100 disabled:opacity-30">
-                下一單元 →
-              </button>
-            </div>
+          <main className="relative flex min-h-0 flex-1 overflow-hidden">
+            {/* Left arrow: previous theme */}
+            <button
+              type="button"
+              onClick={previousSlide}
+              disabled={currentThemeIndex === 0}
+              className="absolute left-[2%] top-1/2 -translate-y-1/2 z-10 flex h-11 w-11 items-center justify-center rounded-full border border-cream-300 bg-white shadow-natural text-natural-400 hover:text-natural-600 hover:border-cream-400 transition-all disabled:opacity-0 disabled:pointer-events-none"
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+
+            {/* Right arrow: next theme */}
+            <button
+              type="button"
+              onClick={nextSlide}
+              disabled={currentThemeIndex >= (themes.length || slides.length) - 1}
+              className="absolute right-[2%] top-1/2 -translate-y-1/2 z-10 flex h-11 w-11 items-center justify-center rounded-full border border-cream-300 bg-white shadow-natural text-natural-400 hover:text-natural-600 hover:border-cream-400 transition-all disabled:opacity-0 disabled:pointer-events-none"
+            >
+              <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
 
             {/* Questions with inline strikethrough status */}
-            <div className="min-h-0 flex-1 overflow-y-auto bg-gray-50 px-6 py-5">
+            <div className="min-h-0 flex-1 overflow-y-auto bg-cream-100 px-14 py-5">
               {currentTheme ? (
-                <div className="mx-auto max-w-3xl space-y-4">
+                <div key={currentTheme.id} className="mx-auto max-w-3xl space-y-4 animate-themeFadeIn">
                   {(() => {
                     const cardStateMap = new Map(cardStates.map(cs => [cs.questionCard.id, cs.status]))
                     const completedStatuses = new Set(['sufficient', 'covered', 'manually_checked'])
@@ -400,29 +407,26 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
                       const groupProgress = groupCardStates.length > 0 ? Math.round((groupConfidenceSum / groupCardStates.length) * 100) : 0
 
                       return (
-                        <div key={gi} className={`relative rounded-xl border shadow-sm overflow-hidden ${groupDone ? 'border-green-200' : 'border-gray-200'}`}>
+                        <div key={gi} className={`relative rounded-2xl border shadow-sm overflow-hidden ${groupDone ? 'border-green-200' : 'border-cream-300'}`}>
                           {/* Water fill background for the whole group */}
                           <div
                             className="pointer-events-none absolute inset-x-0 bottom-0 z-0 transition-[height] duration-1000 ease-out"
                             style={{ height: `${groupProgress}%` }}
                             aria-hidden="true"
                           >
-                            <div className={`absolute inset-0 ${groupDone ? 'bg-green-100/60' : 'bg-blue-50/50'}`} />
+                            <div className={`absolute inset-0 ${groupDone ? 'bg-green-100/60' : 'bg-sage-50/50'}`} />
                           </div>
 
                           {/* Content on top */}
                           <div className="relative z-10">
                             {group.focus && (
-                              <div className={`border-b px-5 py-2.5 ${groupDone ? 'border-green-200' : 'border-blue-100'}`}>
+                              <div className={`border-b px-5 py-2.5 ${groupDone ? 'border-green-200' : 'border-sage-100'}`}>
                                 <div className="flex items-center justify-between">
                                   <AnimatedStrikeText
                                     text={`${groupDone ? '✓ ' : ''}${formatFocusText(group.focus)}`}
                                     done={groupDone}
-                                    className={`text-sm font-semibold transition-colors duration-500 ease-out ${groupDone ? 'text-green-800' : 'text-blue-900'}`}
+                                    className={`text-sm font-semibold transition-colors duration-500 ease-out ${groupDone ? 'text-green-800' : 'text-sage-500'}`}
                                   />
-                                  {groupProgress > 0 && !groupDone && (
-                                    <span key={groupProgress} className="animate-fadeIn text-xs font-medium text-blue-600 transition-opacity duration-300">{groupProgress}%</span>
-                                  )}
                                 </div>
                               </div>
                             )}
@@ -433,35 +437,31 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
                                 const itemProgress = isDone ? 100 : Math.round((confidence ?? 0) * 100)
 
                                 return (
-                                  <div key={card.id} className={`rounded-lg border bg-white p-4 shadow-sm transition-[border-color,background-color,box-shadow,opacity,transform] duration-500 ease-out ${isListening ? 'scale-[1.01] border-yellow-300 bg-yellow-50 shadow-yellow-100' : isDone ? 'border-green-200 bg-green-50/60' : 'border-gray-200'}`}>
+                                  <div key={card.id} className={`rounded-2xl border bg-white p-4 shadow-sm transition-[border-color,background-color,box-shadow,opacity,transform] duration-500 ease-out ${isListening ? 'scale-[1.01] border-yellow-300 bg-yellow-50 shadow-yellow-100' : isDone ? 'border-green-200 bg-green-50/60' : 'border-cream-300'}`}>
                                     <div className="mb-3 flex items-center justify-between gap-3">
                                       <div className="flex items-center gap-2">
-                                        <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded text-sm font-semibold transition-[background-color,color,transform,opacity] duration-500 ease-out ${
-                                          isDone ? 'bg-green-100 text-green-700' : isListening ? 'bg-yellow-200 text-yellow-800 animate-pulse' : 'bg-gray-100 text-gray-600'
+                                        <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-sm font-semibold transition-[background-color,color,transform,opacity] duration-500 ease-out ${
+                                          isDone ? 'bg-green-100 text-green-700' : isListening ? 'bg-yellow-200 text-yellow-800 animate-pulse' : 'bg-cream-200 text-natural-500'
                                         }`}>
                                           {isDone ? '✓' : qi + 1}
                                         </span>
-                                        <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-semibold tracking-wide text-gray-600">
+                                        <span className="rounded-lg bg-cream-200 px-2 py-0.5 text-xs font-semibold tracking-wide text-natural-500">
                                           建議提問
                                         </span>
                                       </div>
                                       {!isDone && card.importance === 'must' && (
-                                        <span className="shrink-0 rounded bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">必問</span>
+                                        <span className="shrink-0 rounded-lg bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">必問</span>
                                       )}
                                     </div>
                                     <AnimatedStrikeText
                                       text={formatQuestionText(card.questionText)}
                                       done={isDone}
-                                      className={`text-base font-normal leading-relaxed transition-colors duration-500 ease-out ${isDone ? 'text-gray-400' : 'text-gray-900'}`}
+                                      className={`text-base font-normal leading-relaxed transition-colors duration-500 ease-out ${isDone ? 'text-natural-300' : 'text-natural-700'}`}
                                     />
-                                      <div className={`mt-3 overflow-hidden transition-[max-height,opacity] duration-500 ease-out ${isDone ? 'max-h-0 opacity-0' : 'max-h-16 opacity-100'}`}>
-                                        <div className="mb-1 flex items-center justify-between text-xs text-gray-500 transition-opacity duration-300">
-                                          <span>回答完整度</span>
-                                          <span key={itemProgress} className="inline-block animate-fadeIn">{itemProgress}%</span>
-                                        </div>
-                                        <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-200 transition-colors duration-500">
+                                      <div className={`mt-2 overflow-hidden transition-[max-height,opacity] duration-500 ease-out ${isDone ? 'max-h-0 opacity-0' : 'max-h-4 opacity-100'}`}>
+                                        <div className="h-1 w-full overflow-hidden rounded-full bg-cream-300">
                                           <div
-                                            className={`h-1.5 rounded-full transition-[width,background-color,opacity] duration-700 ease-out ${isListening ? 'bg-yellow-400' : 'bg-blue-400'}`}
+                                            className={`h-1 rounded-full transition-[width,background-color,opacity] duration-700 ease-out ${isListening ? 'bg-yellow-400' : 'bg-sage-400'}`}
                                             style={{ width: `${itemProgress}%` }}
                                           />
                                         </div>
@@ -475,16 +475,19 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
                       )
                     })
                   })()}
+                  {/* 底部留白，避免被懸浮追問提示擋住 */}
+                  <div className="h-28" />
                 </div>
               ) : currentSlide ? (
                 <div className="mx-auto max-w-3xl">
-                  <p className="text-base text-gray-700 whitespace-pre-wrap">{currentSlide.extractedText}</p>
+                  <p className="text-base text-natural-600 whitespace-pre-wrap">{currentSlide.extractedText}</p>
                 </div>
               ) : null}
             </div>
-          </main>
 
-          <FollowupPromptPanel prompt={followupPrompt} />
+            {/* 懸浮追問提示 */}
+            <FollowupPromptPanel prompt={followupPrompt} />
+          </main>
 
           {/* 底部：轉錄區 - 動態高度 */}
           <div className={layoutConfig.transcriptArea.height}>
@@ -566,7 +569,7 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
 function PreparingOverlay() {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-cream-100/85 backdrop-blur-sm">
-      <div className="flex flex-col items-center justify-center rounded-lg border border-cream-300 bg-white px-8 py-7 shadow-natural">
+      <div className="flex flex-col items-center justify-center rounded-2xl border border-cream-300 bg-white px-8 py-7 shadow-natural">
         <div className="mb-4 h-11 w-11 animate-spin rounded-full border-2 border-cream-200 border-t-sage-500" />
         <p className="text-base font-medium tracking-wide text-natural-700">準備中</p>
       </div>
@@ -751,28 +754,20 @@ function FollowupPromptPanel({ prompt }: { prompt: FollowupPrompt | null }) {
     prompt?.suggestedFollowup,
   ].filter(Boolean).join('::') || 'empty'
 
+  if (!prompt?.suggestedFollowup) return null
+
   return (
-    <section className="shrink-0 bg-transparent px-6 py-3" aria-live="polite">
+    <section className="absolute bottom-4 left-6 right-6 z-20" aria-live="polite">
       <div className="mx-auto max-w-5xl">
-        <div className="min-h-[6.25rem] min-w-0 rounded-lg border border-amber-200 bg-white px-4 py-3 shadow-lg shadow-amber-100/60 transition-[box-shadow,border-color,opacity,transform] duration-500 ease-out">
-          <div className="mb-3 flex min-w-0 items-center gap-2">
-            <span className="shrink-0 rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">仍需追問</span>
-            {prompt?.cardTitle && (
-              <p key={prompt.cardTitle} className="animate-fadeIn truncate text-sm font-semibold text-gray-900">{prompt.cardTitle}</p>
+        <div className="min-w-0 rounded-2xl bg-white px-7 py-5 shadow-[0_0_20px_rgba(251,191,36,0.3),0_0_40px_rgba(251,191,36,0.15)]">
+          <div className="mb-3 flex min-w-0 items-center gap-3">
+            <span className="shrink-0 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-sm font-bold text-amber-800">仍需追問</span>
+            {prompt.cardTitle && (
+              <p key={prompt.cardTitle} className="animate-fadeIn truncate text-base font-medium text-natural-500">{prompt.cardTitle}</p>
             )}
           </div>
-          <div key={promptKey} className="animate-fadeIn space-y-3">
-            {prompt?.suggestedFollowup ? (
-              <div className="text-center">
-                <AnimatedStrikeText
-                  text={prompt.suggestedFollowup}
-                  done={false}
-                  className="text-base font-normal leading-relaxed text-gray-900"
-                />
-              </div>
-            ) : (
-              <div className="min-h-9" />
-            )}
+          <div key={promptKey} className="animate-fadeIn">
+            <p className="text-base leading-relaxed text-natural-700">{prompt.suggestedFollowup}</p>
           </div>
         </div>
       </div>
@@ -789,11 +784,7 @@ function InterviewOutputsPanel({ sessionId, deckId }: { sessionId: string; deckI
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'brd' | 'transcript'>('brd')
 
-  useEffect(() => {
-    handleGenerate()
-  }, [])
-
-  async function handleGenerate() {
+  const handleGenerate = useCallback(async () => {
     setIsGenerating(true)
     setError(null)
     try {
@@ -804,7 +795,11 @@ function InterviewOutputsPanel({ sessionId, deckId }: { sessionId: string; deckI
     } finally {
       setIsGenerating(false)
     }
-  }
+  }, [sessionId])
+
+  useEffect(() => {
+    handleGenerate()
+  }, [handleGenerate])
 
   function downloadMarkdown(content: string, filename: string) {
     const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
@@ -818,10 +813,10 @@ function InterviewOutputsPanel({ sessionId, deckId }: { sessionId: string; deckI
 
   if (isGenerating) {
     return (
-      <div className="flex min-h-0 flex-1 items-center justify-center bg-gray-50">
+      <div className="flex min-h-0 flex-1 items-center justify-center bg-cream-100">
         <div className="text-center">
-          <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-gray-200 border-t-blue-600" />
-          <p className="text-base font-medium text-gray-700">正在產生 BRD 與逐字稿...</p>
+          <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-cream-300 border-t-sage-400" />
+          <p className="text-base font-medium text-natural-600">正在產生 BRD 與逐字稿...</p>
         </div>
       </div>
     )
@@ -829,10 +824,10 @@ function InterviewOutputsPanel({ sessionId, deckId }: { sessionId: string; deckI
 
   if (error) {
     return (
-      <div className="flex min-h-0 flex-1 items-center justify-center bg-gray-50">
+      <div className="flex min-h-0 flex-1 items-center justify-center bg-cream-100">
         <div className="text-center">
           <p className="text-red-600 mb-3">{error}</p>
-          <button onClick={handleGenerate} className="rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700">重試</button>
+          <button onClick={handleGenerate} className="rounded-xl bg-sage-500 px-4 py-2 text-sm text-white hover:bg-sage-500">重試</button>
         </div>
       </div>
     )
@@ -843,14 +838,14 @@ function InterviewOutputsPanel({ sessionId, deckId }: { sessionId: string; deckI
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       {/* Header */}
-      <div className="flex shrink-0 items-center justify-between border-b border-gray-200 bg-white px-5 py-3">
+      <div className="flex shrink-0 items-center justify-between border-b border-cream-300 bg-white px-5 py-3">
         <div className="flex items-center gap-4">
-          <h2 className="text-base font-semibold text-gray-900">訪談產出</h2>
-          <div className="flex rounded-lg border border-gray-200 bg-gray-50 p-0.5">
+          <h2 className="text-base font-semibold text-natural-700">訪談產出</h2>
+          <div className="flex rounded-2xl border border-cream-300 bg-cream-100 p-0.5">
             <button
               type="button"
               onClick={() => setActiveTab('brd')}
-              className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${activeTab === 'brd' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+              className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${activeTab === 'brd' ? 'bg-white text-natural-700 shadow-sm' : 'text-natural-400 hover:text-natural-600'}`}
             >
               BRD 草稿
               {outputs?.brd?.openIssuesCount ? (
@@ -862,11 +857,11 @@ function InterviewOutputsPanel({ sessionId, deckId }: { sessionId: string; deckI
             <button
               type="button"
               onClick={() => setActiveTab('transcript')}
-              className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${activeTab === 'transcript' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+              className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${activeTab === 'transcript' ? 'bg-white text-natural-700 shadow-sm' : 'text-natural-400 hover:text-natural-600'}`}
             >
               逐字稿
               {outputs?.transcript?.utteranceCount ? (
-                <span className="ml-1.5 text-xs text-gray-400">{outputs.transcript.utteranceCount} 句</span>
+                <span className="ml-1.5 text-xs text-natural-300">{outputs.transcript.utteranceCount} 句</span>
               ) : null}
             </button>
           </div>
@@ -876,7 +871,7 @@ function InterviewOutputsPanel({ sessionId, deckId }: { sessionId: string; deckI
             <button
               type="button"
               onClick={() => downloadMarkdown(outputs.brd!.markdown, 'BRD_草稿.md')}
-              className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+              className="rounded-2xl border border-cream-400 bg-white px-3 py-1.5 text-xs font-medium text-natural-600 hover:bg-cream-100"
             >
               下載 BRD
             </button>
@@ -885,7 +880,7 @@ function InterviewOutputsPanel({ sessionId, deckId }: { sessionId: string; deckI
             <button
               type="button"
               onClick={() => downloadMarkdown(outputs.transcript!.markdown, '訪談逐字稿.md')}
-              className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+              className="rounded-2xl border border-cream-400 bg-white px-3 py-1.5 text-xs font-medium text-natural-600 hover:bg-cream-100"
             >
               下載逐字稿
             </button>
@@ -893,14 +888,14 @@ function InterviewOutputsPanel({ sessionId, deckId }: { sessionId: string; deckI
           <button
             type="button"
             onClick={() => window.location.assign(`/editor/${deckId}`)}
-            className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+            className="rounded-2xl border border-cream-400 bg-white px-3 py-1.5 text-xs font-medium text-natural-600 hover:bg-cream-100"
           >
             回到編輯
           </button>
           <button
             type="button"
             onClick={() => window.location.assign(`/interview/${deckId}`)}
-            className="rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-blue-700"
+            className="rounded-2xl bg-sage-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-sage-500"
           >
             重新訪談
           </button>

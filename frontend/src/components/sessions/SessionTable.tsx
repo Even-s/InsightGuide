@@ -172,7 +172,7 @@ export default function SessionTable({
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                     <div className="flex justify-end gap-2">
                       <button
-                        onClick={() => navigate(`/presenter/${session.deckId}`)}
+                        onClick={() => navigate(`/editor/${session.deckId}`)}
                         className="text-sage-600 hover:text-sage-700 font-medium"
                         title="View details"
                       >

@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react'
 import type { CardState } from '@/types/presentation'
 import type { CardStatus } from '@/types/questionCard'
-import ProgressBar from '@/components/common/ProgressBar'
 import TopicCard from './TopicCard'
 
 interface TopicCardsPanelProps {
@@ -32,9 +31,6 @@ export default function TopicCardsPanel({
     : cardStates
   const orderedVisibleCards = [...visibleCards].sort(comparePresentationOrder)
 
-  const coveredCount = visibleCards.filter(isCompletedCard).length
-  const totalCount = visibleCards.length
-  const percentage = totalCount > 0 ? coveredCount / totalCount : 0
   const isPortraitLayout = slideOrientation === 'portrait'
   const rowCount = Math.max(1, Math.ceil(orderedVisibleCards.length / 2))
 
@@ -57,15 +53,7 @@ export default function TopicCardsPanel({
   return (
     <aside className="flex h-full min-h-0 flex-col bg-cream-50">
       <div className="shrink-0 border-b border-cream-300 px-4 py-3 bg-wood-50">
-        <div className="flex items-center justify-between">
-          <h2 className="font-medium text-natural-700 tracking-wide">主題卡片</h2>
-          <span className="text-xs text-natural-500">
-            {coveredCount}/{totalCount}
-          </span>
-        </div>
-        <div className="mt-3">
-          <ProgressBar value={coveredCount} max={totalCount || 1} tone={percentage >= 0.75 ? 'green' : 'blue'} />
-        </div>
+        <h2 className="font-medium text-natural-700 tracking-wide">主題卡片</h2>
       </div>
 
       <div

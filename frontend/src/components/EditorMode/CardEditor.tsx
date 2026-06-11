@@ -222,15 +222,15 @@ function CardItem({
         className={`rounded-lg border bg-white p-4 transition-all ${
           isDragging ? 'opacity-50' : ''
         } ${
-          isDragOver ? 'border-blue-500 border-2' : 'border-gray-200'
-        } ${!isEditing ? 'hover:bg-gray-50' : ''}`}
+          isDragOver ? 'border-sage-400 border-2' : 'border-cream-300'
+        } ${!isEditing ? 'hover:bg-cream-100' : ''}`}
         style={{ transform: `translateX(${swipeX}px)`, transition: isSwiping ? 'none' : 'transform 0.3s ease' }}
       >
         {isEditing ? (
           // Edit mode
           <div className="space-y-4">
             <div className="flex items-center gap-2">
-              <label className="flex flex-1 cursor-pointer items-center gap-2 rounded border-2 border-gray-200 p-3 transition-colors has-[:checked]:border-red-500 has-[:checked]:bg-red-50">
+              <label className="flex flex-1 cursor-pointer items-center gap-2 rounded border-2 border-cream-300 p-3 transition-colors has-[:checked]:border-red-500 has-[:checked]:bg-red-50">
                 <input
                   type="radio"
                   name={`importance-${card.id}`}
@@ -242,14 +242,14 @@ function CardItem({
                 <span className="text-sm font-medium">必問</span>
               </label>
 
-              <label className="flex flex-1 cursor-pointer items-center gap-2 rounded border-2 border-gray-200 p-3 transition-colors has-[:checked]:border-blue-500 has-[:checked]:bg-blue-50">
+              <label className="flex flex-1 cursor-pointer items-center gap-2 rounded border-2 border-cream-300 p-3 transition-colors has-[:checked]:border-sage-400 has-[:checked]:bg-sage-50">
                 <input
                   type="radio"
                   name={`importance-${card.id}`}
                   value="should"
                   checked={form.importance === 'should'}
                   onChange={(e) => setForm({ ...form, importance: e.target.value as 'must' | 'should' })}
-                  className="h-4 w-4 text-blue-600"
+                  className="h-4 w-4 text-sage-500"
                 />
                 <span className="text-sm font-medium">選問</span>
               </label>
@@ -260,7 +260,7 @@ function CardItem({
               onChange={(e) => setForm({ ...form, questionText: e.target.value })}
               placeholder="請輸入問題內容，例如：「這個功能的使用者是誰？」"
               rows={3}
-              className="w-full resize-none rounded border border-gray-300 px-3 py-2 text-sm leading-relaxed focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              className="w-full resize-none rounded border border-cream-400 px-3 py-2 text-sm leading-relaxed focus:border-sage-400 focus:outline-none focus:ring-1 focus:ring-sage-400"
               autoFocus
             />
 
@@ -269,7 +269,7 @@ function CardItem({
               <button
                 type="button"
                 onClick={handleCancel}
-                className="rounded border border-gray-300 px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                className="rounded border border-cream-400 px-4 py-2 text-sm text-natural-600 hover:bg-cream-100"
               >
                 取消
               </button>
@@ -277,7 +277,7 @@ function CardItem({
                 type="button"
                 onClick={handleSave}
                 disabled={!form.questionText.trim()}
-                className="rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
+                className="rounded bg-sage-500 px-4 py-2 text-sm text-white hover:bg-sage-500 disabled:opacity-50"
               >
                 儲存
               </button>
@@ -290,7 +290,7 @@ function CardItem({
               <div className="flex h-9 w-9 items-center justify-center rounded-full border border-sage-200 bg-sage-50 text-sm font-semibold text-sage-700">
                 {index + 1}
               </div>
-              <span className="text-[10px] font-medium tracking-wide text-gray-400">順序</span>
+              <span className="text-[10px] font-medium tracking-wide text-natural-300">順序</span>
             </div>
 
             {/* Drag handle - only this area is draggable */}
@@ -298,7 +298,7 @@ function CardItem({
               draggable
               onDragStart={handleDragHandleStart}
               onDragEnd={handleDragHandleEnd}
-              className="mt-2 shrink-0 cursor-move text-gray-400 hover:text-gray-600 active:cursor-grabbing"
+              className="mt-2 shrink-0 cursor-move text-natural-300 hover:text-natural-500 active:cursor-grabbing"
               title="拖曳來重新排序"
             >
               <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -308,7 +308,7 @@ function CardItem({
 
             <div className="flex-1 min-w-0">
               <div className="flex items-center justify-between gap-3">
-                <h3 className="text-base font-medium text-gray-950 leading-relaxed">{formatQuestionText(card.questionText)}</h3>
+                <h3 className="text-base font-medium text-natural-700 leading-relaxed">{formatQuestionText(card.questionText)}</h3>
                 <Badge tone={importanceTone[card.importance]} size="sm">
                   {importanceLabel[card.importance]}
                 </Badge>
@@ -384,10 +384,10 @@ export default function CardEditor({
 
   return (
     <section className="flex h-full min-h-0 flex-col bg-white">
-      <div className="flex shrink-0 items-center border-b border-gray-200 px-3 py-2.5">
+      <div className="flex shrink-0 items-center border-b border-cream-300 px-3 py-2.5">
         <div>
-          <h2 className="text-sm font-semibold text-gray-950">訪談問題</h2>
-          <p className="text-xs text-gray-500">{topicGroups.length} 個主題 · {cards.length} 個問題</p>
+          <h2 className="text-sm font-semibold text-natural-700">訪談問題</h2>
+          <p className="text-xs text-natural-400">{topicGroups.length} 個主題 · {cards.length} 個問題</p>
         </div>
       </div>
 
@@ -395,13 +395,13 @@ export default function CardEditor({
         {cards.length > 0 ? (
           <div className="space-y-5">
             {topicGroups.map((group, groupIdx) => (
-              <div key={groupIdx} className="rounded-lg border border-gray-100 bg-gray-50/50">
+              <div key={groupIdx} className="rounded-lg border border-cream-200 bg-cream-100/50">
                 {group.focusText && (
-                  <div className="flex items-center gap-2 border-b border-gray-100 px-3 py-2">
-                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-blue-100 text-[10px] font-bold text-blue-700">
+                  <div className="flex items-center gap-2 border-b border-cream-200 px-3 py-2">
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded bg-sage-100 text-[10px] font-bold text-sage-500">
                       {groupIdx + 1}
                     </span>
-                    <h4 className="text-sm font-semibold text-gray-800">{formatFocusText(group.focusText)}</h4>
+                    <h4 className="text-sm font-semibold text-natural-700">{formatFocusText(group.focusText)}</h4>
                   </div>
                 )}
                 <div className="space-y-2 p-2">
@@ -432,7 +432,7 @@ export default function CardEditor({
             <button
               type="button"
               onClick={onCreate}
-              className="flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed border-gray-300 py-4 text-sm font-medium text-gray-500 transition-colors hover:border-blue-400 hover:bg-blue-50 hover:text-blue-600"
+              className="flex w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed border-cream-400 py-4 text-sm font-medium text-natural-400 transition-colors hover:border-sage-300 hover:bg-sage-50 hover:text-sage-500"
             >
               <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
@@ -444,7 +444,7 @@ export default function CardEditor({
           <button
             type="button"
             onClick={onCreate}
-            className="flex w-full flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed border-gray-300 py-12 text-gray-500 transition-colors hover:border-blue-400 hover:bg-blue-50 hover:text-blue-600"
+            className="flex w-full flex-col items-center justify-center gap-3 rounded-lg border-2 border-dashed border-cream-400 py-12 text-natural-400 transition-colors hover:border-sage-300 hover:bg-sage-50 hover:text-sage-500"
           >
             <svg className="h-10 w-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />

@@ -529,6 +529,7 @@ class OpenAIService:
         document_title: str,
         full_text: str,
         sections: list,
+        deck_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Phase 1: Analyze full BRD document and generate interview themes.
@@ -609,6 +610,13 @@ class OpenAIService:
                 response_format={"type": "json_object"},
             )
 
+            billing_service.record_deck_chat_completion(
+                deck_id=deck_id,
+                operation="generate_interview_themes",
+                model=model,
+                response=response,
+            )
+
             content = response.choices[0].message.content
             result = json.loads(content)
 
@@ -627,6 +635,7 @@ class OpenAIService:
         theme_rationale: str,
         theme_brd_mapping: list,
         source_sections_text: str,
+        deck_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Phase 2: Generate question cards for a single interview theme.
@@ -743,6 +752,14 @@ class OpenAIService:
                 ],
                 temperature=0.4,
                 response_format={"type": "json_object"},
+            )
+
+            billing_service.record_deck_chat_completion(
+                deck_id=deck_id,
+                operation="generate_theme_question_cards",
+                model=model,
+                response=response,
+                source_id=f"theme:{theme_title}",
             )
 
             content = response.choices[0].message.content

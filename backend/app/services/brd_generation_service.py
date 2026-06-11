@@ -11,6 +11,10 @@ from sqlalchemy.orm import Session
 
 TZ_TAIPEI = timezone(timedelta(hours=8))
 
+import json
+import uuid
+
+from app.models.brd import BRDDraft, BRDStatus
 from app.models.interview_session import InterviewSession, InterviewCardState
 from app.models.interview_theme import InterviewTheme
 from app.models.question_card import QuestionCard
@@ -20,10 +24,23 @@ from app.models.document import Document
 class BRDGenerationService:
 
     def generate_outputs(self, db: Session, session_id: str) -> Dict[str, Any]:
-        """Generate BRD and transcript for a completed interview session."""
+        """Generate BRD and transcript for a completed interview session.
+
+        If a cached BRDDraft exists for this session, return it directly.
+        Otherwise generate, persist to BRDDraft, then return.
+        """
         session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
         if not session:
             raise ValueError(f"Session {session_id} not found")
+
+        # Check for cached BRD
+        existing_brd = db.query(BRDDraft).filter(
+            BRDDraft.interview_session_id == session_id,
+            BRDDraft.status == BRDStatus.COMPLETED,
+        ).first()
+
+        if existing_brd and existing_brd.markdown_content:
+            return json.loads(existing_brd.markdown_content)
 
         document = db.query(Document).filter(Document.id == session.document_id).first()
 
@@ -53,7 +70,7 @@ class BRDGenerationService:
 
         brd_md = self._render_brd_markdown(document, brd_sections, open_issues)
 
-        return {
+        result = {
             "sessionId": session_id,
             "brd": {
                 "markdown": brd_md,
@@ -65,6 +82,26 @@ class BRDGenerationService:
                 "utteranceCount": len(utterances),
             },
         }
+
+        # Persist to BRDDraft
+        if existing_brd:
+            existing_brd.markdown_content = json.dumps(result, ensure_ascii=False)
+            existing_brd.status = BRDStatus.COMPLETED
+            existing_brd.generated_at = datetime.utcnow()
+        else:
+            brd_draft = BRDDraft(
+                id=f"brd_{uuid.uuid4().hex[:12]}",
+                interview_session_id=session_id,
+                user_id=session.user_id,
+                status=BRDStatus.COMPLETED,
+                title=document.title if document else "BRD",
+                markdown_content=json.dumps(result, ensure_ascii=False),
+                generated_at=datetime.utcnow(),
+            )
+            db.add(brd_draft)
+        db.commit()
+
+        return result
 
     def _build_brd_sections(
         self, themes: List[InterviewTheme], state_by_card_id: Dict, db: Session

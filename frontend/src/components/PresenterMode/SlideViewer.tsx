@@ -33,8 +33,8 @@ export default function SlideViewer({
 
   if (!slide) {
     return (
-      <section className="flex h-full items-center justify-center rounded border border-gray-200 bg-white">
-        <p className="text-gray-500">沒有投影片資料</p>
+      <section className="flex h-full items-center justify-center rounded border border-cream-300 bg-white">
+        <p className="text-natural-400">沒有投影片資料</p>
       </section>
     )
   }
@@ -44,7 +44,7 @@ export default function SlideViewer({
 
   return (
     <section className="flex h-full min-h-0 flex-col">
-      <div className="group relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded border border-gray-200 bg-white">
+      <div className="group relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded border border-cream-300 bg-white">
         {slide.imageUrl ? (
           <img
             src={slide.imageUrl}
@@ -58,10 +58,10 @@ export default function SlideViewer({
           />
         ) : (
           <div className="max-w-3xl px-8 text-center">
-            <p className="mb-4 text-2xl font-semibold text-gray-900">
+            <p className="mb-4 text-2xl font-semibold text-natural-700">
               {slide.title || `投影片 ${slide.pageNumber}`}
             </p>
-            <p className="whitespace-pre-wrap text-gray-600">
+            <p className="whitespace-pre-wrap text-natural-500">
               {slide.aiSummary || slide.extractedText || '等待投影片影像或文字內容'}
             </p>
           </div>
@@ -72,7 +72,7 @@ export default function SlideViewer({
           onClick={onPrevious}
           disabled={currentSlideIndex === 0}
           aria-label="上一頁"
-          className="absolute left-4 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-gray-950/70 text-white opacity-0 transition-opacity hover:bg-gray-950 disabled:cursor-not-allowed disabled:opacity-20 group-hover:opacity-100"
+          className="absolute left-4 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-natural-800/70 text-white opacity-0 transition-opacity hover:bg-natural-800 disabled:cursor-not-allowed disabled:opacity-20 group-hover:opacity-100"
         >
           <ChevronLeftIcon className="h-6 w-6" />
         </button>
@@ -81,7 +81,7 @@ export default function SlideViewer({
           onClick={onNext}
           disabled={currentSlideIndex >= totalSlides - 1}
           aria-label="下一頁"
-          className="absolute right-4 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-gray-950/70 text-white opacity-0 transition-opacity hover:bg-gray-950 disabled:cursor-not-allowed disabled:opacity-20 group-hover:opacity-100"
+          className="absolute right-4 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-full bg-natural-800/70 text-white opacity-0 transition-opacity hover:bg-natural-800 disabled:cursor-not-allowed disabled:opacity-20 group-hover:opacity-100"
         >
           <ChevronRightIcon className="h-6 w-6" />
         </button>
@@ -90,7 +90,7 @@ export default function SlideViewer({
       <div className="mt-4 flex shrink-0 flex-col gap-4">
         <div className="flex items-center justify-between gap-4">
           <div className="min-w-0">
-            <h2 className="truncate text-base font-semibold text-gray-900">
+            <h2 className="truncate text-base font-semibold text-natural-700">
               {slide.title || `投影片 ${slide.pageNumber}`}
             </h2>
           </div>
@@ -99,7 +99,7 @@ export default function SlideViewer({
             <Button size="sm" variant="secondary" onClick={onPrevious} disabled={currentSlideIndex === 0}>
               上一頁
             </Button>
-            <span className="min-w-16 text-center text-sm text-gray-600">
+            <span className="min-w-16 text-center text-sm text-natural-500">
               {totalSlides > 0 ? currentSlideIndex + 1 : 0} / {totalSlides}
             </span>
             <Button size="sm" variant="secondary" onClick={onNext} disabled={currentSlideIndex >= totalSlides - 1}>

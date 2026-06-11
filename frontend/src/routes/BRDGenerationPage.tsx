@@ -145,7 +145,7 @@ export default function BRDGenerationPage() {
       case 'must_have': return 'bg-red-100 text-red-800'
       case 'should_have': return 'bg-yellow-100 text-yellow-800'
       case 'nice_to_have': return 'bg-green-100 text-green-800'
-      default: return 'bg-gray-100 text-gray-800'
+      default: return 'bg-cream-200 text-natural-700'
     }
   }
 
@@ -186,7 +186,7 @@ export default function BRDGenerationPage() {
         {/* Header */}
         <div className="mb-8">
           <button
-            onClick={() => navigate(`/interview/${sessionId}/report`)}
+            onClick={() => navigate(-1)}
             className="text-natural-600 hover:text-natural-800 mb-4 flex items-center gap-2"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -331,7 +331,7 @@ export default function BRDGenerationPage() {
                             <span className={`text-xs px-2 py-1 rounded ${getPriorityColor(req.priority)}`}>
                               {getPriorityLabel(req.priority)}
                             </span>
-                            <span className="text-xs px-2 py-1 rounded bg-blue-100 text-blue-800">
+                            <span className="text-xs px-2 py-1 rounded bg-sage-100 text-sage-500">
                               {getTypeLabel(req.type)}
                             </span>
                           </div>

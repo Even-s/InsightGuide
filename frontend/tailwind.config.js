@@ -94,6 +94,7 @@ export default {
       },
       animation: {
         'fadeIn': 'fadeIn 0.3s ease-in',
+        'themeFadeIn': 'themeFadeIn 0.35s ease-out',
         'fadeOut': 'fadeOut 0.18s ease-out forwards',
         'blink': 'blink 1s step-end infinite',
         'wave': 'wave 3s ease-in-out infinite',
@@ -104,6 +105,10 @@ export default {
         fadeIn: {
           '0%': { opacity: '0' },
           '100%': { opacity: '1' },
+        },
+        themeFadeIn: {
+          '0%': { opacity: '0', transform: 'translateY(6px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
         },
         fadeOut: {
           '0%': { opacity: '1' },

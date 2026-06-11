@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import { useParams } from 'react-router-dom'
-import { deckApi } from '@/api/decks'
+import { documentsAPI } from '@/api/documents'
 import { questionCardsAPI, type QuestionCardFormData } from '@/api/questionCards'
-import { useDeckEvents, type AnalysisCompleteEvent } from '@/hooks/useDeckEvents'
 import CardEditor from '@/components/EditorMode/CardEditor'
 import Button from '@/components/common/Button'
 import LoadingSpinner from '@/components/common/LoadingSpinner'
@@ -97,7 +96,7 @@ export default function EditorPage() {
         setIsLoading(true)
         setError(null)
 
-        const deckStatus = await deckApi.getDeckStatus(deckId!)
+        const deckStatus = await documentsAPI.getDocumentStatus(deckId!)
         if (!isMounted) return
 
         if (deckStatus.status === 'failed') {
@@ -106,7 +105,7 @@ export default function EditorPage() {
           return
         }
 
-        if (deckStatus.status === 'analyzing') {
+        if (['uploading', 'uploaded', 'processing', 'converted', 'analyzing'].includes(deckStatus.status)) {
           setIsAnalyzing(true)
         }
 
@@ -124,21 +123,12 @@ export default function EditorPage() {
     return () => { isMounted = false }
   }, [deckId, loadPlan])
 
-  // SSE: refresh when analysis completes
-  useDeckEvents(deckId, {
-    onAnalysisComplete: useCallback((_data: AnalysisCompleteEvent) => {
-      setIsAnalyzing(false)
-      loadPlan().catch(console.error)
-    }, [loadPlan]),
-    onError: useCallback(() => {}, []),
-  })
-
   // Poll during analysis
   useEffect(() => {
     if (!deckId || !isAnalyzing) return
     const interval = window.setInterval(async () => {
       try {
-        const status = await deckApi.getDeckStatus(deckId)
+        const status = await documentsAPI.getDocumentStatus(deckId)
         if (status.status === 'analyzed') {
           setIsAnalyzing(false)
           await loadPlan()
@@ -205,12 +195,12 @@ export default function EditorPage() {
 
   if (isAnalyzing) {
     return (
-      <div className="flex h-screen items-center justify-center bg-gray-50 p-6">
-        <div className="w-full max-w-md rounded border border-gray-200 bg-white p-6 text-center">
-          <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-gray-200 border-t-blue-600" />
-          <p className="text-lg font-semibold text-gray-950">正在分析文件</p>
-          <p className="mt-2 text-sm text-gray-600">系統正在產生訪談單元與提問重點...</p>
-          <p className="mt-3 text-xs text-gray-500">完成後將自動載入。</p>
+      <div className="flex h-screen items-center justify-center bg-cream-100 p-6">
+        <div className="w-full max-w-md rounded border border-cream-300 bg-white p-6 text-center">
+          <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-cream-300 border-t-sage-400" />
+          <p className="text-lg font-semibold text-natural-700">正在分析文件</p>
+          <p className="mt-2 text-sm text-natural-500">系統正在產生訪談單元與提問重點...</p>
+          <p className="mt-3 text-xs text-natural-400">完成後將自動載入。</p>
         </div>
       </div>
     )
@@ -218,10 +208,10 @@ export default function EditorPage() {
 
   if (error) {
     return (
-      <div className="flex h-screen items-center justify-center bg-gray-50 p-6">
+      <div className="flex h-screen items-center justify-center bg-cream-100 p-6">
         <div className="max-w-md rounded border border-red-200 bg-white p-6 text-center">
           <p className="mb-2 text-lg font-semibold text-red-700">無法載入編輯器</p>
-          <p className="mb-5 text-sm text-gray-600">{error}</p>
+          <p className="mb-5 text-sm text-natural-500">{error}</p>
           <Button onClick={() => window.location.reload()}>重試</Button>
         </div>
       </div>
@@ -230,22 +220,22 @@ export default function EditorPage() {
 
   if (!plan || plan.themes.length === 0) {
     return (
-      <div className="flex h-screen items-center justify-center bg-gray-50 p-6">
-        <div className="max-w-md rounded border border-gray-200 bg-white p-6 text-center">
-          <p className="text-lg font-semibold text-gray-950">尚無訪談單元</p>
-          <p className="mt-2 text-sm text-gray-600">請先上傳 BRD 初稿，系統將自動產生訪談計畫。</p>
+      <div className="flex h-screen items-center justify-center bg-cream-100 p-6">
+        <div className="max-w-md rounded border border-cream-300 bg-white p-6 text-center">
+          <p className="text-lg font-semibold text-natural-700">尚無訪談單元</p>
+          <p className="mt-2 text-sm text-natural-500">請先上傳 BRD 初稿，系統將自動產生訪談計畫。</p>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="flex h-screen flex-col bg-gray-50">
+    <div className="flex h-screen flex-col bg-cream-100">
       {/* Header */}
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-gray-200 bg-white px-5">
+      <header className="flex h-14 shrink-0 items-center justify-between border-b border-cream-300 bg-white px-5">
         <div>
-          <h1 className="text-base font-semibold text-gray-950">準備模式</h1>
-          <p className="text-xs text-gray-500">
+          <h1 className="text-base font-semibold text-natural-700">準備模式</h1>
+          <p className="text-xs text-natural-400">
             {plan.themes.length} 個訪談單元 · {plan.totalCards} 個提問重點
           </p>
         </div>
@@ -257,8 +247,8 @@ export default function EditorPage() {
 
       {/* Interview objective banner */}
       {plan.interviewObjective && (
-        <div className="border-b border-blue-100 bg-blue-50 px-5 py-2">
-          <p className="text-xs text-blue-800">
+        <div className="border-b border-sage-100 bg-sage-50 px-5 py-2">
+          <p className="text-xs text-sage-500">
             <span className="font-medium">訪談目標：</span>{plan.interviewObjective}
           </p>
         </div>
@@ -266,8 +256,8 @@ export default function EditorPage() {
 
       <main className="grid min-h-0 flex-1 grid-cols-[15rem_minmax(0,1fr)] overflow-hidden">
         {/* Left: Theme list */}
-        <aside className="min-h-0 overflow-y-auto border-r border-gray-200 bg-white p-3">
-          <h2 className="mb-3 px-1 text-sm font-semibold text-gray-700">訪談單元</h2>
+        <aside className="min-h-0 overflow-y-auto border-r border-cream-300 bg-white p-3">
+          <h2 className="mb-3 px-1 text-sm font-semibold text-natural-600">訪談單元</h2>
           <div className="space-y-1">
             {plan.themes.map((theme) => (
               <button
@@ -276,20 +266,20 @@ export default function EditorPage() {
                 onClick={() => setSelectedThemeId(theme.id)}
                 className={`w-full rounded-lg px-3 py-2.5 text-left transition-colors ${
                   selectedThemeId === theme.id
-                    ? 'border border-blue-400 bg-blue-50'
-                    : 'border border-transparent hover:bg-gray-50'
+                    ? 'border border-sage-300 bg-sage-50'
+                    : 'border border-transparent hover:bg-cream-100'
                 }`}
               >
                 <div className="flex items-center gap-2">
-                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-100 text-xs font-medium text-gray-600">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-cream-200 text-xs font-medium text-natural-500">
                     {theme.themeNumber}
                   </span>
-                  <span className="text-sm font-medium text-gray-900 line-clamp-1">{theme.title}</span>
+                  <span className="text-sm font-medium text-natural-700 line-clamp-1">{theme.title}</span>
                 </div>
                 <div className="mt-1 flex items-center gap-2 pl-7">
-                  <span className="text-xs text-gray-500">{theme.cards.length} 題</span>
+                  <span className="text-xs text-natural-400">{theme.cards.length} 題</span>
                   {theme.estimatedMinutes && (
-                    <span className="text-xs text-gray-400">~{theme.estimatedMinutes}min</span>
+                    <span className="text-xs text-natural-300">~{theme.estimatedMinutes}min</span>
                   )}
                   {theme.priority <= 3 && (
                     <span className="rounded bg-amber-50 px-1 py-0.5 text-[10px] font-medium text-amber-700">優先</span>
@@ -305,29 +295,29 @@ export default function EditorPage() {
           {selectedTheme ? (
             <div className="mx-auto w-full max-w-4xl space-y-5">
               <div>
-                <h2 className="text-lg font-semibold text-gray-950">
+                <h2 className="text-lg font-semibold text-natural-700">
                   {selectedTheme.themeNumber}. {selectedTheme.title}
                 </h2>
                 {selectedTheme.estimatedMinutes && (
-                  <p className="mt-1 text-xs text-gray-500">預估 {selectedTheme.estimatedMinutes} 分鐘</p>
+                  <p className="mt-1 text-xs text-natural-400">預估 {selectedTheme.estimatedMinutes} 分鐘</p>
                 )}
               </div>
 
               {/* Rationale */}
-              <div className="rounded-lg border border-gray-200 bg-white p-4">
-                <h3 className="mb-2 text-sm font-semibold text-gray-700">提問依據</h3>
-                <p className="text-sm leading-relaxed text-gray-600 whitespace-pre-wrap">
+              <div className="rounded-lg border border-cream-300 bg-white p-4">
+                <h3 className="mb-2 text-sm font-semibold text-natural-600">提問依據</h3>
+                <p className="text-sm leading-relaxed text-natural-500 whitespace-pre-wrap">
                   {selectedTheme.rationale}
                 </p>
               </div>
 
               {/* BRD Mapping */}
               {selectedTheme.brdMapping.length > 0 && (
-                <div className="rounded-lg border border-gray-200 bg-white p-4">
-                  <h3 className="mb-2 text-sm font-semibold text-gray-700">對應 BRD 章節</h3>
+                <div className="rounded-lg border border-cream-300 bg-white p-4">
+                  <h3 className="mb-2 text-sm font-semibold text-natural-600">對應 BRD 章節</h3>
                   <div className="flex flex-wrap gap-1.5">
                     {selectedTheme.brdMapping.map((section) => (
-                      <span key={section} className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-0.5 text-xs text-gray-700">
+                      <span key={section} className="rounded-full border border-cream-300 bg-cream-100 px-2.5 py-0.5 text-xs text-natural-600">
                         {section}
                       </span>
                     ))}
@@ -336,9 +326,9 @@ export default function EditorPage() {
               )}
 
               {/* Inline card editor below rationale */}
-              <div className="rounded-lg border border-gray-200 bg-white">
-                <div className="border-b border-gray-100 px-4 py-3">
-                  <h3 className="text-sm font-semibold text-gray-700">
+              <div className="rounded-lg border border-cream-300 bg-white">
+                <div className="border-b border-cream-200 px-4 py-3">
+                  <h3 className="text-sm font-semibold text-natural-600">
                     訪談問題 ({themeCards.length})
                   </h3>
                 </div>
@@ -352,7 +342,7 @@ export default function EditorPage() {
               </div>
             </div>
           ) : (
-            <div className="flex items-center justify-center h-full text-sm text-gray-400">
+            <div className="flex items-center justify-center h-full text-sm text-natural-300">
               請選擇訪談單元
             </div>
           )}
@@ -364,12 +354,12 @@ export default function EditorPage() {
         <div className="fixed inset-0 z-50 flex justify-end">
           <div className="absolute inset-0 bg-black/20" onClick={() => setShowSessionPanel(false)} />
           <aside className="relative w-96 bg-white shadow-xl overflow-y-auto">
-            <div className="sticky top-0 flex items-center justify-between border-b border-gray-200 bg-white px-5 py-4">
-              <h2 className="text-base font-semibold text-gray-900">訪談記錄</h2>
+            <div className="sticky top-0 flex items-center justify-between border-b border-cream-300 bg-white px-5 py-4">
+              <h2 className="text-base font-semibold text-natural-700">訪談記錄</h2>
               <button
                 type="button"
                 onClick={() => setShowSessionPanel(false)}
-                className="rounded p-1 text-gray-400 hover:text-gray-600"
+                className="rounded p-1 text-natural-300 hover:text-natural-500"
               >
                 <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -378,28 +368,28 @@ export default function EditorPage() {
             </div>
             <div className="p-4">
               {sessionsLoading ? (
-                <p className="text-sm text-gray-500 text-center py-8">載入中...</p>
+                <p className="text-sm text-natural-400 text-center py-8">載入中...</p>
               ) : sessions.length === 0 ? (
-                <p className="text-sm text-gray-500 text-center py-8">尚無訪談記錄</p>
+                <p className="text-sm text-natural-400 text-center py-8">尚無訪談記錄</p>
               ) : (
                 <div className="space-y-3">
                   {sessions.map((session) => (
-                    <div key={session.id} className="rounded-lg border border-gray-200 p-3">
+                    <div key={session.id} className="rounded-lg border border-cream-300 p-3">
                       <div className="flex items-center justify-between mb-1">
                         <span className={`rounded px-2 py-0.5 text-xs font-medium ${
                           session.status === 'ended' ? 'bg-green-50 text-green-700' :
-                          session.status === 'interviewing' ? 'bg-blue-50 text-blue-700' :
-                          'bg-gray-50 text-gray-600'
+                          session.status === 'interviewing' ? 'bg-sage-50 text-sage-500' :
+                          'bg-cream-100 text-natural-500'
                         }`}>
                           {session.status === 'ended' ? '已結束' :
                            session.status === 'interviewing' ? '進行中' :
                            session.status === 'paused' ? '已暫停' : '未開始'}
                         </span>
-                        <span className="text-xs text-gray-400">
+                        <span className="text-xs text-natural-300">
                           {session.createdAt ? new Date(session.createdAt).toLocaleDateString('zh-TW') : ''}
                         </span>
                       </div>
-                      <p className="text-xs text-gray-500 mb-2">
+                      <p className="text-xs text-natural-400 mb-2">
                         {session.startedAt ? new Date(session.startedAt).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' }) : '未開始'}
                         {session.endedAt ? ` — ${new Date(session.endedAt).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })}` : ''}
                       </p>
@@ -408,7 +398,7 @@ export default function EditorPage() {
                           <button
                             type="button"
                             onClick={() => window.location.assign(`/interview/${deckId}/report/${session.id}`)}
-                            className="rounded border border-gray-200 px-2 py-1 text-xs text-gray-600 hover:bg-gray-50"
+                            className="rounded border border-cream-300 px-2 py-1 text-xs text-natural-500 hover:bg-cream-100"
                           >
                             查看報告
                           </button>
@@ -417,7 +407,7 @@ export default function EditorPage() {
                           <button
                             type="button"
                             onClick={() => window.location.assign(`/interview/${deckId}`)}
-                            className="rounded bg-blue-600 px-2 py-1 text-xs text-white hover:bg-blue-700"
+                            className="rounded bg-sage-500 px-2 py-1 text-xs text-white hover:bg-sage-500"
                           >
                             繼續訪談
                           </button>

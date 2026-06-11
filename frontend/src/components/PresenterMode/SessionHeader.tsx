@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { PresentationSession } from '@/types/presentation'
 import Button from '@/components/common/Button'
-import Badge from '@/components/common/Badge'
 import { formatElapsedTime } from '@/utils/formatters'
 
 interface SessionHeaderProps {
@@ -9,19 +8,12 @@ interface SessionHeaderProps {
   deckId: string
   isRecording: boolean
   isPreparingToPresent?: boolean
+  currentThemeTitle?: string
+  currentThemeIndex?: number
+  totalThemes?: number
   onStart: () => void
   onPause: () => void
   onEnd: () => void
-}
-
-const statusLabels: Record<string, string> = {
-  idle: '待機',
-  preparing: '準備中',
-  ready: '就緒',
-  presenting: '演講中',
-  paused: '暫停',
-  ended: '已結束',
-  failed: '失敗',
 }
 
 function parseApiDate(value?: string | null) {
@@ -52,9 +44,11 @@ function calculateActiveElapsedSeconds(session: PresentationSession | null) {
 
 export default function SessionHeader({
   session,
-  deckId,
   isRecording,
   isPreparingToPresent = false,
+  currentThemeTitle,
+  currentThemeIndex = 0,
+  totalThemes = 0,
   onStart,
   onPause,
   onEnd,
@@ -88,7 +82,6 @@ export default function SessionHeader({
     session?.status,
   ])
 
-  // Reset timer when session changes
   useEffect(() => {
     if (!session?.startedAt) {
       setElapsedSeconds(0)
@@ -96,31 +89,23 @@ export default function SessionHeader({
   }, [session?.id, session?.startedAt])
 
   return (
-    <header className="flex h-20 shrink-0 items-center justify-between border-b border-cream-300 bg-cream-50 px-8 py-4">
-      <div className="min-w-0">
-        <div className="flex items-center gap-4 mb-1">
-          <h1 className="text-xl font-medium text-natural-700 tracking-wide leading-relaxed">InsightGuide</h1>
-          <Badge tone={session?.status === 'interviewing' ? 'green' : 'blue'}>
-            {statusLabels[session?.status ?? 'idle'] ?? session?.status}
-          </Badge>
-        </div>
-        <p className="truncate text-xs text-natural-500 leading-relaxed tracking-wide">
-          Deck {deckId} · Session {session?.id ?? '尚未建立'}
-        </p>
+    <header className="flex h-14 shrink-0 items-center justify-between border-b border-cream-300 bg-cream-50 px-4">
+      {/* Left: theme title */}
+      <div className="flex items-center gap-2 min-w-0">
+        <span className="text-sm font-medium text-natural-700 truncate">
+          {currentThemeTitle || '—'}
+        </span>
+        <span className="text-xs text-natural-300 shrink-0">
+          {currentThemeIndex + 1}/{totalThemes}
+        </span>
       </div>
 
-      <div className="flex items-center gap-6">
-        <div className="text-right">
-          <p className="text-xs text-natural-500 mb-1 tracking-wide">Timer</p>
-          <p className={`font-mono text-xl font-semibold leading-relaxed ${elapsedSeconds > 3600 ? 'text-wood-500' : 'text-natural-700'}`}>
-            {formatElapsedTime(elapsedSeconds)}
-          </p>
-          {elapsedSeconds > 3600 && (
-            <p className="text-xs text-wood-500 mt-1 leading-relaxed">Session running for {Math.floor(elapsedSeconds / 3600)}+ hours</p>
-          )}
-        </div>
+      {/* Right: timer + controls */}
+      <div className="flex items-center gap-4">
+        <span className={`font-mono text-sm tabular-nums ${elapsedSeconds > 3600 ? 'text-wood-500' : 'text-natural-300'}`}>
+          {formatElapsedTime(elapsedSeconds)}
+        </span>
 
-        {/* Control buttons */}
         {session?.status === 'idle' || session?.status === 'ready' ? (
           <Button
             variant="primary"

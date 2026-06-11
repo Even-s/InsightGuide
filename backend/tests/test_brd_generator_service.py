@@ -18,6 +18,47 @@ from app.models.user import User
 class TestBRDGeneratorService:
     """Test suite for BRD generator service."""
 
+    def _configure_generation_queries(self, mock_db, session, existing_brd=None):
+        """Route mocked SQLAlchemy queries by model for generate_brd tests."""
+        def query(model):
+            query_mock = Mock()
+            query_mock.filter.return_value = query_mock
+            query_mock.order_by.return_value = query_mock
+            query_mock.all.return_value = []
+            if model is InterviewSession:
+                query_mock.first.return_value = session
+            elif model is BRDDraft:
+                query_mock.first.return_value = existing_brd
+            else:
+                query_mock.first.return_value = None
+            return query_mock
+
+        mock_db.query.side_effect = query
+
+    def _sample_interview_data(self, session):
+        return {
+            "session_id": session.id,
+            "document_title": "Test Document",
+            "questions_with_answers": [],
+            "full_transcript": "",
+            "utterances": [],
+            "total_questions": 0,
+            "answered_questions": 0,
+        }
+
+    def _sample_brd_content(self):
+        return {
+            "title": "E-Commerce Platform Modernization",
+            "executive_summary": "Test summary",
+            "project_overview": "Test overview",
+            "business_objectives": ["Increase conversion by 20%"],
+            "success_criteria": ["Conversion increases"],
+            "stakeholders": ["Product team"],
+            "assumptions": [],
+            "constraints": [],
+            "risks": [],
+        }
+
     @pytest.fixture
     def mock_db(self):
         """Create a mock database session."""
@@ -99,8 +140,7 @@ class TestBRDGeneratorService:
     def test_generate_brd_creates_draft(self, mock_openai, mock_db, sample_interview_session, sample_question_cards):
         """Test that generate_brd creates a BRD draft."""
         # Setup mocks
-        mock_db.query().filter().first.return_value = sample_interview_session
-        mock_db.query().filter().all.return_value = sample_question_cards
+        self._configure_generation_queries(mock_db, sample_interview_session)
 
         mock_openai.generate_completion.return_value = {
             "title": "E-Commerce Platform Modernization",
@@ -124,10 +164,14 @@ class TestBRDGeneratorService:
         with patch.object(mock_db, 'add'):
             with patch.object(mock_db, 'commit'):
                 with patch.object(mock_db, 'refresh'):
-                    result = brd_generator_service.generate_brd(
-                        mock_db,
-                        sample_interview_session.id
-                    )
+                    with patch.object(brd_generator_service, '_extract_interview_data', return_value=self._sample_interview_data(sample_interview_session)):
+                        with patch.object(brd_generator_service, '_generate_brd_content', return_value=self._sample_brd_content()):
+                            with patch.object(brd_generator_service, '_extract_requirements', return_value=[]):
+                                with patch.object(brd_generator_service, '_create_requirements'):
+                                    result = brd_generator_service.generate_brd(
+                                        mock_db,
+                                        sample_interview_session.id
+                                    )
 
         # Verify
         assert result is not None
@@ -140,8 +184,7 @@ class TestBRDGeneratorService:
     @patch('app.services.brd_generator_service.openai_service')
     def test_generate_brd_handles_no_questions(self, mock_openai, mock_db, sample_interview_session):
         """Test BRD generation when session has no questions."""
-        mock_db.query().filter().first.return_value = sample_interview_session
-        mock_db.query().filter().all.return_value = []  # No questions
+        self._configure_generation_queries(mock_db, sample_interview_session)
 
         mock_openai.generate_completion.return_value = {
             "title": "BRD Without Questions",
@@ -152,10 +195,14 @@ class TestBRDGeneratorService:
         with patch.object(mock_db, 'add'):
             with patch.object(mock_db, 'commit'):
                 with patch.object(mock_db, 'refresh'):
-                    result = brd_generator_service.generate_brd(
-                        mock_db,
-                        sample_interview_session.id
-                    )
+                    with patch.object(brd_generator_service, '_extract_interview_data', return_value=self._sample_interview_data(sample_interview_session)):
+                        with patch.object(brd_generator_service, '_generate_brd_content', return_value=self._sample_brd_content()):
+                            with patch.object(brd_generator_service, '_extract_requirements', return_value=[]):
+                                with patch.object(brd_generator_service, '_create_requirements'):
+                                    result = brd_generator_service.generate_brd(
+                                        mock_db,
+                                        sample_interview_session.id
+                                    )
 
         assert result is not None
 
@@ -196,8 +243,7 @@ class TestBRDGeneratorService:
     @patch('app.services.brd_generator_service.openai_service')
     def test_generate_brd_sets_timestamps(self, mock_openai, mock_db, sample_interview_session, sample_question_cards):
         """Test that BRD generation sets proper timestamps."""
-        mock_db.query().filter().first.return_value = sample_interview_session
-        mock_db.query().filter().all.return_value = sample_question_cards
+        self._configure_generation_queries(mock_db, sample_interview_session)
 
         start_time = datetime.utcnow()
 
@@ -209,10 +255,14 @@ class TestBRDGeneratorService:
         with patch.object(mock_db, 'add'):
             with patch.object(mock_db, 'commit'):
                 with patch.object(mock_db, 'refresh'):
-                    result = brd_generator_service.generate_brd(
-                        mock_db,
-                        sample_interview_session.id
-                    )
+                    with patch.object(brd_generator_service, '_extract_interview_data', return_value=self._sample_interview_data(sample_interview_session)):
+                        with patch.object(brd_generator_service, '_generate_brd_content', return_value=self._sample_brd_content()):
+                            with patch.object(brd_generator_service, '_extract_requirements', return_value=[]):
+                                with patch.object(brd_generator_service, '_create_requirements'):
+                                    result = brd_generator_service.generate_brd(
+                                        mock_db,
+                                        sample_interview_session.id
+                                    )
 
         # Verify timing
         end_time = datetime.utcnow()
@@ -234,14 +284,15 @@ class TestBRDGeneratorService:
     @patch('app.services.brd_generator_service.openai_service')
     def test_generate_brd_error_handling(self, mock_openai, mock_db, sample_interview_session):
         """Test error handling during BRD generation."""
-        mock_db.query().filter().first.return_value = sample_interview_session
-        mock_openai.generate_completion.side_effect = Exception("API Error")
+        self._configure_generation_queries(mock_db, sample_interview_session)
 
-        with pytest.raises(Exception):
-            brd_generator_service.generate_brd(
-                mock_db,
-                sample_interview_session.id
-            )
+        with patch.object(brd_generator_service, '_extract_interview_data', return_value=self._sample_interview_data(sample_interview_session)):
+            with patch.object(brd_generator_service, '_generate_brd_content', side_effect=Exception("API Error")):
+                with pytest.raises(Exception):
+                    brd_generator_service.generate_brd(
+                        mock_db,
+                        sample_interview_session.id
+                    )
 
     def test_markdown_format_validity(self):
         """Test that generated markdown is valid."""
@@ -275,27 +326,35 @@ class TestBRDGeneratorService:
     def test_brd_regeneration(self, mock_db, sample_interview_session):
         """Test regenerating BRD for same session."""
         # Should create new BRD, not update existing
-        mock_db.query().filter().first.return_value = sample_interview_session
+        self._configure_generation_queries(mock_db, sample_interview_session)
 
         # First generation
         with patch('app.services.brd_generator_service.openai_service'):
             with patch.object(mock_db, 'add'):
                 with patch.object(mock_db, 'commit'):
                     with patch.object(mock_db, 'refresh'):
-                        brd1 = brd_generator_service.generate_brd(
-                            mock_db,
-                            sample_interview_session.id
-                        )
+                        with patch.object(brd_generator_service, '_extract_interview_data', return_value=self._sample_interview_data(sample_interview_session)):
+                            with patch.object(brd_generator_service, '_generate_brd_content', return_value=self._sample_brd_content()):
+                                with patch.object(brd_generator_service, '_extract_requirements', return_value=[]):
+                                    with patch.object(brd_generator_service, '_create_requirements'):
+                                        brd1 = brd_generator_service.generate_brd(
+                                            mock_db,
+                                            sample_interview_session.id
+                                        )
 
         # Second generation
         with patch('app.services.brd_generator_service.openai_service'):
             with patch.object(mock_db, 'add'):
                 with patch.object(mock_db, 'commit'):
                     with patch.object(mock_db, 'refresh'):
-                        brd2 = brd_generator_service.generate_brd(
-                            mock_db,
-                            sample_interview_session.id
-                        )
+                        with patch.object(brd_generator_service, '_extract_interview_data', return_value=self._sample_interview_data(sample_interview_session)):
+                            with patch.object(brd_generator_service, '_generate_brd_content', return_value=self._sample_brd_content()):
+                                with patch.object(brd_generator_service, '_extract_requirements', return_value=[]):
+                                    with patch.object(brd_generator_service, '_create_requirements'):
+                                        brd2 = brd_generator_service.generate_brd(
+                                            mock_db,
+                                            sample_interview_session.id
+                                        )
 
         # Should be different BRDs
         assert brd1 is not None

@@ -1,7 +1,21 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
-import type { CardState } from '@/types/presentation'
+import type { QuestionCard } from '@/types/questionCard'
+
+interface CardState {
+  id: string
+  sessionId: string
+  topicCardId: string
+  status: QuestionCard['status']
+  confidence?: number | null
+  coveredAt?: string | null
+  evidenceTranscript?: string | null
+  evidence?: Record<string, unknown> | null
+  createdAt: string
+  updatedAt: string
+  questionCard: QuestionCard
+}
 import Button from '@/components/common/Button'
 import LoadingSpinner from '@/components/common/LoadingSpinner'
 import { apiClient } from '@/api/client'
@@ -320,12 +334,12 @@ export default function SessionReportEnhanced({
 
             {insights.recommendations.length > 0 && (
               <div>
-                <h3 className="mb-2 text-sm font-medium text-blue-600">後續練習建議</h3>
+                <h3 className="mb-2 text-sm font-medium text-sage-500">後續練習建議</h3>
                 <ul className="space-y-2">
                   {insights.recommendations.map((rec, idx) => (
-                    <li key={idx} className="rounded-lg bg-blue-50 p-3 text-sm">
-                      <span className="font-medium text-blue-700">{translatePriority(rec.priority)}：</span>{' '}
-                      <span className="text-blue-600">{translateInsightText(rec.recommendation)}</span>
+                    <li key={idx} className="rounded-lg bg-sage-50 p-3 text-sm">
+                      <span className="font-medium text-sage-500">{translatePriority(rec.priority)}：</span>{' '}
+                      <span className="text-sage-500">{translateInsightText(rec.recommendation)}</span>
                     </li>
                   ))}
                 </ul>

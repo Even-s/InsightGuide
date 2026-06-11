@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { presentationAPI } from '@/api/presentation'
+import apiClient from '@/api/client'
 import Button from '@/components/common/Button'
-import MarkdownOutput from '@/components/PresenterMode/MarkdownOutput'
+import MarkdownOutput from '@/components/common/MarkdownOutput'
 
 export default function InterviewReportPage() {
   const { deckId, sessionId } = useParams<{ deckId: string; sessionId: string }>()
@@ -17,7 +17,7 @@ export default function InterviewReportPage() {
   useEffect(() => {
     if (!sessionId) return
     setIsLoading(true)
-    presentationAPI.generateOutputs(sessionId)
+    apiClient.post(`/api/interview-sessions/${sessionId}/outputs/generate`).then(r => r.data)
       .then(setOutputs)
       .catch((err) => setError(err instanceof Error ? err.message : 'Failed to generate report'))
       .finally(() => setIsLoading(false))
@@ -35,10 +35,10 @@ export default function InterviewReportPage() {
 
   if (isLoading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-gray-50">
+      <div className="flex h-screen items-center justify-center bg-cream-100">
         <div className="text-center">
-          <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-gray-200 border-t-blue-600" />
-          <p className="text-base font-medium text-gray-700">正在產生 BRD 與逐字稿...</p>
+          <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-cream-300 border-t-sage-400" />
+          <p className="text-base font-medium text-natural-600">正在產生 BRD 與逐字稿...</p>
         </div>
       </div>
     )
@@ -46,7 +46,7 @@ export default function InterviewReportPage() {
 
   if (error) {
     return (
-      <div className="flex h-screen items-center justify-center bg-gray-50">
+      <div className="flex h-screen items-center justify-center bg-cream-100">
         <div className="text-center">
           <p className="text-red-600 mb-3">{error}</p>
           <Button onClick={() => window.location.reload()}>重試</Button>
@@ -58,16 +58,16 @@ export default function InterviewReportPage() {
   const markdownContent = activeTab === 'brd' ? outputs?.brd?.markdown : outputs?.transcript?.markdown
 
   return (
-    <div className="flex h-screen flex-col bg-gray-50">
+    <div className="flex h-screen flex-col bg-cream-100">
       {/* Header */}
-      <div className="flex shrink-0 items-center justify-between border-b border-gray-200 bg-white px-5 py-3">
+      <div className="flex shrink-0 items-center justify-between border-b border-cream-300 bg-white px-5 py-3">
         <div className="flex items-center gap-4">
-          <h2 className="text-base font-semibold text-gray-900">訪談報告</h2>
-          <div className="flex rounded-lg border border-gray-200 bg-gray-50 p-0.5">
+          <h2 className="text-base font-semibold text-natural-700">訪談報告</h2>
+          <div className="flex rounded-lg border border-cream-300 bg-cream-100 p-0.5">
             <button
               type="button"
               onClick={() => setActiveTab('brd')}
-              className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${activeTab === 'brd' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+              className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${activeTab === 'brd' ? 'bg-white text-natural-700 shadow-sm' : 'text-natural-400 hover:text-natural-600'}`}
             >
               BRD 草稿
               {outputs?.brd?.openIssuesCount ? (
@@ -79,11 +79,11 @@ export default function InterviewReportPage() {
             <button
               type="button"
               onClick={() => setActiveTab('transcript')}
-              className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${activeTab === 'transcript' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+              className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${activeTab === 'transcript' ? 'bg-white text-natural-700 shadow-sm' : 'text-natural-400 hover:text-natural-600'}`}
             >
               逐字稿
               {outputs?.transcript?.utteranceCount ? (
-                <span className="ml-1.5 text-xs text-gray-400">{outputs.transcript.utteranceCount} 句</span>
+                <span className="ml-1.5 text-xs text-natural-300">{outputs.transcript.utteranceCount} 句</span>
               ) : null}
             </button>
           </div>
@@ -93,7 +93,7 @@ export default function InterviewReportPage() {
             <button
               type="button"
               onClick={() => downloadMarkdown(outputs.brd!.markdown, 'BRD_草稿.md')}
-              className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+              className="rounded-lg border border-cream-400 bg-white px-3 py-1.5 text-xs font-medium text-natural-600 hover:bg-cream-100"
             >
               下載 BRD
             </button>
@@ -102,7 +102,7 @@ export default function InterviewReportPage() {
             <button
               type="button"
               onClick={() => downloadMarkdown(outputs.transcript!.markdown, '訪談逐字稿.md')}
-              className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+              className="rounded-lg border border-cream-400 bg-white px-3 py-1.5 text-xs font-medium text-natural-600 hover:bg-cream-100"
             >
               下載逐字稿
             </button>

@@ -156,6 +156,8 @@ def export_brd(
             exported_at=datetime.utcnow()
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Failed to export BRD: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
