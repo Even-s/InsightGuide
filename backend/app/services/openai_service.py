@@ -502,31 +502,12 @@ class OpenAIService:
         Uses GPT-5.4-mini for accurate semantic classification.
         """
         try:
-            from app.db.session import SessionLocal
-            from app.services.prompt_registry_service import prompt_registry_service
-
-            # Default fallback prompt
             system_prompt = (
                 "判斷以下語句是「訪問者提問」還是「受訪者回答」。\n"
                 "訪問者特徵：提出問題、請求描述/確認、使用疑問句、引導話題。\n"
                 "受訪者特徵：描述現況、提供資訊、說明流程、回答問題、陳述事實。\n"
                 "只回傳一個字：interviewer 或 interviewee"
             )
-
-            # Try to load from registry
-            db = SessionLocal()
-            try:
-                rendered = prompt_registry_service.render_prompt(
-                    db,
-                    "classify_speaker",
-                    {"transcript": transcript[:200]}
-                )
-                if rendered and "system_prompt" in rendered:
-                    system_prompt = rendered["system_prompt"]
-            except Exception as e:
-                logger.debug(f"Failed to load classify_speaker prompt from registry: {e}")
-            finally:
-                db.close()
 
             response = self.client.chat.completions.create(
                 model="gpt-5.4-mini",
@@ -610,28 +591,6 @@ class OpenAIService:
 """
 
         system_prompt = system_prompt_fallback
-
-        # Try to load from registry
-        from app.db.session import SessionLocal
-        from app.services.prompt_registry_service import prompt_registry_service
-
-        db = SessionLocal()
-        try:
-            rendered = prompt_registry_service.render_prompt(
-                db,
-                "generate_interview_themes",
-                {
-                    "document_title": document_title,
-                    "section_list": section_list,
-                    "full_text": full_text[:12000]
-                }
-            )
-            if rendered and "system_prompt" in rendered:
-                system_prompt = rendered["system_prompt"]
-        except Exception as e:
-            logger.debug(f"Failed to load generate_interview_themes prompt from registry: {e}")
-        finally:
-            db.close()
 
         user_prompt = f"""文件標題：{document_title}
 
@@ -777,31 +736,6 @@ class OpenAIService:
 """
 
         system_prompt = system_prompt_fallback
-
-        # Try to load from registry
-        from app.db.session import SessionLocal
-        from app.services.prompt_registry_service import prompt_registry_service
-
-        db = SessionLocal()
-        try:
-            rendered = prompt_registry_service.render_prompt(
-                db,
-                "generate_theme_question_cards",
-                {
-                    "document_title": document_title,
-                    "document_summary": document_summary,
-                    "theme_title": theme_title,
-                    "theme_rationale": theme_rationale,
-                    "theme_brd_mapping": ', '.join(theme_brd_mapping),
-                    "source_sections_text": source_sections_text[:8000]
-                }
-            )
-            if rendered and "system_prompt" in rendered:
-                system_prompt = rendered["system_prompt"]
-        except Exception as e:
-            logger.debug(f"Failed to load generate_theme_question_cards prompt from registry: {e}")
-        finally:
-            db.close()
 
         user_prompt = f"""文件標題：{document_title}
 文件摘要：{document_summary}

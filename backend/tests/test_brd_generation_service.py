@@ -38,7 +38,7 @@ def test_transcript_export_uses_plain_speaker_labels_without_emoji():
 
     markdown = brd_generation_service._build_transcript(utterances, themes)
 
-    assert "**訪談者**" in markdown
-    assert "**受訪者**" in markdown
+    assert "**Speaker (interviewer)**" in markdown
+    assert "**Speaker (interviewee)**" in markdown
     assert "🎤" not in markdown
     assert "💬" not in markdown

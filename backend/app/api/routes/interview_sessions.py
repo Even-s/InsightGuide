@@ -149,11 +149,39 @@ async def create_interview_session(
 
 
 @router.get("/{session_id}", response_model=InterviewSessionSchema)
-async def get_interview_session(session_id: str, db: Session = Depends(get_db)):
-    """Get interview session by ID."""
+async def get_interview_session(
+    session_id: str,
+    db: Session = Depends(get_db),
+):
+    """Get interview session by ID. Pre-warms rubrics before returning."""
     logger.info(f"Retrieving interview session {session_id}")
     session = interview_service.get_session(db, session_id)
+
+    # Pre-warm rubrics synchronously — frontend waits until all rubrics are ready
+    if session and session.status in ("idle", "ready", "preparing"):
+        await run_in_threadpool(_pre_warm_rubrics_sync, session.document_id)
+
     return convert_session_to_schema(session, db)
+
+
+def _pre_warm_rubrics_sync(document_id: str):
+    """Compile rubrics for all cards in a document (blocking)."""
+    from app.db.session import SessionLocal
+    from app.models.question_card import QuestionCard
+    from app.services.question_rubric_service import question_rubric_service
+
+    db = SessionLocal()
+    try:
+        cards = db.query(QuestionCard).filter(
+            QuestionCard.document_id == document_id,
+        ).all()
+        if cards:
+            question_rubric_service.pre_warm_rubrics(db, cards)
+            logger.info(f"Pre-warmed rubrics for {len(cards)} cards (doc={document_id})")
+    except Exception as e:
+        logger.warning(f"Rubric pre-warm failed: {e}")
+    finally:
+        db.close()
 
 
 @router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT)

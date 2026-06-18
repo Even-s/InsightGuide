@@ -1,7 +1,7 @@
 """add transcript split tables
 
 Revision ID: 006_add_transcript_split_tables
-Revises: 005_add_prompt_approval_requests
+Revises: 001_add_brd_tables
 Create Date: 2026-06-15
 
 Phase 1: Data Flow Separation
@@ -17,7 +17,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = '006_add_transcript_split_tables'
-down_revision = '005_add_prompt_approvals'
+down_revision = '001_add_brd_tables'
 branch_labels = None
 depends_on = None
 

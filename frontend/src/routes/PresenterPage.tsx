@@ -34,6 +34,8 @@ export default function PresenterPage() {
         // Auto-detect project/stakeholder from document if not provided via URL
         let resolvedProjectId = projectId
         let resolvedStakeholderId = stakeholderId
+
+        // Resolve project from document if not provided
         if (!resolvedProjectId) {
           try {
             const docRes = await apiClient.get(`/api/documents/${deckId!}`)
@@ -41,21 +43,25 @@ export default function PresenterPage() {
             if (doc.projectId || doc.project_id) {
               resolvedProjectId = doc.projectId || doc.project_id
               setProjectId(resolvedProjectId)
-
-              // Try to find the stakeholder linked to this document
-              const stakeholders = await apiClient.get(`/api/projects/${resolvedProjectId}/stakeholders`)
-              for (const s of stakeholders.data) {
-                try {
-                  const guide = await apiClient.get(`/api/projects/${resolvedProjectId}/stakeholders/${s.id}/interview-guide`)
-                  if (guide.data.document_id === deckId) {
-                    resolvedStakeholderId = s.id
-                    setStakeholderId(resolvedStakeholderId)
-                    break
-                  }
-                } catch { /* no guide for this stakeholder */ }
-              }
             }
-          } catch { /* document lookup failed, proceed without context */ }
+          } catch { /* document lookup failed */ }
+        }
+
+        // Resolve stakeholder from interview guide if not provided
+        if (resolvedProjectId && !resolvedStakeholderId) {
+          try {
+            const stakeholders = await apiClient.get(`/api/projects/${resolvedProjectId}/stakeholders`)
+            for (const s of stakeholders.data) {
+              try {
+                const guide = await apiClient.get(`/api/projects/${resolvedProjectId}/stakeholders/${s.id}/interview-guide`)
+                if (guide.data.document_id === deckId) {
+                  resolvedStakeholderId = s.id
+                  setStakeholderId(resolvedStakeholderId)
+                  break
+                }
+              } catch { /* no guide for this stakeholder */ }
+            }
+          } catch { /* stakeholder lookup failed */ }
         }
 
         // Find or create a prep session for this deck

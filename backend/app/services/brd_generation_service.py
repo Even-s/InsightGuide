@@ -411,12 +411,9 @@ class BRDGenerationService:
         """Use GPT 5.4 mini to rewrite raw evidence into formal BRD paragraphs."""
         import json
         from app.services.openai_service import openai_service
-        from app.db.session import SessionLocal
-        from app.services.prompt_registry_service import prompt_registry_service
 
         title = document.title if document else "需求文件"
 
-        # Try to load prompt from registry with fallback
         system_prompt = (
             "你是專業的商業分析師，負責將訪談逐字稿改寫成正式的 BRD（Business Requirements Document）段落。\n\n"
             "規則：\n"
@@ -439,44 +436,18 @@ class BRDGenerationService:
                     continue
 
                 try:
-                    # Try DB first, fallback to hardcoded
-                    db = SessionLocal()
-                    try:
-                        rendered = prompt_registry_service.render_prompt(
-                            db,
-                            "rewrite_brd_section",
-                            {
-                                "document_title": title,
-                                "chapter": section['chapter'],
-                                "focus_text": item['focusText'],
-                                "evidence": evidence[:3000],
-                            }
-                        )
-                        if rendered and "system_prompt" in rendered:
-                            system_prompt_to_use = rendered["system_prompt"]
-                            user_prompt = rendered.get("user_prompt", (
-                                f"文件：{title}\n"
-                                f"BRD 章節：{section['chapter']}\n"
-                                f"提問重點：{item['focusText']}\n\n"
-                                f"訪談原始回答：\n{evidence[:3000]}\n\n"
-                                f"請改寫成正式 BRD 段落。"
-                            ))
-                        else:
-                            system_prompt_to_use = system_prompt
-                            user_prompt = (
-                                f"文件：{title}\n"
-                                f"BRD 章節：{section['chapter']}\n"
-                                f"提問重點：{item['focusText']}\n\n"
-                                f"訪談原始回答：\n{evidence[:3000]}\n\n"
-                                f"請改寫成正式 BRD 段落。"
-                            )
-                    finally:
-                        db.close()
+                    user_prompt = (
+                        f"文件：{title}\n"
+                        f"BRD 章節：{section['chapter']}\n"
+                        f"提問重點：{item['focusText']}\n\n"
+                        f"訪談原始回答：\n{evidence[:3000]}\n\n"
+                        f"請改寫成正式 BRD 段落。"
+                    )
 
                     response = openai_service.client.chat.completions.create(
                         model="gpt-5.4-mini",
                         messages=[
-                            {"role": "system", "content": system_prompt_to_use},
+                            {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_prompt},
                         ],
                         temperature=0.3,

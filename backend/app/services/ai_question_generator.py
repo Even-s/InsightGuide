@@ -30,34 +30,12 @@ class AIQuestionGenerator:
             Regenerated followup question
         """
         try:
-            from app.db.session import SessionLocal
-            from app.services.prompt_registry_service import prompt_registry_service
-
-            # Try DB first, fallback to hardcoded
-            db = SessionLocal()
-            try:
-                elements_text = "\n".join(f"- {elem}" for elem in expected_answer_elements)
-                rendered = prompt_registry_service.render_prompt(
-                    db,
-                    "regenerate_followup",
-                    {
-                        "question_text": question_text,
-                        "elements_text": elements_text,
-                        "section_context": section_context or "需求訪談",
-                        "current_followup": current_followup,
-                    }
-                )
-                if rendered and "user_prompt" in rendered:
-                    prompt = rendered["user_prompt"]
-                else:
-                    prompt = self._build_followup_regeneration_prompt(
-                        question_text=question_text,
-                        expected_answer_elements=expected_answer_elements,
-                        section_context=section_context,
-                        current_followup=current_followup,
-                    )
-            finally:
-                db.close()
+            prompt = self._build_followup_regeneration_prompt(
+                question_text=question_text,
+                expected_answer_elements=expected_answer_elements,
+                section_context=section_context,
+                current_followup=current_followup,
+            )
 
             response = openai_service.generate_card_metadata(prompt)
             suggested_followup = str(response.get("suggestedFollowup", "")).strip()

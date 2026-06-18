@@ -1,5 +1,6 @@
 /**
- * Session Management Page
+ * Admin Backend Page - System Management
+ * For debugging and technical management of all sessions
  * Hierarchy: Project → Stakeholder (as deck) → Interview Sessions
  */
 
@@ -24,6 +25,9 @@ interface SessionInfo {
   endedAt?: string
   createdAt: string
   costUsd: number
+  documentId?: string
+  projectId?: string
+  stakeholderProfileId?: string
 }
 
 interface StakeholderWithGuide {
@@ -62,6 +66,14 @@ function TrashIcon({ className }: { className?: string }) {
   )
 }
 
+function RefreshIcon({ className }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+    </svg>
+  )
+}
+
 export default function PrepSessionListPage() {
   const navigate = useNavigate()
   const [projectsData, setProjectsData] = useState<ProjectData[]>([])
@@ -69,6 +81,7 @@ export default function PrepSessionListPage() {
   const [loading, setLoading] = useState(true)
   const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set())
   const [expandedStakeholders, setExpandedStakeholders] = useState<Set<string>>(new Set())
+  const [lastRefreshTime, setLastRefreshTime] = useState<Date>(new Date())
 
   const loadData = useCallback(async () => {
     try {
@@ -92,9 +105,9 @@ export default function PrepSessionListPage() {
                   const res = await apiClient.get('/api/interview-sessions/', {
                     params: { projectId: project.id, limit: 50 }
                   })
-                  // Filter sessions for this stakeholder
+                  // Filter sessions for this stakeholder (include unlinked ones under same project)
                   sessions = (res.data.sessions || [])
-                    .filter((s: any) => s.stakeholderProfileId === profile.id)
+                    .filter((s: any) => s.stakeholderProfileId === profile.id || !s.stakeholderProfileId)
                     .map((s: any) => ({
                       id: s.id,
                       status: s.status,
@@ -102,6 +115,9 @@ export default function PrepSessionListPage() {
                       endedAt: s.endedAt,
                       createdAt: s.createdAt,
                       costUsd: s.costUsd || 0,
+                      documentId: s.documentId,
+                      projectId: s.projectId,
+                      stakeholderProfileId: s.stakeholderProfileId,
                     }))
                 } catch { /* no sessions */ }
 
@@ -131,9 +147,14 @@ export default function PrepSessionListPage() {
             endedAt: s.endedAt,
             createdAt: s.createdAt,
             costUsd: s.costUsd || 0,
+            documentId: s.documentId,
+            projectId: s.projectId,
+            stakeholderProfileId: s.stakeholderProfileId,
           }))
         setUnlinkedSessions(unlinked)
       } catch { /* ignore */ }
+
+      setLastRefreshTime(new Date())
     } catch (err) {
       console.error('Failed to load data:', err)
     } finally {
@@ -166,6 +187,18 @@ export default function PrepSessionListPage() {
       loadData()
     } catch (err) {
       console.error('Failed to delete:', err)
+      alert('刪除失敗：' + (err as any).message)
+    }
+  }
+
+  const handleForceEndSession = async (sessionId: string) => {
+    if (!confirm('強制結束此 session？狀態將變為 ended。')) return
+    try {
+      await apiClient.patch(`/api/interview-sessions/${sessionId}`, { status: 'ended' })
+      loadData()
+    } catch (err) {
+      console.error('Failed to force end session:', err)
+      alert('操作失敗：' + (err as any).message)
     }
   }
 
@@ -176,6 +209,7 @@ export default function PrepSessionListPage() {
       loadData()
     } catch (err) {
       console.error('Failed to delete project:', err)
+      alert('刪除專案失敗：' + (err as any).message)
     }
   }
 
@@ -201,8 +235,10 @@ export default function PrepSessionListPage() {
   // Stats
   const totalProjects = projectsData.length
   const totalStakeholders = projectsData.reduce((s, p) => s + p.stakeholders.length, 0)
-  const totalSessions = projectsData.reduce((s, p) => s + p.stakeholders.reduce((ss, st) => ss + st.sessions.length, 0), 0)
-  const completedSessions = projectsData.reduce((s, p) => s + p.stakeholders.reduce((ss, st) => ss + st.sessions.filter(se => se.status === 'ended').length, 0), 0)
+  const totalSessions = projectsData.reduce((s, p) => s + p.stakeholders.reduce((ss, st) => ss + st.sessions.length, 0), 0) + unlinkedSessions.length
+  const completedSessions = projectsData.reduce((s, p) => s + p.stakeholders.reduce((ss, st) => ss + st.sessions.filter(se => se.status === 'ended').length, 0), 0) + unlinkedSessions.filter(s => s.status === 'ended').length
+  const activeSessions = projectsData.reduce((s, p) => s + p.stakeholders.reduce((ss, st) => ss + st.sessions.filter(se => se.status === 'interviewing' || se.status === 'paused').length, 0), 0) + unlinkedSessions.filter(s => s.status === 'interviewing' || s.status === 'paused').length
+  const errorSessions = projectsData.reduce((s, p) => s + p.stakeholders.reduce((ss, st) => ss + st.sessions.filter(se => se.status === 'failed').length, 0), 0) + unlinkedSessions.filter(s => s.status === 'failed').length
 
   if (loading) {
     return (
@@ -218,19 +254,41 @@ export default function PrepSessionListPage() {
         {/* Header */}
         <div className="flex justify-between items-center mb-8">
           <div>
-            <h1 className="text-2xl font-bold text-natural-800">訪談管理</h1>
-            <p className="text-natural-500 mt-1">專案 → 受訪者 → 訪談 Sessions</p>
+            <h1 className="text-2xl font-bold text-natural-800">系統管理後台</h1>
+            <p className="text-natural-500 mt-1">管理者視角：所有專案、受訪者、訪談 Sessions 技術狀態</p>
           </div>
-          <button
-            onClick={() => navigate('/')}
-            className="px-4 py-2 bg-sage-400 text-white rounded-lg hover:bg-sage-500 text-sm"
-          >
-            回首頁
-          </button>
+          <div className="flex items-center gap-3">
+            <div className="text-right">
+              <div className="text-xs text-natural-400">最後更新</div>
+              <div className="text-xs text-natural-600 font-mono">
+                {lastRefreshTime.toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              </div>
+            </div>
+            <button
+              onClick={loadData}
+              className="px-3 py-2 bg-natural-200 text-natural-700 rounded-lg hover:bg-natural-300 text-sm flex items-center gap-1"
+              disabled={loading}
+            >
+              <RefreshIcon className="w-4 h-4" />
+              刷新
+            </button>
+            <button
+              onClick={() => navigate('/projects')}
+              className="px-4 py-2 bg-sage-400 text-white rounded-lg hover:bg-sage-500 text-sm"
+            >
+              用戶視圖
+            </button>
+            <button
+              onClick={() => navigate('/')}
+              className="px-4 py-2 bg-natural-600 text-white rounded-lg hover:bg-natural-700 text-sm"
+            >
+              回首頁
+            </button>
+          </div>
         </div>
 
         {/* Stats */}
-        <div className="grid grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-6 gap-4 mb-6">
           <div className="bg-white rounded-xl border border-cream-200 p-4">
             <div className="text-2xl font-bold text-natural-700">{totalProjects}</div>
             <div className="text-xs text-natural-500">專案</div>
@@ -241,11 +299,19 @@ export default function PrepSessionListPage() {
           </div>
           <div className="bg-white rounded-xl border border-cream-200 p-4">
             <div className="text-2xl font-bold text-emerald-600">{totalSessions}</div>
-            <div className="text-xs text-natural-500">訪談 Sessions</div>
+            <div className="text-xs text-natural-500">全部 Sessions</div>
           </div>
           <div className="bg-white rounded-xl border border-cream-200 p-4">
-            <div className="text-2xl font-bold text-amber-600">{completedSessions}</div>
+            <div className="text-2xl font-bold text-blue-600">{completedSessions}</div>
             <div className="text-xs text-natural-500">已完成</div>
+          </div>
+          <div className="bg-white rounded-xl border border-cream-200 p-4">
+            <div className="text-2xl font-bold text-amber-600">{activeSessions}</div>
+            <div className="text-xs text-natural-500">進行中</div>
+          </div>
+          <div className="bg-white rounded-xl border border-cream-200 p-4">
+            <div className="text-2xl font-bold text-red-600">{errorSessions}</div>
+            <div className="text-xs text-natural-500">錯誤</div>
           </div>
         </div>
 
@@ -390,8 +456,9 @@ export default function PrepSessionListPage() {
                                   <table className="w-full text-xs">
                                     <thead>
                                       <tr className="text-natural-400 border-b border-cream-200">
-                                        <th className="text-left py-1.5 pr-3">Session</th>
+                                        <th className="text-left py-1.5 pr-3">Session ID (完整)</th>
                                         <th className="text-left py-1.5 pr-3">狀態</th>
+                                        <th className="text-left py-1.5 pr-3">Document ID</th>
                                         <th className="text-left py-1.5 pr-3">開始</th>
                                         <th className="text-left py-1.5 pr-3">時長</th>
                                         <th className="text-left py-1.5 pr-3">花費</th>
@@ -401,19 +468,31 @@ export default function PrepSessionListPage() {
                                     <tbody>
                                       {sessions.map(session => (
                                         <tr key={session.id} className="border-b border-cream-100">
-                                          <td className="py-1.5 pr-3 font-mono text-natural-500">
-                                            {session.id.replace('session_', '').slice(0, 8)}
+                                          <td className="py-1.5 pr-3 font-mono text-natural-500 text-[10px]">
+                                            {session.id}
                                           </td>
                                           <td className="py-1.5 pr-3">
                                             <span className={`px-1.5 py-0.5 rounded text-xs ${sessionStatusColor[session.status] || 'bg-cream-100 text-natural-600'}`}>
-                                              {session.status === 'ended' ? '完成' : session.status === 'interviewing' ? '進行中' : session.status}
+                                              {session.status}
                                             </span>
+                                          </td>
+                                          <td className="py-1.5 pr-3 font-mono text-natural-400 text-[10px]">
+                                            {session.documentId ? session.documentId.slice(0, 12) + '...' : '-'}
                                           </td>
                                           <td className="py-1.5 pr-3 text-natural-500">{formatDate(session.startedAt)}</td>
                                           <td className="py-1.5 pr-3 text-natural-500">{formatDuration(session.startedAt, session.endedAt)}</td>
                                           <td className="py-1.5 pr-3 text-natural-500">${session.costUsd.toFixed(4)}</td>
                                           <td className="py-1.5 text-right">
                                             <div className="flex items-center justify-end gap-1">
+                                              {(session.status === 'interviewing' || session.status === 'paused') && (
+                                                <button
+                                                  onClick={() => handleForceEndSession(session.id)}
+                                                  className="px-1.5 py-0.5 text-amber-600 hover:bg-amber-50 rounded text-[10px]"
+                                                  title="強制結束"
+                                                >
+                                                  強制結束
+                                                </button>
+                                              )}
                                               {session.status === 'ended' && (
                                                 <button
                                                   onClick={() => navigate(`/sessions/${session.id}/insight-memo`)}
@@ -459,32 +538,47 @@ export default function PrepSessionListPage() {
           <div className="mt-6 bg-white rounded-xl border border-dashed border-cream-300 overflow-hidden">
             <div className="px-5 py-4">
               <h3 className="text-base font-semibold text-natural-500">未歸屬專案的訪談</h3>
-              <p className="text-xs text-natural-400 mt-0.5">這些訪談未關聯到任何專案</p>
+              <p className="text-xs text-natural-400 mt-0.5">這些訪談未關聯到任何專案（技術除錯用）</p>
             </div>
             <div className="border-t border-cream-200 px-5 pb-4">
               <table className="w-full text-xs mt-2">
                 <thead>
                   <tr className="text-natural-400 border-b border-cream-200">
-                    <th className="text-left py-1.5 pr-3">Session</th>
+                    <th className="text-left py-1.5 pr-3">Session ID (完整)</th>
                     <th className="text-left py-1.5 pr-3">狀態</th>
+                    <th className="text-left py-1.5 pr-3">Document ID</th>
                     <th className="text-left py-1.5 pr-3">時間</th>
+                    <th className="text-left py-1.5 pr-3">花費</th>
                     <th className="text-right py-1.5">操作</th>
                   </tr>
                 </thead>
                 <tbody>
                   {unlinkedSessions.map(session => (
                     <tr key={session.id} className="border-b border-cream-100">
-                      <td className="py-1.5 pr-3 font-mono text-natural-500">
-                        {session.id.replace('session_', '').slice(0, 8)}
+                      <td className="py-1.5 pr-3 font-mono text-natural-500 text-[10px]">
+                        {session.id}
                       </td>
                       <td className="py-1.5 pr-3">
                         <span className={`px-1.5 py-0.5 rounded text-xs ${sessionStatusColor[session.status] || 'bg-cream-100 text-natural-600'}`}>
-                          {session.status === 'ended' ? '完成' : session.status}
+                          {session.status}
                         </span>
                       </td>
+                      <td className="py-1.5 pr-3 font-mono text-natural-400 text-[10px]">
+                        {session.documentId ? session.documentId.slice(0, 12) + '...' : '-'}
+                      </td>
                       <td className="py-1.5 pr-3 text-natural-500">{formatDate(session.createdAt)}</td>
+                      <td className="py-1.5 pr-3 text-natural-500">${session.costUsd.toFixed(4)}</td>
                       <td className="py-1.5 text-right">
                         <div className="flex items-center justify-end gap-1">
+                          {(session.status === 'interviewing' || session.status === 'paused') && (
+                            <button
+                              onClick={() => handleForceEndSession(session.id)}
+                              className="px-1.5 py-0.5 text-amber-600 hover:bg-amber-50 rounded text-[10px]"
+                              title="強制結束"
+                            >
+                              強制結束
+                            </button>
+                          )}
                           {session.status === 'ended' && (
                             <button
                               onClick={() => navigate(`/sessions/${session.id}/insight-memo`)}
@@ -493,6 +587,12 @@ export default function PrepSessionListPage() {
                               洞察
                             </button>
                           )}
+                          <button
+                            onClick={() => navigate(`/sessions/${session.id}/log`)}
+                            className="px-1.5 py-0.5 text-natural-400 hover:bg-cream-100 rounded"
+                          >
+                            Log
+                          </button>
                           <button
                             onClick={() => handleDeleteSession(session.id)}
                             className="text-red-300 hover:text-red-500"

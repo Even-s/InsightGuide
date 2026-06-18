@@ -24,7 +24,6 @@ from app.models.interview_insight_memo import InterviewInsightMemo
 from app.models.requirement_evidence_matrix import RequirementEvidenceMatrix, EvidenceMatrixEntry
 from app.models.brd_readiness_report import BRDReadinessReport
 from app.models.brd import BRDDraft, Requirement, BRDStatus, RequirementType, RequirementPriority
-from app.models.prompt_template import PromptTemplate, PromptVersion, PromptABTest, PromptABResult, PromptApprovalRequest, PromptAuditLog, PromptUsageLog
 
 __all__ = [
     "User",
@@ -57,11 +56,4 @@ __all__ = [
     "BRDStatus",
     "RequirementType",
     "RequirementPriority",
-    "PromptTemplate",
-    "PromptVersion",
-    "PromptABTest",
-    "PromptABResult",
-    "PromptApprovalRequest",
-    "PromptAuditLog",
-    "PromptUsageLog",
 ]

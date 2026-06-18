@@ -6,73 +6,111 @@ import { listProjects, getStakeholderPlan, type Project, type StakeholderPlan } 
 interface SessionInfo {
   id: string
   status: string
-  stakeholderName?: string
-  stakeholderRole?: string
-  startedAt?: string
   endedAt?: string
-  createdAt: string
-  hasMemo: boolean
 }
 
-interface ProjectWithSessions {
+interface ProjectCardData {
   project: Project
   plan: StakeholderPlan | null
-  sessions: SessionInfo[]
-  loading: boolean
+  completedInterviews: number
+  totalStakeholders: number
+  progressPercentage: number
+  lastInterviewDate?: string
+  hasInterviews: boolean
+  userFriendlyStatus: string
 }
 
 export default function ProjectSessionsPage() {
   const navigate = useNavigate()
-  const [data, setData] = useState<ProjectWithSessions[]>([])
+  const [projectCards, setProjectCards] = useState<ProjectCardData[]>([])
   const [loading, setLoading] = useState(true)
-  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set())
+
+  const getUserFriendlyStatus = (status: string): string => {
+    const statusMap: Record<string, string> = {
+      active: '進行中',
+      planning: '規劃中',
+      interviewing: '訪談中',
+      ready_for_brd: '已完成',
+      completed: '已完成',
+    }
+    return statusMap[status] || '規劃中'
+  }
+
+  const getStatusBadgeClass = (status: string): string => {
+    const classMap: Record<string, string> = {
+      active: 'bg-emerald-100 text-emerald-700',
+      planning: 'bg-cream-200 text-natural-700',
+      interviewing: 'bg-blue-100 text-blue-700',
+      ready_for_brd: 'bg-purple-100 text-purple-700',
+      completed: 'bg-purple-100 text-purple-700',
+    }
+    return classMap[status] || 'bg-cream-200 text-natural-700'
+  }
 
   const loadData = useCallback(async () => {
     try {
       setLoading(true)
       const { projects } = await listProjects()
 
-      const items: ProjectWithSessions[] = projects.map(p => ({
-        project: p,
-        plan: null,
-        sessions: [],
-        loading: false,
-      }))
-
-      setData(items)
-
-      // Load details for each project in parallel
-      const updated = await Promise.all(
-        items.map(async (item) => {
+      // Load details for each project
+      const cards = await Promise.all(
+        projects.map(async (project) => {
           try {
-            const [planRes, sessionsRes] = await Promise.all([
-              getStakeholderPlan(item.project.id),
-              apiClient.get('/api/interview-sessions/', {
-                params: { limit: 100, projectId: item.project.id }
-              }).then(r => r.data.sessions || []).catch(() => []),
-            ])
+            // Fetch stakeholder plan
+            const plan = await getStakeholderPlan(project.id).catch(() => null)
 
-            const projectSessions: SessionInfo[] = sessionsRes.map((s: any) => ({
-              id: s.id,
-              status: s.status,
-              stakeholderName: s.stakeholderName,
-              stakeholderRole: s.stakeholderRole,
-              startedAt: s.startedAt,
-              endedAt: s.endedAt,
-              createdAt: s.createdAt,
-              hasMemo: false,
-            }))
+            // Fetch interview sessions
+            const sessionsRes = await apiClient.get('/api/interview-sessions/', {
+              params: { limit: 100, projectId: project.id }
+            }).catch(() => ({ data: { sessions: [] } }))
 
-            return { ...item, plan: planRes, sessions: projectSessions }
-          } catch {
-            return item
+            const sessions: SessionInfo[] = sessionsRes.data.sessions || []
+            const completedSessions = sessions.filter(s => s.status === 'ended')
+
+            // Calculate progress
+            const totalStakeholders = plan?.profiles.length || 0
+            const completedInterviews = completedSessions.length
+            const progressPercentage = plan?.summary.progress_percentage || 0
+
+            // Find most recent interview date
+            let lastInterviewDate: string | undefined
+            if (completedSessions.length > 0) {
+              const sortedSessions = completedSessions
+                .filter(s => s.endedAt)
+                .sort((a, b) => new Date(b.endedAt!).getTime() - new Date(a.endedAt!).getTime())
+              if (sortedSessions.length > 0) {
+                lastInterviewDate = sortedSessions[0].endedAt
+              }
+            }
+
+            return {
+              project,
+              plan,
+              completedInterviews,
+              totalStakeholders,
+              progressPercentage,
+              lastInterviewDate,
+              hasInterviews: sessions.length > 0,
+              userFriendlyStatus: getUserFriendlyStatus(project.status),
+            }
+          } catch (err) {
+            console.error(`Failed to load data for project ${project.id}:`, err)
+            return {
+              project,
+              plan: null,
+              completedInterviews: 0,
+              totalStakeholders: 0,
+              progressPercentage: 0,
+              hasInterviews: false,
+              userFriendlyStatus: getUserFriendlyStatus(project.status),
+            }
           }
         })
       )
 
-      setData(updated)
+      setProjectCards(cards)
     } catch (err) {
-      console.error('Failed to load data:', err)
+      console.error('Failed to load projects:', err)
     } finally {
       setLoading(false)
     }
@@ -80,291 +118,155 @@ export default function ProjectSessionsPage() {
 
   useEffect(() => { loadData() }, [loadData])
 
-  const toggleProject = (projectId: string) => {
-    setExpandedProjects(prev => {
-      const next = new Set(prev)
-      if (next.has(projectId)) {
-        next.delete(projectId)
-      } else {
-        next.add(projectId)
-      }
-      return next
-    })
-  }
-
-  const handleDeleteSession = async (sessionId: string) => {
-    if (!confirm('確定要刪除此訪談 session？')) return
-    try {
-      await apiClient.delete(`/api/interview-sessions/${sessionId}`)
-      setData(prev => prev.map(item => ({
-        ...item,
-        sessions: item.sessions.filter(s => s.id !== sessionId),
-      })))
-    } catch (err) {
-      console.error('Failed to delete session:', err)
-    }
-  }
-
-  const statusConfig: Record<string, { label: string; color: string }> = {
-    idle: { label: '待機', color: 'bg-cream-100 text-natural-600' },
-    preparing: { label: '準備中', color: 'bg-blue-100 text-blue-600' },
-    ready: { label: '就緒', color: 'bg-blue-100 text-blue-700' },
-    interviewing: { label: '訪談中', color: 'bg-green-100 text-green-700' },
-    paused: { label: '暫停', color: 'bg-yellow-100 text-yellow-700' },
-    ended: { label: '已結束', color: 'bg-cream-100 text-natural-500' },
-    failed: { label: '失敗', color: 'bg-red-100 text-red-600' },
-  }
-
-  const projectStatusConfig: Record<string, { label: string; color: string }> = {
-    active: { label: '進行中', color: 'bg-blue-100 text-blue-700' },
-    planning: { label: '規劃中', color: 'bg-cream-100 text-natural-700' },
-    interviewing: { label: '訪談中', color: 'bg-green-100 text-green-700' },
-    ready_for_brd: { label: '可生成 BRD', color: 'bg-emerald-100 text-emerald-700' },
-    completed: { label: '已完成', color: 'bg-purple-100 text-purple-700' },
-  }
-
   if (loading) {
     return (
-      <div className="min-h-screen bg-cream-100 flex items-center justify-center">
-        <div className="text-natural-500">載入中...</div>
+      <div className="min-h-screen bg-cream-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="inline-block w-8 h-8 border-4 border-sage-400 border-t-transparent rounded-full animate-spin mb-3"></div>
+          <p className="text-natural-600">載入專案中...</p>
+        </div>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-cream-100">
-      <div className="max-w-6xl mx-auto px-6 py-8">
+    <div className="min-h-screen bg-cream-50">
+      <div className="max-w-6xl mx-auto px-6 py-12">
         {/* Header */}
-        <div className="flex justify-between items-center mb-8">
+        <div className="flex justify-between items-center mb-10">
           <div>
-            <h1 className="text-2xl font-bold text-natural-800">專案與訪談管理</h1>
-            <p className="text-natural-500 mt-1">管理所有專案及其訪談 sessions</p>
+            <h1 className="text-3xl font-bold text-natural-900">我的專案</h1>
+            <p className="text-natural-600 mt-2">管理您的需求探索專案</p>
           </div>
-          <div className="flex gap-3">
-            <button
-              onClick={() => navigate('/projects')}
-              className="px-4 py-2 text-sm bg-sage-400 text-white rounded-lg hover:bg-sage-500"
-            >
-              + 建立專案
-            </button>
-          </div>
+          <button
+            onClick={() => navigate('/')}
+            className="px-5 py-2.5 bg-white border border-cream-200 text-natural-700 rounded-lg hover:bg-cream-50 transition-colors shadow-sm"
+          >
+            回首頁
+          </button>
         </div>
 
-        {/* Summary Stats */}
-        <div className="grid grid-cols-4 gap-4 mb-6">
-          <div className="p-4 bg-white rounded-xl border border-cream-200 shadow-natural">
-            <div className="text-2xl font-bold text-natural-700">{data.length}</div>
-            <div className="text-xs text-natural-500">專案數</div>
-          </div>
-          <div className="p-4 bg-white rounded-xl border border-cream-200 shadow-natural">
-            <div className="text-2xl font-bold text-sage-600">
-              {data.reduce((sum, d) => sum + (d.plan?.profiles.length || 0), 0)}
+        {/* Project Cards Grid */}
+        {projectCards.length === 0 ? (
+          <div className="text-center py-20 bg-white rounded-2xl border border-cream-200 shadow-sm">
+            <div className="mb-6">
+              <svg className="w-20 h-20 mx-auto text-natural-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+              </svg>
             </div>
-            <div className="text-xs text-natural-500">受訪者數</div>
-          </div>
-          <div className="p-4 bg-white rounded-xl border border-cream-200 shadow-natural">
-            <div className="text-2xl font-bold text-emerald-600">
-              {data.reduce((sum, d) => sum + d.sessions.length, 0)}
-            </div>
-            <div className="text-xs text-natural-500">訪談 Sessions</div>
-          </div>
-          <div className="p-4 bg-white rounded-xl border border-cream-200 shadow-natural">
-            <div className="text-2xl font-bold text-amber-600">
-              {data.reduce((sum, d) => sum + d.sessions.filter(s => s.status === 'ended').length, 0)}
-            </div>
-            <div className="text-xs text-natural-500">已完成訪談</div>
-          </div>
-        </div>
-
-        {/* Project List */}
-        {data.length === 0 ? (
-          <div className="text-center py-12 text-natural-500">
-            <p>尚無專案</p>
+            <p className="text-lg text-natural-600 mb-6">尚無專案，前往首頁建立第一個專案</p>
             <button
-              onClick={() => navigate('/projects')}
-              className="mt-3 px-4 py-2 bg-sage-400 text-white rounded-lg hover:bg-sage-500 text-sm"
+              onClick={() => navigate('/')}
+              className="px-6 py-3 bg-sage-500 text-white rounded-lg hover:bg-sage-600 transition-colors shadow-sm"
             >
-              建立第一個專案
+              建立專案
             </button>
           </div>
         ) : (
-          <div className="space-y-4">
-            {data.map(({ project, plan, sessions }) => {
-              const isExpanded = expandedProjects.has(project.id)
-              const pStatus = projectStatusConfig[project.status] || projectStatusConfig.active
-              const completedSessions = sessions.filter(s => s.status === 'ended').length
-              const planProgress = plan?.summary.progress_percentage || 0
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {projectCards.map((card) => (
+              <div
+                key={card.project.id}
+                className="bg-white rounded-2xl border border-cream-200 shadow-sm hover:shadow-md transition-all overflow-hidden"
+              >
+                {/* Card Header */}
+                <div className="p-6 border-b border-cream-100">
+                  <div className="flex items-start justify-between mb-3">
+                    <h3 className="text-xl font-semibold text-natural-900 flex-1">
+                      {card.project.title}
+                    </h3>
+                    <span className={`px-3 py-1 text-xs font-medium rounded-full whitespace-nowrap ml-3 ${getStatusBadgeClass(card.project.status)}`}>
+                      {card.userFriendlyStatus}
+                    </span>
+                  </div>
+                  {card.project.description && (
+                    <p className="text-sm text-natural-600 line-clamp-2 mb-4">
+                      {card.project.description}
+                    </p>
+                  )}
+                </div>
 
-              return (
-                <div key={project.id} className="bg-white rounded-xl border border-cream-200 shadow-natural overflow-hidden">
-                  {/* Project Header */}
-                  <div
-                    className="p-5 cursor-pointer hover:bg-cream-50 transition-colors"
-                    onClick={() => toggleProject(project.id)}
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <svg
-                          className={`w-4 h-4 text-natural-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
-                          fill="none" viewBox="0 0 24 24" stroke="currentColor"
-                        >
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                        </svg>
-                        <h3 className="text-lg font-semibold text-natural-800">{project.title}</h3>
-                        <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${pStatus.color}`}>
-                          {pStatus.label}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-4 text-xs text-natural-400">
-                        <span>受訪者 {plan?.profiles.length || 0}</span>
-                        <span>訪談 {sessions.length} ({completedSessions} 完成)</span>
-                        <span>進度 {Math.round(planProgress)}%</span>
-                        <button
-                          onClick={e => { e.stopPropagation(); navigate(`/projects/${project.id}`) }}
-                          className="px-2 py-1 text-sage-600 hover:bg-sage-50 rounded"
-                        >
-                          管理
-                        </button>
-                      </div>
+                {/* Card Body */}
+                <div className="p-6 space-y-4">
+                  {/* Progress Bar */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium text-natural-700">專案進度</span>
+                      <span className="text-sm font-semibold text-sage-600">
+                        {Math.round(card.progressPercentage)}%
+                      </span>
                     </div>
-                    {project.description && (
-                      <p className="text-sm text-natural-500 mt-1 ml-7">{project.description}</p>
-                    )}
-                    {/* Progress bar */}
-                    <div className="mt-2 ml-7 h-1.5 bg-cream-100 rounded-full overflow-hidden max-w-xs">
+                    <div className="h-2.5 bg-cream-100 rounded-full overflow-hidden">
                       <div
-                        className="h-full bg-sage-400 rounded-full transition-all"
-                        style={{ width: `${planProgress}%` }}
+                        className="h-full bg-gradient-to-r from-sage-400 to-sage-500 rounded-full transition-all duration-500"
+                        style={{ width: `${card.progressPercentage}%` }}
                       />
                     </div>
                   </div>
 
-                  {/* Expanded: Sessions + Stakeholders */}
-                  {isExpanded && (
-                    <div className="border-t border-cream-200 px-5 pb-5">
-                      {/* Stakeholder overview */}
-                      {plan && plan.profiles.length > 0 && (
-                        <div className="mt-4 mb-4">
-                          <div className="text-xs font-medium text-natural-500 mb-2 uppercase tracking-wider">受訪者</div>
-                          <div className="flex flex-wrap gap-2">
-                            {plan.profiles.map(p => (
-                              <span
-                                key={p.id}
-                                className={`px-2.5 py-1 text-xs rounded-full border ${
-                                  p.status === 'interviewed'
-                                    ? 'bg-green-50 border-green-200 text-green-700'
-                                    : 'bg-cream-50 border-cream-200 text-natural-600'
-                                }`}
-                              >
-                                {p.name}
-                                <span className="text-natural-400 ml-1">
-                                  {p.status === 'interviewed' ? '✓' : '○'}
-                                </span>
-                              </span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Sessions table */}
-                      <div className="text-xs font-medium text-natural-500 mb-2 uppercase tracking-wider">訪談 Sessions</div>
-                      {sessions.length === 0 ? (
-                        <div className="text-sm text-natural-400 py-3">
-                          尚無訪談 session。
-                          <button
-                            onClick={() => navigate(`/projects/${project.id}`)}
-                            className="text-sage-600 hover:underline ml-1"
-                          >
-                            前往開始訪談
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-sm">
-                            <thead>
-                              <tr className="border-b border-cream-200">
-                                <th className="text-left py-2 pr-3 text-natural-500 font-medium">Session ID</th>
-                                <th className="text-left py-2 pr-3 text-natural-500 font-medium">狀態</th>
-                                <th className="text-left py-2 pr-3 text-natural-500 font-medium">建立時間</th>
-                                <th className="text-right py-2 text-natural-500 font-medium">操作</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {sessions.map(session => {
-                                const sConfig = statusConfig[session.status] || statusConfig.idle
-                                return (
-                                  <tr key={session.id} className="border-b border-cream-50 hover:bg-cream-50">
-                                    <td className="py-2.5 pr-3">
-                                      <span className="font-mono text-xs text-natural-600">
-                                        {session.id.replace('session_', '').slice(0, 8)}
-                                      </span>
-                                    </td>
-                                    <td className="py-2.5 pr-3">
-                                      <span className={`px-2 py-0.5 text-xs rounded-full ${sConfig.color}`}>
-                                        {sConfig.label}
-                                      </span>
-                                    </td>
-                                    <td className="py-2.5 pr-3 text-xs text-natural-400">
-                                      {new Date(session.createdAt).toLocaleString('zh-TW')}
-                                    </td>
-                                    <td className="py-2.5 text-right">
-                                      <div className="flex items-center justify-end gap-2">
-                                        {session.status === 'ended' && (
-                                          <button
-                                            onClick={() => navigate(`/sessions/${session.id}/insight-memo`)}
-                                            className="px-2 py-0.5 text-xs text-sage-600 hover:bg-sage-50 rounded"
-                                          >
-                                            洞察
-                                          </button>
-                                        )}
-                                        <button
-                                          onClick={() => navigate(`/sessions/${session.id}/log`)}
-                                          className="px-2 py-0.5 text-xs text-natural-500 hover:bg-cream-100 rounded"
-                                        >
-                                          Log
-                                        </button>
-                                        <button
-                                          onClick={() => handleDeleteSession(session.id)}
-                                          className="px-2 py-0.5 text-xs text-red-400 hover:bg-red-50 rounded"
-                                        >
-                                          刪除
-                                        </button>
-                                      </div>
-                                    </td>
-                                  </tr>
-                                )
-                              })}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-
-                      {/* Quick actions */}
-                      <div className="flex gap-2 mt-4 pt-3 border-t border-cream-200">
-                        <button
-                          onClick={() => navigate(`/projects/${project.id}`)}
-                          className="px-3 py-1.5 text-xs bg-sage-50 text-sage-700 rounded-lg hover:bg-sage-100"
-                        >
-                          專案詳情
-                        </button>
-                        <button
-                          onClick={() => navigate(`/projects/${project.id}/evidence-matrix`)}
-                          className="px-3 py-1.5 text-xs bg-cream-50 text-natural-600 rounded-lg hover:bg-cream-100"
-                        >
-                          證據矩陣
-                        </button>
-                        <button
-                          onClick={() => navigate(`/projects/${project.id}/readiness`)}
-                          className="px-3 py-1.5 text-xs bg-cream-50 text-natural-600 rounded-lg hover:bg-cream-100"
-                        >
-                          BRD 準備度
-                        </button>
+                  {/* Stats */}
+                  <div className="grid grid-cols-2 gap-4 py-3">
+                    <div className="text-center">
+                      <div className="text-2xl font-bold text-natural-800">
+                        {card.completedInterviews}/{card.totalStakeholders}
                       </div>
+                      <div className="text-xs text-natural-500 mt-1">已完成受訪者</div>
+                    </div>
+                    <div className="text-center">
+                      <div className="text-2xl font-bold text-natural-800">
+                        {card.totalStakeholders}
+                      </div>
+                      <div className="text-xs text-natural-500 mt-1">受訪者總數</div>
+                    </div>
+                  </div>
+
+                  {/* Last Interview Date */}
+                  {card.lastInterviewDate ? (
+                    <div className="flex items-center gap-2 text-sm text-natural-500 pt-2 border-t border-cream-100">
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
+                      <span>最近訪談：{new Date(card.lastInterviewDate).toLocaleDateString('zh-TW')}</span>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-2 text-sm text-natural-400 pt-2 border-t border-cream-100">
+                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                      </svg>
+                      <span>尚未開始訪談</span>
                     </div>
                   )}
                 </div>
-              )
-            })}
+
+                {/* Action Buttons */}
+                <div className="px-6 pb-6">
+                  <div className="flex gap-3">
+                    <button
+                      onClick={() => navigate(`/projects/${card.project.id}`)}
+                      className="flex-1 px-4 py-2.5 bg-sage-500 text-white rounded-lg hover:bg-sage-600 transition-colors font-medium text-sm shadow-sm"
+                    >
+                      開始訪談
+                    </button>
+                    <button
+                      onClick={() => navigate(`/projects/${card.project.id}/evidence-matrix`)}
+                      className="px-4 py-2.5 bg-cream-50 text-natural-700 rounded-lg hover:bg-cream-100 transition-colors font-medium text-sm border border-cream-200"
+                    >
+                      查看報告
+                    </button>
+                    <button
+                      onClick={() => navigate(`/projects/${card.project.id}`)}
+                      className="px-4 py-2.5 bg-white text-natural-600 rounded-lg hover:bg-cream-50 transition-colors text-sm border border-cream-200"
+                      title="管理專案"
+                    >
+                      <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>

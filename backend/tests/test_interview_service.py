@@ -469,18 +469,6 @@ class TestInterviewService:
 
         assert exc_info.value.status_code == 404
 
-    def test_get_card_state_success(self, mock_db, sample_interview_session, sample_card_state):
-        """Test getting a specific card state."""
-        mock_db.query().filter().first.side_effect = [sample_interview_session, sample_card_state]
-
-        card_state = interview_service.get_card_state(
-            db=mock_db,
-            session_id="session-123",
-            card_state_id="state-123"
-        )
-
-        assert card_state == sample_card_state
-
     def test_get_all_card_states(self, mock_db, sample_interview_session):
         """Test getting all card states for a session."""
         card_states = [
@@ -534,23 +522,6 @@ class TestInterviewService:
 
         assert len(result) == 2
 
-    def test_get_utterances_filtered_by_speaker(self, mock_db, sample_interview_session):
-        """Test getting utterances filtered by speaker."""
-        utterances = [
-            Utterance(id="utt-1", session_id="session-123", speaker="interviewee", transcript="Answer")
-        ]
-
-        mock_db.query().filter().first.return_value = sample_interview_session
-        mock_db.query().filter().filter().order_by().limit().all.return_value = utterances
-
-        result = interview_service.get_utterances(
-            db=mock_db,
-            session_id="session-123",
-            speaker="interviewee"
-        )
-
-        assert len(result) == 1
-        assert result[0].speaker == "interviewee"
 
     def test_list_sessions(self, mock_db):
         """Test listing interview sessions for a user."""

@@ -368,28 +368,6 @@ class InterviewService:
 
         return card_state
 
-    def get_card_state(
-        self,
-        db: Session,
-        session_id: str,
-        card_state_id: str
-    ) -> InterviewCardState:
-        """Get a specific card state."""
-        self.get_session(db, session_id)
-
-        card_state = db.query(InterviewCardState).filter(
-            InterviewCardState.id == card_state_id,
-            InterviewCardState.session_id == session_id
-        ).first()
-
-        if not card_state:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Card state {card_state_id} not found"
-            )
-
-        return card_state
-
     def get_all_card_states(
         self,
         db: Session,
@@ -483,25 +461,6 @@ class InterviewService:
         if speaker:
             query = query.filter(Utterance.speaker == speaker)
         return query.order_by(asc(Utterance.created_at)).limit(limit).all()
-
-    def get_live_utterances(
-        self,
-        db: Session,
-        session_id: str,
-        speaker: Optional[str] = None,
-        limit: int = 100
-    ) -> List[LiveUtterance]:
-        """Get live utterances for a session (Realtime API transcripts)."""
-        self.get_session(db, session_id)
-
-        query = db.query(LiveUtterance).filter(LiveUtterance.session_id == session_id)
-
-        if speaker:
-            query = query.filter(LiveUtterance.speaker == speaker)
-
-        utterances = query.order_by(asc(LiveUtterance.sequence_index)).limit(limit).all()
-
-        return utterances
 
     def list_sessions(
         self,
