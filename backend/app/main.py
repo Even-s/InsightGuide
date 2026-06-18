@@ -11,7 +11,7 @@ from app.core.logging import setup_logging
 from app.core.json_encoder import DateTimeEncoder
 
 # InsightGuide routes
-from app.api.routes import documents, sections, question_cards, interview_sessions, auth, realtime, prep_sessions, events, session_reports, brd
+from app.api.routes import documents, sections, question_cards, interview_sessions, auth, realtime, prep_sessions, events, session_reports, brd, prompts, diarize, projects, insight_memos, evidence_matrix
 
 # Setup logging
 setup_logging()
@@ -73,6 +73,11 @@ app.include_router(
     prefix="/api/brd",
     tags=["brd"],
 )
+app.include_router(prompts.router, prefix="/api", tags=["prompts"])
+app.include_router(diarize.router, prefix="/api/realtime", tags=["diarize"])
+app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
+app.include_router(insight_memos.router, prefix="/api", tags=["insight-memos"])
+app.include_router(evidence_matrix.router, prefix="/api", tags=["evidence-matrix"])
 
 
 @app.get("/")
@@ -100,6 +105,32 @@ async def startup_event():
     logger.info("InsightGuide API starting up...")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
     logger.info(f"Debug mode: {settings.DEBUG}")
+
+    # Seed prompt templates if table is empty
+    try:
+        from app.db.session import SessionLocal
+        from app.models.prompt_template import PromptTemplate
+        db = SessionLocal()
+        count = db.query(PromptTemplate).count()
+        if count == 0:
+            from app.services.prompt_seed_data import PROMPT_SEEDS as PROMPTS
+            from app.services.prompt_registry_service import prompt_registry_service
+            for p in PROMPTS:
+                prompt_registry_service.seed_template(
+                    db, key=p["key"], name=p["name"], category=p["category"],
+                    system_prompt=p["system_prompt"],
+                    user_prompt_template=p.get("user_prompt_template"),
+                    description=p.get("description"), model=p.get("model"),
+                    risk_level=p.get("risk_level", "medium"),
+                    service_file=p.get("service_file"),
+                    service_function=p.get("service_function"),
+                    input_variables=p.get("input_variables"),
+                    output_format=p.get("output_format"),
+                )
+            logger.info(f"Seeded {len(PROMPTS)} prompt templates")
+        db.close()
+    except Exception as e:
+        logger.warning(f"Prompt seed skipped: {e}")
 
 
 @app.on_event("shutdown")

@@ -25,6 +25,7 @@ def convert_document_to_response(document, db: Session) -> DocumentResponse:
     return DocumentResponse(
         id=document.id,
         user_id=document.user_id,
+        project_id=document.project_id,
         title=document.title,
         source_file_url=document.source_file_url,
         file_type=document.file_type,
@@ -52,6 +53,7 @@ def browser_safe_file_url(file_url: str | None) -> str | None:
 async def create_document(
     file: UploadFile = File(..., description="PDF, Word, Markdown, or Text file to upload"),
     title: Optional[str] = Form(None, description="Optional document title"),
+    project_id: Optional[str] = Form(None, description="Project to associate this document with"),
     db: Session = Depends(get_db)
 ):
     """
@@ -66,12 +68,39 @@ async def create_document(
        - Analyzes content with AI
        - Generates question cards
     """
-    logger.info(f"Creating document from file: {file.filename}")
+    logger.info(f"Creating document from file: {file.filename}, project_id={project_id}")
 
     document = document_service.create_document(
         db=db,
         file=file,
-        title=title
+        title=title,
+        project_id=project_id,
+    )
+
+    return convert_document_to_response(document, db)
+
+
+@router.post("/from-topic", status_code=status.HTTP_201_CREATED, response_model=DocumentResponse)
+async def create_document_from_topic(
+    body: dict,
+    db: Session = Depends(get_db),
+):
+    """Create a document from a text topic (no file upload required).
+
+    The topic text is used directly as the document content for AI analysis.
+    """
+    topic = body.get("topic", "").strip()
+    title = body.get("title", "").strip() or topic[:50]
+    project_id = body.get("project_id")
+
+    if not topic:
+        raise HTTPException(status_code=400, detail="topic is required")
+
+    document = document_service.create_document_from_text(
+        db=db,
+        title=title,
+        content=topic,
+        project_id=project_id,
     )
 
     return convert_document_to_response(document, db)

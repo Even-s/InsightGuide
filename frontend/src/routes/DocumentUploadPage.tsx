@@ -1,165 +1,260 @@
 /**
- * Document Upload Page - InsightGuide
+ * Home Page - New Project Creation
+ *
+ * Users create a new project by entering a title and description.
+ * Voice input: records user's spoken description, then AI parses it into
+ * structured fields (title + description) and auto-fills the form.
  */
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { documentsAPI } from '@/api/documents'
-import { useDocumentStore } from '@/stores/documentStore'
+import { createProject, listProjects, voiceToProjectFields, type Project } from '@/api/projects'
 
 export default function DocumentUploadPage() {
-  const [file, setFile] = useState<File | null>(null)
-  const [uploading, setUploading] = useState(false)
+  const [title, setTitle] = useState('')
+  const [description, setDescription] = useState('')
+  const [submitting, setSubmitting] = useState(false)
   const [localError, setLocalError] = useState<string | null>(null)
-  const navigate = useNavigate()
-  const { setCurrentDocument, setError } = useDocumentStore()
+  const [recentProjects, setRecentProjects] = useState<Project[]>([])
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setFile(e.target.files[0])
-      setLocalError(null) // Clear error when new file selected
+  // Voice recording state
+  const [isRecording, setIsRecording] = useState(false)
+  const [isProcessingVoice, setIsProcessingVoice] = useState(false)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const chunksRef = useRef<Blob[]>([])
+
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    listProjects().then(res => setRecentProjects(res.projects.slice(0, 5))).catch(() => {})
+  }, [])
+
+  const startRecording = async () => {
+    setLocalError(null)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const mediaRecorder = new MediaRecorder(stream, { mimeType: 'audio/webm' })
+      chunksRef.current = []
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data)
+      }
+
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop())
+        const blob = new Blob(chunksRef.current, { type: 'audio/webm' })
+        if (blob.size < 1000) return
+
+        setIsProcessingVoice(true)
+        try {
+          const result = await voiceToProjectFields(blob)
+          if (result.parsed.title) setTitle(result.parsed.title)
+          if (result.parsed.description) {
+            const parts: string[] = []
+            if (result.parsed.description) parts.push(result.parsed.description)
+            if (result.parsed.business_domain) parts.push(`領域：${result.parsed.business_domain}`)
+            if (result.parsed.key_objectives?.length) parts.push(`目標：${result.parsed.key_objectives.join('、')}`)
+            if (result.parsed.out_of_scope?.length) parts.push(`不含：${result.parsed.out_of_scope.join('、')}`)
+            setDescription(parts.join('\n'))
+          } else if (result.transcript) {
+            setDescription(result.transcript)
+          }
+        } catch (error: unknown) {
+          const msg = error instanceof Error ? error.message : '語音辨識失敗'
+          setLocalError(msg)
+        } finally {
+          setIsProcessingVoice(false)
+        }
+      }
+
+      mediaRecorder.start()
+      mediaRecorderRef.current = mediaRecorder
+      setIsRecording(true)
+    } catch {
+      setLocalError('無法存取麥克風，請確認瀏覽器權限')
     }
   }
 
-  const handleUpload = async () => {
-    if (!file) return
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop()
+    }
+    setIsRecording(false)
+  }
 
-    setUploading(true)
-    setError(null)
+  const handleSubmit = async () => {
+    if (!title.trim() || !description.trim()) return
+    setSubmitting(true)
     setLocalError(null)
 
     try {
-      // Upload the document
-      const document = await documentsAPI.uploadDocument(file)
-      setCurrentDocument(document)
-
-      // Note: PrepSession will be auto-created by backend after analysis completes
-
-      navigate(`/editor/${document.id}`)
+      const newProject = await createProject({
+        title: title.trim(),
+        description: description.trim(),
+      })
+      navigate(`/projects/${newProject.id}`)
     } catch (error: unknown) {
-      const errorMessage = error instanceof Error ? error.message : 'Failed to upload document'
-      setError(errorMessage)
-      setLocalError(errorMessage)
+      const msg = error instanceof Error ? error.message : '建立失敗'
+      setLocalError(msg)
     } finally {
-      setUploading(false)
+      setSubmitting(false)
     }
   }
+
+  const canSubmit = title.trim() && description.trim() && !submitting && !isRecording && !isProcessingVoice
 
   return (
     <div className="flex min-h-screen flex-col bg-cream-100">
       <nav className="mx-auto flex w-full max-w-7xl flex-none items-center justify-between px-8 py-5">
-        <h1 className="text-2xl font-medium leading-relaxed tracking-wide text-natural-700">InsightGuide</h1>
+        <span className="text-2xl font-medium leading-relaxed tracking-wide text-natural-700">
+          InsightGuide
+        </span>
         <button
-          onClick={() => navigate('/sessions')}
+          onClick={() => navigate('/projects')}
           className="rounded-lg px-4 py-2 text-sm leading-relaxed tracking-wide text-sage-600 underline transition-colors hover:bg-cream-50 hover:text-sage-700"
         >
-          訪談記錄
+          所有專案
         </button>
       </nav>
 
-      <main className="mx-auto grid w-full max-w-2xl flex-1 grid-rows-[auto_auto_1fr] px-8 pb-12 pt-12">
-        <div className="text-center">
+      <main className="mx-auto w-full max-w-2xl flex-1 px-8 pb-12 pt-6">
+        {/* Hero */}
+        <div className="text-center mb-10">
           <h2 className="text-3xl font-semibold leading-tight text-natural-800">
-            InsightGuide - AI 需求訪談助手
+            新建專案
           </h2>
-          <p className="mx-auto mt-5 max-w-xl text-base leading-loose text-natural-600">
-            從需求文件分析、訪談問題準備到即時評估，InsightGuide 協助你把每個關鍵需求問清楚。
+          <p className="mx-auto mt-4 max-w-md text-base leading-relaxed text-natural-600">
+            告訴我你想了解什麼，我來幫你規劃該找誰聊、該問什麼。
           </p>
         </div>
 
-        <div className="flex items-center justify-center py-14">
-          <div className="mx-auto flex max-w-xl flex-col gap-3 text-sm text-natural-600 sm:flex-row sm:items-center sm:justify-center sm:gap-0">
-            <span className="font-medium text-natural-700">上傳文件</span>
-            <span className="hidden h-px w-12 bg-cream-300 sm:mx-4 sm:block" />
-            <span className="font-medium text-natural-700">整理問題</span>
-            <span className="hidden h-px w-12 bg-cream-300 sm:mx-4 sm:block" />
-            <span className="font-medium text-natural-700">追蹤充分度</span>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-center">
-          <div className="w-full max-w-xl rounded-lg border border-cream-300 bg-white p-8 shadow-natural">
-            <div className="space-y-6">
+        <div className="space-y-6">
+          {/* Voice input - separate standalone action */}
+          <div className="w-full rounded-lg border border-cream-300 bg-white p-6 shadow-natural">
+            <div className="flex items-center justify-between">
               <div>
-                <label className="mb-3 block text-base font-medium leading-relaxed tracking-wide text-natural-700">
-                  選擇需求文件
-                </label>
-                <div className="rounded-xl border-2 border-dashed border-cream-300 bg-cream-50 p-6 transition-all hover:border-sage-300 hover:bg-sage-50">
-                  <input
-                    type="file"
-                    accept=".pdf,.docx,.doc,.md,.txt"
-                    onChange={handleFileChange}
-                    className="block w-full text-sm text-natural-600
-                      file:mr-4 file:py-3 file:px-6
-                      file:rounded-xl file:border-0
-                      file:text-sm file:font-medium file:tracking-wide
-                      file:bg-sage-400 file:text-white
-                      hover:file:bg-sage-500 file:shadow-natural
-                      file:transition-colors cursor-pointer"
-                  />
-                  <p className="mt-4 text-center text-xs leading-relaxed tracking-wide text-natural-500">
-                    支援格式：PDF (.pdf)、Word (.docx, .doc)、Markdown (.md)、Text (.txt)<br/>
-                    檔案大小上限：50MB
-                  </p>
-                </div>
+                <p className="text-sm font-medium text-natural-700">語音建立</p>
+                <p className="text-xs text-natural-500 mt-0.5">說出專案背景，AI 自動填入名稱與描述</p>
               </div>
-
-              {file && (
-                <div className="bg-sage-50 rounded-xl p-6 border border-sage-200 shadow-natural">
-                  <div className="flex items-center gap-3 mb-2">
-                    <svg className="w-6 h-6 text-sage-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-natural-700 leading-relaxed">
-                        {file.name}
-                      </p>
-                      <p className="text-xs text-natural-600 leading-relaxed tracking-wide">
-                        {(file.size / 1024 / 1024).toFixed(2)} MB
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {localError && (
-                <div className="bg-red-50 rounded-xl p-4 border border-red-200">
-                  <div className="flex items-start gap-3">
-                    <svg className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
-                    <div className="flex-1">
-                      <p className="text-sm font-medium text-red-800">上傳失敗</p>
-                      <p className="text-sm text-red-700 mt-1">{localError}</p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {uploading && (
-                <div className="bg-sage-50 rounded-xl p-4 border border-sage-200">
-                  <div className="flex items-center gap-3">
-                    <svg className="w-5 h-5 text-sage-500 animate-spin" fill="none" viewBox="0 0 24 24">
+              <button
+                onClick={isRecording ? stopRecording : startRecording}
+                disabled={isProcessingVoice}
+                className={`flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-medium transition-all ${
+                  isRecording
+                    ? 'bg-red-50 border border-red-300 text-red-600 hover:bg-red-100'
+                    : isProcessingVoice
+                    ? 'bg-cream-100 border border-cream-300 text-natural-400'
+                    : 'bg-sage-50 border border-sage-300 text-sage-600 hover:bg-sage-100'
+                } disabled:opacity-60 disabled:cursor-not-allowed`}
+              >
+                {isRecording ? (
+                  <>
+                    <span className="relative flex h-2.5 w-2.5">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-400 opacity-75"></span>
+                      <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-red-500"></span>
+                    </span>
+                    停止錄音
+                  </>
+                ) : isProcessingVoice ? (
+                  <>
+                    <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                     </svg>
-                    <p className="text-sm font-medium text-sage-500">上傳文件中，請稍候...</p>
-                  </div>
-                </div>
-              )}
-
-              <button
-                onClick={handleUpload}
-                disabled={!file || uploading}
-                className="w-full bg-sage-400 text-white py-4 px-6 rounded-xl font-medium tracking-wide shadow-natural text-base leading-relaxed
-                  hover:bg-sage-500 disabled:bg-cream-300 disabled:text-natural-400 disabled:cursor-not-allowed
-                  transition-all transform hover:scale-[1.02] disabled:hover:scale-100"
-              >
-                {uploading ? '上傳中...' : '上傳並開始分析'}
+                    分析中...
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                    </svg>
+                    開始錄音
+                  </>
+                )}
               </button>
             </div>
           </div>
+
+          {/* Project title + description */}
+          <div className="w-full rounded-lg border border-cream-300 bg-white p-8 shadow-natural space-y-5">
+            <div>
+              <label className="mb-2 block text-base font-medium leading-relaxed tracking-wide text-natural-700">
+                專案名稱
+              </label>
+              <input
+                type="text"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="例：線上預約系統"
+                className="w-full px-4 py-3 text-sm leading-relaxed text-natural-700 bg-cream-50 border border-cream-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-sage-400"
+              />
+            </div>
+            <div>
+              <label className="mb-2 block text-base font-medium leading-relaxed tracking-wide text-natural-700">
+                專案描述
+              </label>
+              <textarea
+                value={description}
+                onChange={e => setDescription(e.target.value)}
+                placeholder="例：開發診所線上預約系統，目標用戶為櫃台人員與病患。需了解現行預約流程與痛點，須整合 HIS 掛號系統。"
+                className="w-full h-36 px-4 py-3 text-sm leading-relaxed text-natural-700 bg-cream-50 border border-cream-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-sage-400 resize-y"
+              />
+              <p className="mt-2 text-xs text-natural-500">描述越完整，AI 產生的訪談計劃越精準。</p>
+            </div>
+          </div>
+
+          {/* Error */}
+          {localError && (
+            <div className="bg-red-50 rounded-xl p-4 border border-red-200">
+              <p className="text-sm text-red-700">{localError}</p>
+            </div>
+          )}
+
+          {/* Submit */}
+          <button
+            onClick={handleSubmit}
+            disabled={!canSubmit}
+            className="w-full bg-sage-400 text-white py-4 px-6 rounded-xl font-medium tracking-wide shadow-natural text-base leading-relaxed
+              hover:bg-sage-500 disabled:bg-cream-300 disabled:text-natural-400 disabled:cursor-not-allowed
+              transition-all transform hover:scale-[1.02] disabled:hover:scale-100"
+          >
+            {submitting ? '建立中...' : '建立專案'}
+          </button>
         </div>
+
+        {/* Recent projects */}
+        {recentProjects.length > 0 && (
+          <div className="mt-14">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-sm font-medium text-natural-500 tracking-wide">近期專案</h3>
+              <button
+                onClick={() => navigate('/projects')}
+                className="text-xs text-sage-600 hover:text-sage-700 underline"
+              >
+                查看全部
+              </button>
+            </div>
+            <div className="space-y-2">
+              {recentProjects.map(p => (
+                <button
+                  key={p.id}
+                  onClick={() => navigate(`/projects/${p.id}`)}
+                  className="w-full flex items-center justify-between px-5 py-3.5 bg-white border border-cream-200 rounded-xl hover:border-sage-300 hover:shadow-sm transition-all text-left"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-natural-800 truncate">{p.title}</p>
+                    {p.description && (
+                      <p className="text-xs text-natural-500 truncate mt-0.5">{p.description}</p>
+                    )}
+                  </div>
+                  <svg className="w-4 h-4 text-natural-400 flex-shrink-0 ml-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </main>
     </div>
   )

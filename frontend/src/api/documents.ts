@@ -23,11 +23,14 @@ export interface DocumentStatus {
 }
 
 export const documentsAPI = {
-  uploadDocument: async (file: File, title?: string): Promise<Document> => {
+  uploadDocument: async (file: File, title?: string, projectId?: string): Promise<Document> => {
     const formData = new FormData()
     formData.append('file', file)
     if (title) {
       formData.append('title', title)
+    }
+    if (projectId) {
+      formData.append('project_id', projectId)
     }
 
     const response = await apiClient.post('/api/documents/', formData, {
@@ -35,6 +38,11 @@ export const documentsAPI = {
         'Content-Type': 'multipart/form-data',
       },
     })
+    return response.data
+  },
+
+  createFromTopic: async (topic: string, title?: string, projectId?: string): Promise<Document> => {
+    const response = await apiClient.post('/api/documents/from-topic', { topic, title, project_id: projectId })
     return response.data
   },
 

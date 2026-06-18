@@ -77,15 +77,46 @@ class SemanticJudgeService:
                 must_mention_facts=must_mention_facts
             )
 
+            # Default fallback system prompt
+            system_prompt = (
+                "你是簡報分析的語義理解專家。你的任務是判斷演講者的發言是否從語義上覆蓋了"
+                "投影片中的特定主題。使用深度語義理解，不要求逐字匹配，理解意思相近即可。"
+                "只回覆結構化的 JSON 格式。"
+            )
+
+            # Try to load from registry
+            from app.db.session import SessionLocal
+            from app.services.prompt_registry_service import prompt_registry_service
+
+            db = SessionLocal()
+            try:
+                rendered = prompt_registry_service.render_prompt(
+                    db,
+                    "semantic_coverage_judgment",
+                    {
+                        "utterance_text": utterance_text,
+                        "title": title,
+                        "description": description,
+                        "semantic_anchors": semantic_anchors,
+                        "expected_keywords": expected_keywords,
+                        "must_mention_facts": must_mention_facts
+                    }
+                )
+                if rendered and "system_prompt" in rendered:
+                    system_prompt = rendered["system_prompt"]
+                # Note: user prompt is built by _build_judge_prompt, not from registry
+            except Exception as e:
+                logger.debug(f"Failed to load semantic_coverage_judgment prompt from registry: {e}")
+            finally:
+                db.close()
+
             # Call semantic model (GPT-5.4-mini) with structured output for fast real-time matching
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {
                         "role": "system",
-                        "content": "你是簡報分析的語義理解專家。你的任務是判斷演講者的發言是否從語義上覆蓋了"
-                                   "投影片中的特定主題。使用深度語義理解，不要求逐字匹配，理解意思相近即可。"
-                                   "只回覆結構化的 JSON 格式。"
+                        "content": system_prompt
                     },
                     {
                         "role": "user",
@@ -364,12 +395,43 @@ class SemanticJudgeService:
 }}
 """.strip()
 
+            # Default fallback system prompt
+            system_prompt = "你是簡報主題卡片完成度評分器。只根據逐字稿和卡片要求評分，並只回傳 JSON。"
+
+            # Try to load from registry
+            from app.db.session import SessionLocal
+            from app.services.prompt_registry_service import prompt_registry_service
+
+            db = SessionLocal()
+            try:
+                rendered = prompt_registry_service.render_prompt(
+                    db,
+                    "card_completion_percentage",
+                    {
+                        "transcript_context": transcript_context,
+                        "title": title,
+                        "description": description,
+                        "semantic_anchors": semantic_anchors,
+                        "expected_keywords": expected_keywords,
+                        "must_mention_facts": must_mention_facts,
+                        "important_points": important_points,
+                        "aspect_reference": aspect_reference
+                    }
+                )
+                if rendered and "system_prompt" in rendered:
+                    system_prompt = rendered["system_prompt"]
+                # Note: user prompt is built inline above, not from registry
+            except Exception as e:
+                logger.debug(f"Failed to load card_completion_percentage prompt from registry: {e}")
+            finally:
+                db.close()
+
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {
                         "role": "system",
-                        "content": "你是簡報主題卡片完成度評分器。只根據逐字稿和卡片要求評分，並只回傳 JSON。"
+                        "content": system_prompt
                     },
                     {
                         "role": "user",
@@ -658,7 +720,13 @@ JSON 格式：
             return ""
 
         try:
-            prompt = f"""請清理以下由語音轉錄而來的講稿內容。
+            from app.db.session import SessionLocal
+            from app.services.prompt_registry_service import prompt_registry_service
+
+            # Try DB first, fallback to hardcoded
+            db = SessionLocal()
+            system_prompt = "你是繁體中文簡報講稿編輯器。只做保守清理，不改寫成新內容，並只回 JSON。"
+            user_prompt = f"""請清理以下由語音轉錄而來的講稿內容。
 
 原則：
 - 盡量不改變使用者原本要表達的內容、順序與語氣。
@@ -676,16 +744,29 @@ JSON 格式：
 }}
 """.strip()
 
+            try:
+                rendered = prompt_registry_service.render_prompt(
+                    db,
+                    "clean_spoken_script",
+                    {"raw_text": text}
+                )
+                if rendered and "system_prompt" in rendered:
+                    system_prompt = rendered["system_prompt"]
+                if rendered and "user_prompt" in rendered:
+                    user_prompt = rendered["user_prompt"]
+            finally:
+                db.close()
+
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {
                         "role": "system",
-                        "content": "你是繁體中文簡報講稿編輯器。只做保守清理，不改寫成新內容，並只回 JSON。"
+                        "content": system_prompt
                     },
                     {
                         "role": "user",
-                        "content": prompt
+                        "content": user_prompt
                     }
                 ],
                 response_format={"type": "json_object"},

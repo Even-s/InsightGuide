@@ -16,6 +16,7 @@ class DocumentResponse(BaseModel):
 
     id: str
     user_id: str
+    project_id: Optional[str] = None
     title: str
     source_file_url: str
     file_type: str  # pdf, docx, doc, md, txt

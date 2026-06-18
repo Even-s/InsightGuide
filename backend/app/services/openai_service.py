@@ -502,15 +502,36 @@ class OpenAIService:
         Uses GPT-5.4-mini for accurate semantic classification.
         """
         try:
+            from app.db.session import SessionLocal
+            from app.services.prompt_registry_service import prompt_registry_service
+
+            # Default fallback prompt
+            system_prompt = (
+                "判斷以下語句是「訪問者提問」還是「受訪者回答」。\n"
+                "訪問者特徵：提出問題、請求描述/確認、使用疑問句、引導話題。\n"
+                "受訪者特徵：描述現況、提供資訊、說明流程、回答問題、陳述事實。\n"
+                "只回傳一個字：interviewer 或 interviewee"
+            )
+
+            # Try to load from registry
+            db = SessionLocal()
+            try:
+                rendered = prompt_registry_service.render_prompt(
+                    db,
+                    "classify_speaker",
+                    {"transcript": transcript[:200]}
+                )
+                if rendered and "system_prompt" in rendered:
+                    system_prompt = rendered["system_prompt"]
+            except Exception as e:
+                logger.debug(f"Failed to load classify_speaker prompt from registry: {e}")
+            finally:
+                db.close()
+
             response = self.client.chat.completions.create(
                 model="gpt-5.4-mini",
                 messages=[
-                    {"role": "system", "content": (
-                        "判斷以下語句是「訪問者提問」還是「受訪者回答」。\n"
-                        "訪問者特徵：提出問題、請求描述/確認、使用疑問句、引導話題。\n"
-                        "受訪者特徵：描述現況、提供資訊、說明流程、回答問題、陳述事實。\n"
-                        "只回傳一個字：interviewer 或 interviewee"
-                    )},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": transcript[:200]},
                 ],
                 temperature=0,
@@ -543,7 +564,8 @@ class OpenAIService:
             for s in sections
         )
 
-        system_prompt = """你是一位資深的商業分析師（BA），擅長從需求初稿中找出資訊缺口，並設計訪談策略。
+        # Default fallback prompt
+        system_prompt_fallback = """你是一位資深的商業分析師（BA），擅長從需求初稿中找出資訊缺口，並設計訪談策略。
 
 你的任務是：分析整份 BRD 初稿，產出一份結構化的「訪談單元規劃」。
 
@@ -586,6 +608,30 @@ class OpenAIService:
 - rationale 必須說明「為什麼要問」，不是「這段在講什麼」
 - brd_mapping 應使用常見 BRD 章節名稱
 """
+
+        system_prompt = system_prompt_fallback
+
+        # Try to load from registry
+        from app.db.session import SessionLocal
+        from app.services.prompt_registry_service import prompt_registry_service
+
+        db = SessionLocal()
+        try:
+            rendered = prompt_registry_service.render_prompt(
+                db,
+                "generate_interview_themes",
+                {
+                    "document_title": document_title,
+                    "section_list": section_list,
+                    "full_text": full_text[:12000]
+                }
+            )
+            if rendered and "system_prompt" in rendered:
+                system_prompt = rendered["system_prompt"]
+        except Exception as e:
+            logger.debug(f"Failed to load generate_interview_themes prompt from registry: {e}")
+        finally:
+            db.close()
 
         user_prompt = f"""文件標題：{document_title}
 
@@ -644,7 +690,8 @@ class OpenAIService:
         """
         logger.info(f"Generating question cards for theme: {theme_title}")
 
-        system_prompt = """你是一位資深商業分析師，負責為特定訪談單元設計「提問主題」與「建議提問」。
+        # Default fallback prompt
+        system_prompt_fallback = """你是一位資深商業分析師，負責為特定訪談單元設計「提問主題」與「建議提問」。
 
 你的輸出結構是「主題 → 問題」的階層：
 - 一個訪談單元下有 3-6 個提問主題（focus_text）
@@ -665,7 +712,7 @@ class OpenAIService:
 - 以 BA 對 BU 訪談的語氣撰寫，語句要自然、清楚、可直接念出口。
 - 避免使用「agent 的 agent」、「系統之系統」、「該功能模組」等技術或重複詞。若原文提到 agent，對 BU 的問法優先稱為「這個助手」、「需求訪談助手」或「這套工具」。
 - focus_text 使用名詞化的資訊缺口，例如「確認需求訪談助手的目標與範圍」、「界定第一階段支援對象與不納入範圍」。
-- question_text 使用訪談句型，例如「想先請你說明，這個助手第一階段主要希望解決什麼問題？」而不是「能否描述 agent 的主要目標？」。
+- question_text 使用訪談句型，例如「想先請你說明，這個助手第一階段主要希望解決的是什麼問題？」而不是「能否描述 agent 的主要目標？」。
 - 若訪談單元與「目標與範圍」相關，必須明確區分：業務目標、第一階段範圍、使用對象、支援情境、不支援或延後處理的項目。
 - suggested_followup 要能接在回答不足之後直接追問，不要只重述原問題。
 - expected_answer_elements 與 must_mention_elements 要寫成可驗收的資訊項，而不是抽象詞。
@@ -728,6 +775,33 @@ class OpenAIService:
 - cards 陣列的順序必須是「適合實際對話的提問順序」：先問全局性、背景性的問題，再問細節與規則，最後問確認與例外。模擬一位資深 BA 在訪談現場自然的對話節奏。
 - 同一 focus_text 下的問題也要按由淺入深排列：先問開放式大問題，再問確認細節、邊界條件。
 """
+
+        system_prompt = system_prompt_fallback
+
+        # Try to load from registry
+        from app.db.session import SessionLocal
+        from app.services.prompt_registry_service import prompt_registry_service
+
+        db = SessionLocal()
+        try:
+            rendered = prompt_registry_service.render_prompt(
+                db,
+                "generate_theme_question_cards",
+                {
+                    "document_title": document_title,
+                    "document_summary": document_summary,
+                    "theme_title": theme_title,
+                    "theme_rationale": theme_rationale,
+                    "theme_brd_mapping": ', '.join(theme_brd_mapping),
+                    "source_sections_text": source_sections_text[:8000]
+                }
+            )
+            if rendered and "system_prompt" in rendered:
+                system_prompt = rendered["system_prompt"]
+        except Exception as e:
+            logger.debug(f"Failed to load generate_theme_question_cards prompt from registry: {e}")
+        finally:
+            db.close()
 
         user_prompt = f"""文件標題：{document_title}
 文件摘要：{document_summary}

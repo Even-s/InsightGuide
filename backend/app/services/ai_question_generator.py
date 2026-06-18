@@ -30,12 +30,35 @@ class AIQuestionGenerator:
             Regenerated followup question
         """
         try:
-            prompt = self._build_followup_regeneration_prompt(
-                question_text=question_text,
-                expected_answer_elements=expected_answer_elements,
-                section_context=section_context,
-                current_followup=current_followup,
-            )
+            from app.db.session import SessionLocal
+            from app.services.prompt_registry_service import prompt_registry_service
+
+            # Try DB first, fallback to hardcoded
+            db = SessionLocal()
+            try:
+                elements_text = "\n".join(f"- {elem}" for elem in expected_answer_elements)
+                rendered = prompt_registry_service.render_prompt(
+                    db,
+                    "regenerate_followup",
+                    {
+                        "question_text": question_text,
+                        "elements_text": elements_text,
+                        "section_context": section_context or "需求訪談",
+                        "current_followup": current_followup,
+                    }
+                )
+                if rendered and "user_prompt" in rendered:
+                    prompt = rendered["user_prompt"]
+                else:
+                    prompt = self._build_followup_regeneration_prompt(
+                        question_text=question_text,
+                        expected_answer_elements=expected_answer_elements,
+                        section_context=section_context,
+                        current_followup=current_followup,
+                    )
+            finally:
+                db.close()
+
             response = openai_service.generate_card_metadata(prompt)
             suggested_followup = str(response.get("suggestedFollowup", "")).strip()
 
@@ -209,6 +232,63 @@ class AIQuestionGenerator:
                 "element_coverage": 0.20
             }
         }
+
+    def generate_role_targeting(
+        self,
+        question_text: str,
+        question_type: str = "",
+        section_context: str = "",
+    ) -> Dict[str, Any]:
+        """Generate role targeting metadata for a question card.
+
+        Returns:
+            {
+                "target_roles": ["engineering", "IT"],
+                "not_recommended_roles": ["sales"],
+                "expertise_required": ["system_architecture", "API"],
+                "question_intent": "technical_constraint"
+            }
+        """
+        try:
+            prompt = (
+                "分析以下訪談問題，判斷這題適合問哪些角色的人。\n\n"
+                f"問題：{question_text}\n"
+                f"問題類型：{question_type or '未指定'}\n"
+                f"情境：{section_context or '需求訪談'}\n\n"
+                "可選角色：business, product, engineering, management, operations, "
+                "customer_support, legal, finance, design, qa\n\n"
+                "可選 question_intent：technical_constraint, business_process, user_experience, "
+                "decision_criteria, compliance, performance, integration, data_flow, workflow, general\n\n"
+                "請以 JSON 回應：\n"
+                "{\n"
+                '  "target_roles": ["適合回答的角色"],\n'
+                '  "not_recommended_roles": ["不適合問的角色"],\n'
+                '  "expertise_required": ["需要的知識領域"],\n'
+                '  "question_intent": "問題意圖類別"\n'
+                "}\n\n"
+                "規則：\n"
+                "- 如果是通用問題（任何角色都能回答），target_roles 為空陣列\n"
+                "- 只有明確不適合的角色才放 not_recommended_roles\n"
+                "- expertise_required 用英文小寫 snake_case"
+            )
+
+            response = openai_service.generate_card_metadata(prompt)
+
+            return {
+                "target_roles": response.get("target_roles", []) or [],
+                "not_recommended_roles": response.get("not_recommended_roles", []) or [],
+                "expertise_required": response.get("expertise_required", []) or [],
+                "question_intent": response.get("question_intent", "general") or "general",
+            }
+
+        except Exception as e:
+            logger.warning(f"Failed to generate role targeting: {e}")
+            return {
+                "target_roles": [],
+                "not_recommended_roles": [],
+                "expertise_required": [],
+                "question_intent": "general",
+            }
 
     @staticmethod
     def _normalize_text(text: str) -> str:

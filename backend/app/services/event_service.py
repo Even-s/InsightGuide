@@ -26,6 +26,7 @@ class EventService:
         # Store active connections per session
         # session_id -> set of queues
         self._connections: Dict[str, Set[asyncio.Queue]] = defaultdict(set)
+        self._queue_loops: Dict[asyncio.Queue, asyncio.AbstractEventLoop] = {}
         self._redis_client = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
         self._async_redis_client = async_redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
 
@@ -50,6 +51,7 @@ class EventService:
         """
         queue = asyncio.Queue(maxsize=100)
         self._connections[session_id].add(queue)
+        self._queue_loops[queue] = asyncio.get_running_loop()
 
         logger.info(
             f"Client subscribed to session {session_id} "
@@ -77,6 +79,7 @@ class EventService:
             # Clean up empty session
             if not self._connections[session_id]:
                 del self._connections[session_id]
+        self._queue_loops.pop(queue, None)
 
     async def publish(self, session_id: str, event: Dict[str, Any]):
         """
@@ -153,19 +156,30 @@ class EventService:
         if session_id not in self._connections:
             return
 
-        dead_queues = set()
         for queue in self._connections[session_id]:
+            self._put_queue_threadsafe(session_id, queue, sse_data)
+
+    def _put_queue_threadsafe(self, session_id: str, queue: asyncio.Queue, sse_data: str) -> None:
+        """Schedule an SSE queue write from sync background-task threads."""
+        loop = self._queue_loops.get(queue)
+        if not loop or loop.is_closed():
+            self._connections[session_id].discard(queue)
+            self._queue_loops.pop(queue, None)
+            return
+
+        def put_nowait() -> None:
             try:
                 queue.put_nowait(sse_data)
             except asyncio.QueueFull:
                 logger.warning(f"Queue full for session {session_id}")
-                dead_queues.add(queue)
+                self._connections[session_id].discard(queue)
+                self._queue_loops.pop(queue, None)
             except Exception as e:
                 logger.error(f"Error sending to queue: {str(e)}")
-                dead_queues.add(queue)
+                self._connections[session_id].discard(queue)
+                self._queue_loops.pop(queue, None)
 
-        for queue in dead_queues:
-            self._connections[session_id].discard(queue)
+        loop.call_soon_threadsafe(put_nowait)
 
     def _format_sse_message(self, event: Dict[str, Any]) -> str:
         """

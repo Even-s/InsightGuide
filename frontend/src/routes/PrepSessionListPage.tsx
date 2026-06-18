@@ -1,16 +1,49 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { prepSessionsAPI, type PrepSessionWithDeck, type PresentationSessionForPrep } from '@/api/prepSessions';
-import { formatDateUTC } from '@/utils/dateUtils';
-import { formatTokenCount, formatUsdCost } from '@/utils/formatters';
+/**
+ * Session Management Page
+ * Hierarchy: Project → Stakeholder (as deck) → Interview Sessions
+ */
 
-// Icon components
+import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
+import {
+  listProjects,
+  getStakeholderPlan,
+  getInterviewGuide,
+  deleteProject,
+  type Project,
+  type StakeholderPlan,
+  type StakeholderProfile,
+  type InterviewGuide,
+} from '@/api/projects'
+import { apiClient } from '@/api/client'
+
+interface SessionInfo {
+  id: string
+  status: string
+  startedAt?: string
+  endedAt?: string
+  createdAt: string
+  costUsd: number
+}
+
+interface StakeholderWithGuide {
+  profile: StakeholderProfile
+  guide: InterviewGuide | null
+  sessions: SessionInfo[]
+}
+
+interface ProjectData {
+  project: Project
+  plan: StakeholderPlan | null
+  stakeholders: StakeholderWithGuide[]
+}
+
 function ChevronDownIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
     </svg>
-  );
+  )
 }
 
 function ChevronRightIcon({ className }: { className?: string }) {
@@ -18,526 +51,464 @@ function ChevronRightIcon({ className }: { className?: string }) {
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
     </svg>
-  );
+  )
 }
-
 
 function TrashIcon({ className }: { className?: string }) {
   return (
     <svg className={className} fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
     </svg>
-  );
+  )
 }
 
 export default function PrepSessionListPage() {
-  const navigate = useNavigate();
-  const [prepSessions, setPrepSessions] = useState<PrepSessionWithDeck[]>([]);
-  const [expandedSessions, setExpandedSessions] = useState<Set<string>>(new Set());
-  const [presentationSessions, setPresentationSessions] = useState<Record<string, PresentationSessionForPrep[]>>({});
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const navigate = useNavigate()
+  const [projectsData, setProjectsData] = useState<ProjectData[]>([])
+  const [unlinkedSessions, setUnlinkedSessions] = useState<SessionInfo[]>([])
+  const [loading, setLoading] = useState(true)
+  const [expandedProjects, setExpandedProjects] = useState<Set<string>>(new Set())
+  const [expandedStakeholders, setExpandedStakeholders] = useState<Set<string>>(new Set())
 
-  const [statusFilter, setStatusFilter] = useState('all');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [sortBy, setSortBy] = useState<'createdAt' | 'updatedAt' | 'status'>('createdAt');
-  const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
-
-  const [stats, setStats] = useState({
-    total: 0,
-    preparing: 0,
-    ready: 0,
-    archived: 0,
-    totalPresentationSessions: 0,
-  });
-
-  const loadPrepSessions = useCallback(async () => {
+  const loadData = useCallback(async () => {
     try {
-      setLoading(true);
-      setError(null);
-      const response = await prepSessionsAPI.listPrepSessions({
-        limit: 1000,
-        offset: 0,
-        sortBy,
-        order: sortOrder,
-      });
-      setPrepSessions(response.prepSessions);
+      setLoading(true)
+      const { projects } = await listProjects()
+
+      const data: ProjectData[] = await Promise.all(
+        projects.map(async (project) => {
+          try {
+            const plan = await getStakeholderPlan(project.id)
+
+            const stakeholders: StakeholderWithGuide[] = await Promise.all(
+              plan.profiles.map(async (profile) => {
+                let guide: InterviewGuide | null = null
+                try {
+                  guide = await getInterviewGuide(project.id, profile.id)
+                } catch { /* no guide yet */ }
+
+                let sessions: SessionInfo[] = []
+                try {
+                  const res = await apiClient.get('/api/interview-sessions/', {
+                    params: { projectId: project.id, limit: 50 }
+                  })
+                  // Filter sessions for this stakeholder
+                  sessions = (res.data.sessions || [])
+                    .filter((s: any) => s.stakeholderProfileId === profile.id)
+                    .map((s: any) => ({
+                      id: s.id,
+                      status: s.status,
+                      startedAt: s.startedAt,
+                      endedAt: s.endedAt,
+                      createdAt: s.createdAt,
+                      costUsd: s.costUsd || 0,
+                    }))
+                } catch { /* no sessions */ }
+
+                return { profile, guide, sessions }
+              })
+            )
+
+            return { project, plan, stakeholders }
+          } catch {
+            return { project, plan: null, stakeholders: [] }
+          }
+        })
+      )
+
+      setProjectsData(data)
+
+      // Load unlinked sessions (no projectId)
+      try {
+        const allRes = await apiClient.get('/api/interview-sessions/', { params: { limit: 50 } })
+        const allSessions = allRes.data.sessions || []
+        const unlinked = allSessions
+          .filter((s: any) => !s.projectId)
+          .map((s: any) => ({
+            id: s.id,
+            status: s.status,
+            startedAt: s.startedAt,
+            endedAt: s.endedAt,
+            createdAt: s.createdAt,
+            costUsd: s.costUsd || 0,
+          }))
+        setUnlinkedSessions(unlinked)
+      } catch { /* ignore */ }
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load prep sessions');
+      console.error('Failed to load data:', err)
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  }, [sortBy, sortOrder]);
+  }, [])
 
-  const loadStats = useCallback(async () => {
+  useEffect(() => { loadData() }, [loadData])
+
+  const toggleProject = (id: string) => {
+    setExpandedProjects(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  const toggleStakeholder = (id: string) => {
+    setExpandedStakeholders(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  const handleDeleteSession = async (sessionId: string) => {
+    if (!confirm('確定要刪除此訪談 session？')) return
     try {
-      const statsData = await prepSessionsAPI.getPrepSessionStats();
-      setStats(statsData);
+      await apiClient.delete(`/api/interview-sessions/${sessionId}`)
+      loadData()
     } catch (err) {
-      console.error('Failed to load stats:', err);
+      console.error('Failed to delete:', err)
     }
-  }, []);
+  }
 
-  const preparingPrepSessionIds = useMemo(
-    () => prepSessions
-      .filter((prepSession) => prepSession.status === 'preparing')
-      .map((prepSession) => prepSession.id)
-      .join(','),
-    [prepSessions],
-  );
-
-  useEffect(() => {
-    loadPrepSessions();
-    loadStats();
-  }, [loadPrepSessions, loadStats]);
-
-  // Global event listener for prep session creation/deletion
-  useEffect(() => {
-    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8001';
-    const url = `${apiUrl}/api/prep-sessions/events`;
-    const eventSource = new EventSource(url);
-
-    eventSource.addEventListener('connected', () => {
-      console.log('✅ Connected to global prep sessions events');
-    });
-
-    eventSource.addEventListener('PREP_SESSION_CREATED', (e) => {
-      const event = JSON.parse(e.data);
-      console.log('📥 New prep session created:', event);
-
-      // Reload the list to include the new prep session
-      loadPrepSessions();
-      loadStats();
-    });
-
-    eventSource.addEventListener('PREP_SESSION_DELETED', (e) => {
-      const event = JSON.parse(e.data);
-      console.log('📥 Prep session deleted:', event);
-
-      // Remove from local state
-      setPrepSessions(prev => prev.filter(ps => ps.id !== event.prepSessionId));
-      loadStats();
-    });
-
-    eventSource.addEventListener('error', (e) => {
-      console.error('❌ Global prep sessions SSE error:', e);
-    });
-
-    return () => {
-      console.log('🔌 Disconnecting from global prep sessions events');
-      eventSource.close();
-    };
-  }, [loadPrepSessions, loadStats]);
-
-  // Handle real-time status updates for ALL prep sessions
-  // We'll connect to each one and update state when status changes
-  useEffect(() => {
-    const eventSources: EventSource[] = [];
-
-    prepSessions.forEach(ps => {
-      // Only subscribe to preparing sessions
-      if (ps.status !== 'preparing') return;
-
-      const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:8001';
-      const url = `${apiUrl}/api/prep-sessions/${ps.id}/events`;
-      const eventSource = new EventSource(url);
-
-      eventSource.addEventListener('PREP_STATUS_CHANGED', (e) => {
-        const event = JSON.parse(e.data);
-        console.log(`Prep session ${event.prepSessionId} status changed to ${event.status}`);
-
-        // Update the prep session in the list
-        setPrepSessions(prev => prev.map(session =>
-          session.id === event.prepSessionId
-            ? { ...session, status: event.status, updatedAt: event.timestamp }
-            : session
-        ));
-
-        // Reload stats
-        loadStats();
-      });
-
-      eventSource.addEventListener('error', () => {
-        console.error(`SSE error for prep session ${ps.id}`);
-      });
-
-      eventSources.push(eventSource);
-    });
-
-    // Cleanup on unmount or when prepSessions change
-    return () => {
-      eventSources.forEach(es => es.close());
-    };
-  }, [loadStats, prepSessions, preparingPrepSessionIds]);
-
-  const toggleExpanded = async (prepSessionId: string) => {
-    const newExpanded = new Set(expandedSessions);
-
-    if (newExpanded.has(prepSessionId)) {
-      newExpanded.delete(prepSessionId);
-    } else {
-      newExpanded.add(prepSessionId);
-
-      // Load presentation sessions if not already loaded
-      if (!presentationSessions[prepSessionId]) {
-        try {
-          const sessions = await prepSessionsAPI.getPrepSessionPresentationSessions(prepSessionId);
-          setPresentationSessions(prev => ({
-            ...prev,
-            [prepSessionId]: sessions
-          }));
-        } catch (err) {
-          console.error('Failed to load presentation sessions:', err);
-        }
-      }
-    }
-
-    setExpandedSessions(newExpanded);
-  };
-
-  const handleDeletePrepSession = async (prepSessionId: string, deckTitle: string) => {
-    const message = `⚠️ WARNING: This will permanently delete:\n\n` +
-      `• The deck "${deckTitle}"\n` +
-      `• All slides and topic cards\n` +
-      `• All presentation sessions\n` +
-      `• All related data\n\n` +
-      `This action CANNOT be undone.\n\n` +
-      `Are you sure you want to delete this prep session?`;
-
-    if (!confirm(message)) {
-      return;
-    }
-
+  const handleDeleteProject = async (projectId: string) => {
+    if (!confirm('確定要刪除此專案？所有訪談記錄將一併刪除。')) return
     try {
-      await prepSessionsAPI.deletePrepSession(prepSessionId);
-      setPrepSessions(prev => prev.filter(s => s.id !== prepSessionId));
-      loadStats();
+      await deleteProject(projectId)
+      loadData()
     } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to delete prep session');
+      console.error('Failed to delete project:', err)
     }
-  };
+  }
 
-  const handleDeleteAll = async () => {
-    const confirmMessage = `⚠️ WARNING: This will permanently delete ALL ${stats.total} prep sessions and ${stats.totalPresentationSessions} presentation sessions!\n\nThis action CANNOT be undone.\n\nType "DELETE ALL" to confirm:`;
-    const userInput = prompt(confirmMessage);
-
-    if (userInput !== 'DELETE ALL') {
-      return;
-    }
-
-    try {
-      setLoading(true);
-      await prepSessionsAPI.deleteAllPrepSessions();
-      setPrepSessions([]);
-      setPresentationSessions({});
-      setExpandedSessions(new Set());
-      await loadStats();
-      alert('All prep sessions deleted successfully');
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to delete all prep sessions');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSort = (field: 'createdAt' | 'updatedAt' | 'status') => {
-    if (sortBy === field) {
-      setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortBy(field);
-      setSortOrder('desc');
-    }
-  };
-
-  const getStatusBadgeColor = (status: string) => {
-    switch (status) {
-      case 'preparing':
-        return 'bg-wood-100 text-wood-600';
-      case 'ready':
-        return 'bg-sage-200 text-sage-700';
-      case 'archived':
-        return 'bg-cream-200 text-natural-700';
-      case 'interviewing':
-        return 'bg-sage-100 text-sage-600';
-      case 'ended':
-        return 'bg-cream-200 text-natural-600';
-      default:
-        return 'bg-cream-200 text-natural-700';
-    }
-  };
-
-  // Use formatDateUTC from dateUtils for proper timezone handling
-  const formatDate = formatDateUTC;
+  const formatDate = (dateStr?: string) => {
+    if (!dateStr) return '-'
+    return new Date(dateStr).toLocaleString('zh-TW', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+  }
 
   const formatDuration = (startedAt?: string, endedAt?: string) => {
-    if (!startedAt || !endedAt) return '-';
-    const duration = Math.floor((new Date(endedAt).getTime() - new Date(startedAt).getTime()) / 1000);
-    const minutes = Math.floor(duration / 60);
-    const seconds = duration % 60;
-    return `${minutes}m ${seconds}s`;
-  };
+    if (!startedAt || !endedAt) return '-'
+    const seconds = Math.floor((new Date(endedAt).getTime() - new Date(startedAt).getTime()) / 1000)
+    return `${Math.floor(seconds / 60)}m ${seconds % 60}s`
+  }
 
-  const filteredPrepSessions = prepSessions.filter(ps => {
-    if (statusFilter !== 'all' && ps.status !== statusFilter) {
-      return false;
-    }
-    if (searchQuery && !ps.deckTitle.toLowerCase().includes(searchQuery.toLowerCase())) {
-      return false;
-    }
-    return true;
-  });
+  const sessionStatusColor: Record<string, string> = {
+    idle: 'bg-cream-100 text-natural-600',
+    interviewing: 'bg-green-50 text-green-700',
+    paused: 'bg-amber-50 text-amber-700',
+    ended: 'bg-blue-50 text-blue-600',
+    failed: 'bg-red-50 text-red-600',
+  }
+
+  // Stats
+  const totalProjects = projectsData.length
+  const totalStakeholders = projectsData.reduce((s, p) => s + p.stakeholders.length, 0)
+  const totalSessions = projectsData.reduce((s, p) => s + p.stakeholders.reduce((ss, st) => ss + st.sessions.length, 0), 0)
+  const completedSessions = projectsData.reduce((s, p) => s + p.stakeholders.reduce((ss, st) => ss + st.sessions.filter(se => se.status === 'ended').length, 0), 0)
 
   if (loading) {
     return (
       <div className="min-h-screen bg-cream-100 flex items-center justify-center">
-        <div className="text-natural-600">Loading prep sessions...</div>
+        <div className="text-natural-500">載入中...</div>
       </div>
-    );
+    )
   }
 
   return (
     <div className="min-h-screen bg-cream-100">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        {/* Header */}
         <div className="flex justify-between items-center mb-8">
           <div>
-            <h1 className="text-3xl font-medium text-natural-700 tracking-wide">Prep Sessions</h1>
-            <p className="text-natural-600 mt-1">Manage your presentation preparation sessions</p>
+            <h1 className="text-2xl font-bold text-natural-800">訪談管理</h1>
+            <p className="text-natural-500 mt-1">專案 → 受訪者 → 訪談 Sessions</p>
           </div>
-          <div className="flex gap-3">
-            {stats.total > 0 && (
-              <button
-                onClick={handleDeleteAll}
-                className="px-4 py-2 bg-wood-400 text-white rounded-xl hover:bg-wood-500 shadow-natural flex items-center gap-2 font-medium tracking-wide"
-                title="Delete all prep sessions and presentation sessions"
-              >
-                <TrashIcon className="w-4 h-4" />
-                Delete All ({stats.total})
-              </button>
-            )}
-            <button
-              onClick={() => navigate('/')}
-              className="px-4 py-2 bg-sage-400 text-white rounded-xl hover:bg-sage-500 shadow-natural font-medium tracking-wide"
-            >
-              Back to Home
-            </button>
+          <button
+            onClick={() => navigate('/')}
+            className="px-4 py-2 bg-sage-400 text-white rounded-lg hover:bg-sage-500 text-sm"
+          >
+            回首頁
+          </button>
+        </div>
+
+        {/* Stats */}
+        <div className="grid grid-cols-4 gap-4 mb-6">
+          <div className="bg-white rounded-xl border border-cream-200 p-4">
+            <div className="text-2xl font-bold text-natural-700">{totalProjects}</div>
+            <div className="text-xs text-natural-500">專案</div>
+          </div>
+          <div className="bg-white rounded-xl border border-cream-200 p-4">
+            <div className="text-2xl font-bold text-sage-600">{totalStakeholders}</div>
+            <div className="text-xs text-natural-500">受訪者</div>
+          </div>
+          <div className="bg-white rounded-xl border border-cream-200 p-4">
+            <div className="text-2xl font-bold text-emerald-600">{totalSessions}</div>
+            <div className="text-xs text-natural-500">訪談 Sessions</div>
+          </div>
+          <div className="bg-white rounded-xl border border-cream-200 p-4">
+            <div className="text-2xl font-bold text-amber-600">{completedSessions}</div>
+            <div className="text-xs text-natural-500">已完成</div>
           </div>
         </div>
 
-        {error && (
-          <div className="bg-wood-50 border border-wood-300 text-wood-600 px-4 py-3 rounded-xl mb-6">
-            {error}
+        {/* Empty state */}
+        {projectsData.length === 0 && (
+          <div className="text-center py-12 bg-white rounded-xl border border-cream-200">
+            <p className="text-natural-500 mb-3">尚無專案</p>
+            <button onClick={() => navigate('/')} className="text-sage-600 hover:underline text-sm">
+              建立第一個專案
+            </button>
           </div>
         )}
 
-        {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
-          <div className="bg-cream-50 rounded-xl shadow-natural border border-cream-300 p-4">
-            <div className="text-sm text-natural-600 tracking-wide">Total Prep Sessions</div>
-            <div className="text-2xl font-medium text-natural-700">{stats.total}</div>
-          </div>
-          <div className="bg-cream-50 rounded-xl shadow-natural border border-cream-300 p-4">
-            <div className="text-sm text-natural-600 tracking-wide">Preparing</div>
-            <div className="text-2xl font-medium text-wood-600">{stats.preparing}</div>
-          </div>
-          <div className="bg-cream-50 rounded-xl shadow-natural border border-cream-300 p-4">
-            <div className="text-sm text-natural-600 tracking-wide">Ready</div>
-            <div className="text-2xl font-medium text-sage-600">{stats.ready}</div>
-          </div>
-          <div className="bg-cream-50 rounded-xl shadow-natural border border-cream-300 p-4">
-            <div className="text-sm text-natural-600 tracking-wide">Archived</div>
-            <div className="text-2xl font-medium text-natural-600">{stats.archived}</div>
-          </div>
-          <div className="bg-cream-50 rounded-xl shadow-natural border border-cream-300 p-4">
-            <div className="text-sm text-natural-600 tracking-wide">Total Presentations</div>
-            <div className="text-2xl font-medium text-sage-600">{stats.totalPresentationSessions}</div>
-          </div>
-        </div>
+        {/* Project hierarchy */}
+        <div className="space-y-4">
+          {projectsData.map(({ project, stakeholders }) => {
+            const isProjectExpanded = expandedProjects.has(project.id)
+            const projectSessions = stakeholders.reduce((s, st) => s + st.sessions.length, 0)
+            const projectCompleted = stakeholders.reduce((s, st) => s + st.sessions.filter(se => se.status === 'ended').length, 0)
 
-        {/* Filters */}
-        <div className="bg-cream-50 rounded-xl shadow-natural border border-cream-300 p-4 mb-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-natural-700 mb-2 tracking-wide">Status</label>
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="w-full px-3 py-2 border border-cream-300 rounded-xl focus:ring-2 focus:ring-sage-300 bg-white text-natural-700"
-              >
-                <option value="all">All Statuses</option>
-                <option value="preparing">Preparing</option>
-                <option value="ready">Ready</option>
-                <option value="archived">Archived</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-natural-700 mb-2 tracking-wide">Search</label>
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search by deck title..."
-                className="w-full px-3 py-2 border border-cream-300 rounded-xl focus:ring-2 focus:ring-sage-300 bg-white text-natural-700"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Prep Sessions Table */}
-        <div className="bg-cream-50 rounded-xl shadow-natural border border-cream-300 overflow-hidden">
-          <table className="min-w-full divide-y divide-cream-300">
-            <thead className="bg-wood-50">
-              <tr>
-                <th className="w-12 px-6 py-3"></th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-natural-600 uppercase tracking-wider">
-                  ID
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-natural-600 uppercase tracking-wider">
-                  Deck / Title
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-natural-600 uppercase tracking-wider">
-                  Status
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-natural-600 uppercase tracking-wider">
-                  Presentations
-                </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-natural-600 uppercase tracking-wider">
-                  Deck AI Cost
-                </th>
-                <th
-                  className="px-6 py-3 text-left text-xs font-medium text-natural-600 uppercase tracking-wider cursor-pointer hover:bg-cream-100"
-                  onClick={() => handleSort('createdAt')}
+            return (
+              <div key={project.id} className="bg-white rounded-xl border border-cream-200 overflow-hidden">
+                {/* Project row */}
+                <div
+                  className="px-5 py-4 cursor-pointer hover:bg-cream-50 transition-colors flex items-center gap-3"
+                  onClick={() => toggleProject(project.id)}
                 >
-                  Created {sortBy === 'createdAt' && (sortOrder === 'asc' ? '↑' : '↓')}
-                </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-natural-600 uppercase tracking-wider">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="bg-white divide-y divide-cream-200">
-              {filteredPrepSessions.map((prepSession) => (
-                <>
-                  <tr key={prepSession.id} className="hover:bg-cream-50">
-                    <td className="px-6 py-4">
-                      <button
-                        onClick={() => toggleExpanded(prepSession.id)}
-                        className="text-natural-400 hover:text-natural-600"
-                      >
-                        {expandedSessions.has(prepSession.id) ? (
-                          <ChevronDownIcon className="w-5 h-5" />
-                        ) : (
-                          <ChevronRightIcon className="w-5 h-5" />
-                        )}
-                      </button>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="text-xs font-mono text-natural-500">{prepSession.id}</div>
-                    </td>
-                    <td className="px-6 py-4">
-                      <div className="text-sm font-medium text-natural-700">{prepSession.deckTitle}</div>
-                      {prepSession.title && (
-                        <div className="text-sm text-natural-600">{prepSession.title}</div>
-                      )}
-                    </td>
-                    <td className="px-6 py-4">
-                      <span className={`px-2 py-1 inline-flex text-xs leading-5 font-medium rounded-lg ${getStatusBadgeColor(prepSession.status)}`}>
-                        {prepSession.status}
+                  {isProjectExpanded ? (
+                    <ChevronDownIcon className="w-4 h-4 text-natural-400 flex-shrink-0" />
+                  ) : (
+                    <ChevronRightIcon className="w-4 h-4 text-natural-400 flex-shrink-0" />
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-3">
+                      <h3 className="text-base font-semibold text-natural-800 truncate">{project.title}</h3>
+                      <span className="px-2 py-0.5 text-xs bg-sage-50 text-sage-600 rounded-full">
+                        {stakeholders.length} 受訪者
                       </span>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-natural-700">
-                      {prepSession.presentationSessionsCount}
-                    </td>
-                    <td className="px-6 py-4 text-sm text-natural-700">
-                      <div className="font-medium">{formatUsdCost(prepSession.deckCostUsd)}</div>
-                      <div className="text-xs text-natural-500">
-                        {formatTokenCount(prepSession.deckAiUsage?.totalTokens)} tokens
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 text-sm text-natural-600">
-                      {formatDate(prepSession.createdAt)}
-                    </td>
-                    <td className="px-6 py-4 text-right text-sm font-medium">
-                      <button
-                        onClick={() => handleDeletePrepSession(prepSession.id, prepSession.deckTitle)}
-                        className="text-wood-500 hover:text-wood-600 ml-4"
-                        title="Delete prep session and deck"
-                      >
-                        <TrashIcon className="w-4 h-4" />
-                      </button>
-                    </td>
-                  </tr>
+                    </div>
+                    {project.description && (
+                      <p className="text-xs text-natural-400 mt-0.5 truncate">{project.description}</p>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-4 text-xs text-natural-400 flex-shrink-0">
+                    <span>{projectSessions} 訪談</span>
+                    <span>{projectCompleted} 完成</span>
+                    <button
+                      onClick={e => { e.stopPropagation(); navigate(`/projects/${project.id}`) }}
+                      className="px-2 py-1 text-sage-600 hover:bg-sage-50 rounded"
+                    >
+                      管理
+                    </button>
+                    <button
+                      onClick={e => { e.stopPropagation(); handleDeleteProject(project.id) }}
+                      className="px-2 py-1 text-red-500 hover:bg-red-50 rounded"
+                      title="刪除專案"
+                    >
+                      <TrashIcon className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
 
-                  {/* Expanded Presentation Sessions */}
-                  {expandedSessions.has(prepSession.id) && (
-                    <tr>
-                      <td colSpan={8} className="px-6 py-4 bg-cream-50">
-                        <div className="ml-8">
-                          <h4 className="text-sm font-medium text-natural-700 mb-2 tracking-wide">Presentation Sessions</h4>
-                          {presentationSessions[prepSession.id]?.length > 0 ? (
-                            <table className="min-w-full">
-                              <thead>
-                                <tr className="text-xs text-natural-600">
-                                  <th className="text-left py-2">ID</th>
-                                  <th className="text-left py-2">Status</th>
-                                  <th className="text-left py-2">Started</th>
-                                  <th className="text-left py-2">Ended</th>
-                                  <th className="text-left py-2">Duration</th>
-                                  <th className="text-left py-2">AI Cost</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {presentationSessions[prepSession.id].map((session) => (
-                                  <tr key={session.id} className="text-sm">
-                                    <td className="py-2">
-                                      <div className="text-xs font-mono text-natural-400">{session.id}</div>
-                                    </td>
-                                    <td className="py-2">
-                                      <span className={`px-2 py-1 inline-flex text-xs leading-5 font-semibold rounded-full ${getStatusBadgeColor(session.status)}`}>
-                                        {session.status}
-                                      </span>
-                                    </td>
-                                    <td className="py-2 text-natural-600">
-                                      {session.startedAt ? formatDate(session.startedAt) : '-'}
-                                    </td>
-                                    <td className="py-2 text-natural-600">
-                                      {session.endedAt ? formatDate(session.endedAt) : '-'}
-                                    </td>
-                                    <td className="py-2 text-natural-600">
-                                      {formatDuration(session.startedAt, session.endedAt)}
-                                    </td>
-                                    <td className="py-2 text-natural-700">
-                                      <div className="font-medium">{formatUsdCost(session.costUsd)}</div>
-                                      <div className="text-xs text-natural-500">
-                                        {formatTokenCount(session.aiUsage?.totalTokens)} tokens
-                                      </div>
-                                    </td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          ) : (
-                            <p className="text-sm text-natural-500">No presentation sessions yet</p>
+                {/* Expanded: Stakeholders */}
+                {isProjectExpanded && (
+                  <div className="border-t border-cream-200">
+                    {stakeholders.length === 0 ? (
+                      <div className="px-10 py-4 text-sm text-natural-400">
+                        尚無受訪者。
+                        <button onClick={() => navigate(`/projects/${project.id}`)} className="text-sage-600 hover:underline ml-1">
+                          前往新增
+                        </button>
+                      </div>
+                    ) : (
+                      stakeholders.map(({ profile, guide, sessions }) => {
+                        const isStakeholderExpanded = expandedStakeholders.has(profile.id)
+                        const hasGuide = !!guide
+                        const cardCount = guide?.card_count || 0
+
+                        return (
+                          <div key={profile.id} className="border-b border-cream-100 last:border-b-0">
+                            {/* Stakeholder row */}
+                            <div
+                              className="px-10 py-3 cursor-pointer hover:bg-cream-50 transition-colors flex items-center gap-3"
+                              onClick={() => toggleStakeholder(profile.id)}
+                            >
+                              {isStakeholderExpanded ? (
+                                <ChevronDownIcon className="w-3.5 h-3.5 text-natural-400 flex-shrink-0" />
+                              ) : (
+                                <ChevronRightIcon className="w-3.5 h-3.5 text-natural-400 flex-shrink-0" />
+                              )}
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-medium text-natural-700">{profile.name}</span>
+                                  {profile.roleTitle && (
+                                    <span className="text-xs text-natural-400">{profile.roleTitle}</span>
+                                  )}
+                                  <span className={`px-1.5 py-0.5 text-xs rounded ${
+                                    profile.status === 'interviewed' ? 'bg-green-50 text-green-700' :
+                                    'bg-cream-100 text-natural-500'
+                                  }`}>
+                                    {profile.status === 'interviewed' ? '已訪' : '待訪'}
+                                  </span>
+                                  {hasGuide && (
+                                    <span className="px-1.5 py-0.5 text-xs bg-blue-50 text-blue-600 rounded">
+                                      {cardCount} 卡
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2 text-xs flex-shrink-0">
+                                <span className="text-natural-400">{sessions.length} 次訪談</span>
+                                {hasGuide ? (
+                                  <>
+                                    <button
+                                      onClick={e => { e.stopPropagation(); navigate(`/editor/${guide!.document_id}`) }}
+                                      className="px-2 py-0.5 text-sage-600 hover:bg-sage-50 rounded"
+                                    >
+                                      編輯大綱
+                                    </button>
+                                    <button
+                                      onClick={e => {
+                                        e.stopPropagation()
+                                        navigate(`/interview/${guide!.document_id}?projectId=${project.id}&stakeholderId=${profile.id}`)
+                                      }}
+                                      className="px-2 py-0.5 bg-sage-400 text-white rounded hover:bg-sage-500"
+                                    >
+                                      訪談
+                                    </button>
+                                  </>
+                                ) : (
+                                  <span className="text-amber-500">未生成大綱</span>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Expanded: Sessions */}
+                            {isStakeholderExpanded && (
+                              <div className="px-16 pb-3">
+                                {sessions.length === 0 ? (
+                                  <div className="text-xs text-natural-400 py-2">尚無訪談紀錄</div>
+                                ) : (
+                                  <table className="w-full text-xs">
+                                    <thead>
+                                      <tr className="text-natural-400 border-b border-cream-200">
+                                        <th className="text-left py-1.5 pr-3">Session</th>
+                                        <th className="text-left py-1.5 pr-3">狀態</th>
+                                        <th className="text-left py-1.5 pr-3">開始</th>
+                                        <th className="text-left py-1.5 pr-3">時長</th>
+                                        <th className="text-left py-1.5 pr-3">花費</th>
+                                        <th className="text-right py-1.5">操作</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {sessions.map(session => (
+                                        <tr key={session.id} className="border-b border-cream-100">
+                                          <td className="py-1.5 pr-3 font-mono text-natural-500">
+                                            {session.id.replace('session_', '').slice(0, 8)}
+                                          </td>
+                                          <td className="py-1.5 pr-3">
+                                            <span className={`px-1.5 py-0.5 rounded text-xs ${sessionStatusColor[session.status] || 'bg-cream-100 text-natural-600'}`}>
+                                              {session.status === 'ended' ? '完成' : session.status === 'interviewing' ? '進行中' : session.status}
+                                            </span>
+                                          </td>
+                                          <td className="py-1.5 pr-3 text-natural-500">{formatDate(session.startedAt)}</td>
+                                          <td className="py-1.5 pr-3 text-natural-500">{formatDuration(session.startedAt, session.endedAt)}</td>
+                                          <td className="py-1.5 pr-3 text-natural-500">${session.costUsd.toFixed(4)}</td>
+                                          <td className="py-1.5 text-right">
+                                            <div className="flex items-center justify-end gap-1">
+                                              {session.status === 'ended' && (
+                                                <button
+                                                  onClick={() => navigate(`/sessions/${session.id}/insight-memo`)}
+                                                  className="px-1.5 py-0.5 text-sage-600 hover:bg-sage-50 rounded"
+                                                >
+                                                  洞察
+                                                </button>
+                                              )}
+                                              <button
+                                                onClick={() => navigate(`/sessions/${session.id}/log`)}
+                                                className="px-1.5 py-0.5 text-natural-400 hover:bg-cream-100 rounded"
+                                              >
+                                                Log
+                                              </button>
+                                              <button
+                                                onClick={() => handleDeleteSession(session.id)}
+                                                className="text-red-300 hover:text-red-500"
+                                              >
+                                                <TrashIcon className="w-3.5 h-3.5" />
+                                              </button>
+                                            </div>
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      })
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+
+        {/* Unlinked Sessions (no project) */}
+        {unlinkedSessions.length > 0 && (
+          <div className="mt-6 bg-white rounded-xl border border-dashed border-cream-300 overflow-hidden">
+            <div className="px-5 py-4">
+              <h3 className="text-base font-semibold text-natural-500">未歸屬專案的訪談</h3>
+              <p className="text-xs text-natural-400 mt-0.5">這些訪談未關聯到任何專案</p>
+            </div>
+            <div className="border-t border-cream-200 px-5 pb-4">
+              <table className="w-full text-xs mt-2">
+                <thead>
+                  <tr className="text-natural-400 border-b border-cream-200">
+                    <th className="text-left py-1.5 pr-3">Session</th>
+                    <th className="text-left py-1.5 pr-3">狀態</th>
+                    <th className="text-left py-1.5 pr-3">時間</th>
+                    <th className="text-right py-1.5">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {unlinkedSessions.map(session => (
+                    <tr key={session.id} className="border-b border-cream-100">
+                      <td className="py-1.5 pr-3 font-mono text-natural-500">
+                        {session.id.replace('session_', '').slice(0, 8)}
+                      </td>
+                      <td className="py-1.5 pr-3">
+                        <span className={`px-1.5 py-0.5 rounded text-xs ${sessionStatusColor[session.status] || 'bg-cream-100 text-natural-600'}`}>
+                          {session.status === 'ended' ? '完成' : session.status}
+                        </span>
+                      </td>
+                      <td className="py-1.5 pr-3 text-natural-500">{formatDate(session.createdAt)}</td>
+                      <td className="py-1.5 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          {session.status === 'ended' && (
+                            <button
+                              onClick={() => navigate(`/sessions/${session.id}/insight-memo`)}
+                              className="px-1.5 py-0.5 text-sage-600 hover:bg-sage-50 rounded"
+                            >
+                              洞察
+                            </button>
                           )}
+                          <button
+                            onClick={() => handleDeleteSession(session.id)}
+                            className="text-red-300 hover:text-red-500"
+                          >
+                            <TrashIcon className="w-3.5 h-3.5" />
+                          </button>
                         </div>
                       </td>
                     </tr>
-                  )}
-                </>
-              ))}
-            </tbody>
-          </table>
-
-          {filteredPrepSessions.length === 0 && (
-            <div className="text-center py-12 text-natural-500">
-              No prep sessions found
+                  ))}
+                </tbody>
+              </table>
             </div>
-          )}
-        </div>
-
-        <div className="mt-4 text-center text-sm text-natural-500">
-          Showing {filteredPrepSessions.length} of {prepSessions.length} prep sessions
-        </div>
+          </div>
+        )}
       </div>
     </div>
-  );
+  )
 }

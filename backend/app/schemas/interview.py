@@ -32,6 +32,8 @@ class InterviewSessionCreate(BaseModel):
     """Schema for creating an interview session."""
     prepSessionId: str
     documentId: str
+    projectId: Optional[str] = None
+    stakeholderProfileId: Optional[str] = None
 
 
 class InterviewSessionUpdate(BaseModel):
@@ -47,7 +49,8 @@ class InterviewCardStateUpdate(BaseModel):
     """Schema for manually updating an interview card state."""
     status: Literal[
         "pending", "listening", "probably_sufficient", "sufficient",
-        "at_risk", "skipped", "manually_checked", "disabled"
+        "at_risk", "skipped", "manually_checked", "disabled",
+        "not_applicable_for_role", "needs_different_stakeholder"
     ]
     confidence: Optional[float] = Field(None, ge=0, le=1)
     evidenceTranscript: Optional[str] = None
@@ -61,7 +64,8 @@ class InterviewCardStateSchema(BaseModel):
     questionCardId: str
     status: Literal[
         "pending", "listening", "probably_sufficient", "sufficient",
-        "at_risk", "skipped", "manually_checked", "disabled"
+        "at_risk", "skipped", "manually_checked", "disabled",
+        "not_applicable_for_role", "needs_different_stakeholder"
     ]
     confidence: Optional[float] = Field(None, ge=0, le=1)
     answeredAt: Optional[datetime] = None
@@ -118,6 +122,8 @@ class InterviewSessionWithDocument(BaseModel):
     documentId: str
     documentTitle: str
     userId: str
+    projectId: Optional[str] = None
+    stakeholderProfileId: Optional[str] = None
     status: Literal[
         "idle", "preparing", "ready", "interviewing",
         "paused", "section_transitioning", "recovering", "ended", "failed"

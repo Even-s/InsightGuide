@@ -38,7 +38,7 @@ class RealtimeService:
                     "type": "transcription",
                     "audio": {
                         "input": {
-                            "noise_reduction": {"type": "far_field"},
+                            "noise_reduction": {"type": "near_field"},
                             "transcription": {
                                 "model": settings.REALTIME_TRANSCRIPTION_MODEL,
                                 "language": "zh",

@@ -29,6 +29,7 @@ interface UseRealtimeTranscriptionOptions {
   onTranscriptDelta?: (delta: string, itemId?: string) => void
   onTranscriptCompleted?: (payload: TranscriptCompletedPayload) => void
   onSpeechStarted?: () => void
+  onMediaStreamReady?: (stream: MediaStream) => void
 }
 
 function getErrorMessage(error: unknown) {
@@ -40,8 +41,11 @@ export function useRealtimeTranscription({
   onTranscriptDelta,
   onTranscriptCompleted,
   onSpeechStarted,
+  onMediaStreamReady,
 }: UseRealtimeTranscriptionOptions = {}) {
-  const [status, setStatus] = useState<RealtimeTranscriptionStatus>('idle')
+  const [status, _setStatus] = useState<RealtimeTranscriptionStatus>('idle')
+  const statusRef = useRef<RealtimeTranscriptionStatus>('idle')
+  const setStatus = (s: RealtimeTranscriptionStatus) => { statusRef.current = s; _setStatus(s) }
   const [isRecording, setIsRecording] = useState(false)
   const [isTranscribing, setIsTranscribing] = useState(false)
   const [error, setError] = useState<Error | null>(null)
@@ -60,6 +64,7 @@ export function useRealtimeTranscription({
     onTranscriptDelta,
     onTranscriptCompleted,
     onSpeechStarted,
+    onMediaStreamReady,
   })
 
   useEffect(() => {
@@ -67,8 +72,9 @@ export function useRealtimeTranscription({
       onTranscriptDelta,
       onTranscriptCompleted,
       onSpeechStarted,
+      onMediaStreamReady,
     }
-  }, [onSpeechStarted, onTranscriptCompleted, onTranscriptDelta])
+  }, [onMediaStreamReady, onSpeechStarted, onTranscriptCompleted, onTranscriptDelta])
 
   const cleanupConnection = useCallback(() => {
     dataChannelRef.current?.close()
@@ -208,6 +214,7 @@ export function useRealtimeTranscription({
 
   const startTranscription = useCallback(async () => {
     if (peerConnectionRef.current) return
+    if (statusRef.current === 'connecting') return
     if (!navigator.mediaDevices?.getUserMedia) {
       setError(new Error('此瀏覽器不支援麥克風錄音'))
       setStatus('error')
@@ -226,7 +233,7 @@ export function useRealtimeTranscription({
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
-          noiseSuppression: true,
+          noiseSuppression: false,
           autoGainControl: true,
         },
       })
@@ -235,6 +242,8 @@ export function useRealtimeTranscription({
         mediaStream.getTracks().forEach((track) => track.stop())
         return
       }
+
+      callbacksRef.current.onMediaStreamReady?.(mediaStream)
 
       const peerConnection = new RTCPeerConnection()
       const dataChannel = peerConnection.createDataChannel('oai-events')
@@ -270,6 +279,13 @@ export function useRealtimeTranscription({
         if (['failed', 'disconnected', 'closed'].includes(peerConnection.connectionState)) {
           if (peerConnectionRef.current === peerConnection) {
             setIsRecording(false)
+            setStatus('error')
+            setError(new Error('即時轉錄連線中斷，請重新開始'))
+            // Clean up so startTranscription can be called again
+            peerConnectionRef.current = null
+            dataChannelRef.current = null
+            mediaStreamRef.current?.getTracks().forEach(t => t.stop())
+            mediaStreamRef.current = null
           }
         }
       }
@@ -329,5 +345,6 @@ export function useRealtimeTranscription({
     error,
     startTranscription,
     stopTranscription,
+    mediaStream: mediaStreamRef.current,
   }
 }

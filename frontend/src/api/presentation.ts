@@ -49,10 +49,16 @@ function normalizeCardState(raw: ApiRecord): PresentationCardState {
 }
 
 export const presentationAPI = {
-  async createSession(deckId: string, prepSessionId: string): Promise<PresentationSession> {
+  async createSession(
+    deckId: string,
+    prepSessionId: string,
+    opts?: { projectId?: string; stakeholderProfileId?: string }
+  ): Promise<PresentationSession> {
     const response = await apiClient.post('/api/interview-sessions/', {
       prepSessionId,
-      documentId: deckId
+      documentId: deckId,
+      ...(opts?.projectId && { projectId: opts.projectId }),
+      ...(opts?.stakeholderProfileId && { stakeholderProfileId: opts.stakeholderProfileId }),
     });
     return response.data;
   },
@@ -153,6 +159,14 @@ export const presentationAPI = {
     const response = await apiClient.post(
       `/api/interview-sessions/${sessionId}/utterances`,
       { transcript, themeId, sectionId: themeId, realtimeItemId, startedAt, endedAt }
+    );
+    return response.data;
+  },
+
+  async updateUtteranceSpeaker(sessionId: string, utteranceId: string, speaker: string) {
+    const response = await apiClient.patch(
+      `/api/interview-sessions/${sessionId}/utterances/${utteranceId}/speaker`,
+      { speaker }
     );
     return response.data;
   },

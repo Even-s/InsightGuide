@@ -14,6 +14,7 @@ class Document(Base):
 
     id = Column(String, primary_key=True)
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    project_id = Column(String, ForeignKey("projects.id"), nullable=True, index=True)
     title = Column(String, nullable=False)
     source_file_url = Column(Text, nullable=False)
     file_type = Column(String, nullable=False)  # pdf, docx, md, txt
@@ -28,6 +29,7 @@ class Document(Base):
 
     # Relationships
     user = relationship("User", back_populates="documents")
+    project = relationship("Project", back_populates="documents", foreign_keys=[project_id])
     sections = relationship("Section", back_populates="document", cascade="all, delete-orphan")
     interview_themes = relationship("InterviewTheme", back_populates="document", cascade="all, delete-orphan")
     question_cards = relationship("QuestionCard", back_populates="document", cascade="all, delete-orphan")

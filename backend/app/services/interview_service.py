@@ -10,6 +10,7 @@ from fastapi import HTTPException, status
 
 from app.models.interview_session import InterviewSession, InterviewCardState
 from app.models.utterance import Utterance
+from app.models.live_utterance import LiveUtterance
 from app.models.document import Document
 from app.models.prep_session import PrepSession
 from app.models.question_card import QuestionCard
@@ -166,11 +167,15 @@ class InterviewService:
 
         # Create session
         session_id = f"session_{uuid.uuid4().hex[:12]}"
+        project_id = getattr(session_data, 'projectId', None)
+        stakeholder_profile_id = getattr(session_data, 'stakeholderProfileId', None)
         session = InterviewSession(
             id=session_id,
             prep_session_id=session_data.prepSessionId,
             document_id=session_data.documentId,
             user_id=user_id,
+            project_id=project_id,
+            stakeholder_profile_id=stakeholder_profile_id,
             status="idle",
             created_at=datetime.utcnow()
         )
@@ -195,6 +200,18 @@ class InterviewService:
 
         db.commit()
         db.refresh(session)
+
+        # Auto-apply role filter if stakeholder is set
+        if stakeholder_profile_id:
+            try:
+                from app.services.role_filter_service import role_filter_service
+                result = role_filter_service.apply_role_filter_to_session(db, session_id)
+                logger.info(
+                    f"Role filter applied: {result.get('applicable', 0)} applicable, "
+                    f"{result.get('not_applicable', 0)} not applicable"
+                )
+            except Exception as e:
+                logger.warning(f"Role filter failed (non-fatal): {e}")
 
         logger.info(
             f"Created interview session {session_id} for document {session_data.documentId} "
@@ -392,24 +409,31 @@ class InterviewService:
         db: Session,
         session_id: str,
         utterance_data: UtteranceCreate
-    ) -> Utterance:
-        """Create a new utterance in an interview session."""
+    ) -> LiveUtterance:
+        """Create a new live utterance from Realtime API in an interview session.
+
+        Phase 1: This now writes to live_utterances instead of utterances.
+        Live utterances are used for provisional card coverage during the interview.
+        """
         session = self.get_session(db, session_id)
 
         utterance_id = f"utt_{uuid.uuid4().hex[:12]}"
-        # Only store section_id if it's actually a section (not a theme)
-        raw_section_id = utterance_data.sectionId
-        section_id = raw_section_id if raw_section_id and not raw_section_id.startswith("theme_") else None
 
-        utterance = Utterance(
+        # Calculate sequence index based on existing live utterances
+        existing_count = db.query(LiveUtterance).filter(
+            LiveUtterance.session_id == session_id
+        ).count()
+
+        utterance = LiveUtterance(
             id=utterance_id,
             session_id=session_id,
-            section_id=section_id,
-            speaker=utterance_data.speaker,
+            realtime_event_id=utterance_data.realtimeItemId,
+            speaker=utterance_data.speaker or 'unknown',
             transcript=utterance_data.transcript,
             started_at=utterance_data.startedAt,
             ended_at=utterance_data.endedAt,
-            realtime_item_id=utterance_data.realtimeItemId,
+            sequence_index=existing_count,
+            is_partial=False,
             created_at=datetime.utcnow()
         )
 
@@ -417,7 +441,7 @@ class InterviewService:
         db.commit()
         db.refresh(utterance)
 
-        logger.info(f"Created utterance {utterance_id} in session {session_id} (speaker: {utterance.speaker})")
+        logger.info(f"Created live utterance {utterance_id} in session {session_id} (speaker: {utterance.speaker})")
 
         return utterance
 
@@ -428,19 +452,54 @@ class InterviewService:
         section_id: Optional[str] = None,
         speaker: Optional[str] = None,
         limit: int = 100
-    ) -> List[Utterance]:
-        """Get utterances for a session, optionally filtered by section and/or speaker."""
+    ) -> list:
+        """Get utterances for a session.
+
+        Priority: final_utterances > live_utterances > old utterances table.
+        """
         self.get_session(db, session_id)
 
-        query = db.query(Utterance).filter(Utterance.session_id == session_id)
+        # Try final_utterances first (post-diarization, official)
+        from app.models.final_utterance import FinalUtterance
+        finals = db.query(FinalUtterance).filter(
+            FinalUtterance.session_id == session_id
+        ).order_by(asc(FinalUtterance.sequence_index)).limit(limit).all()
+        if finals:
+            return finals
 
+        # Fall back to live_utterances
+        from app.models.live_utterance import LiveUtterance
+        query = db.query(LiveUtterance).filter(LiveUtterance.session_id == session_id)
+        if speaker:
+            query = query.filter(LiveUtterance.speaker == speaker)
+        lives = query.order_by(asc(LiveUtterance.sequence_index)).limit(limit).all()
+        if lives:
+            return lives
+
+        # Legacy fallback
+        query = db.query(Utterance).filter(Utterance.session_id == session_id)
         if section_id:
             query = query.filter(Utterance.section_id == section_id)
-
         if speaker:
             query = query.filter(Utterance.speaker == speaker)
+        return query.order_by(asc(Utterance.created_at)).limit(limit).all()
 
-        utterances = query.order_by(asc(Utterance.created_at)).limit(limit).all()
+    def get_live_utterances(
+        self,
+        db: Session,
+        session_id: str,
+        speaker: Optional[str] = None,
+        limit: int = 100
+    ) -> List[LiveUtterance]:
+        """Get live utterances for a session (Realtime API transcripts)."""
+        self.get_session(db, session_id)
+
+        query = db.query(LiveUtterance).filter(LiveUtterance.session_id == session_id)
+
+        if speaker:
+            query = query.filter(LiveUtterance.speaker == speaker)
+
+        utterances = query.order_by(asc(LiveUtterance.sequence_index)).limit(limit).all()
 
         return utterances
 
@@ -449,9 +508,10 @@ class InterviewService:
         db: Session,
         user_id: str,
         limit: int = 50,
-        offset: int = 0
+        offset: int = 0,
+        project_id: Optional[str] = None,
     ) -> InterviewSessionListResponse:
-        """List interview sessions for a user."""
+        """List interview sessions for a user, optionally filtered by project."""
         # Query sessions with document information
         query = db.query(
             InterviewSession,
@@ -462,6 +522,9 @@ class InterviewService:
         ).filter(
             InterviewSession.user_id == user_id
         )
+
+        if project_id:
+            query = query.filter(InterviewSession.project_id == project_id)
 
         # Get total count
         total = query.count()
@@ -492,6 +555,8 @@ class InterviewService:
                 documentId=session.document_id,
                 documentTitle=document_title,
                 userId=session.user_id,
+                projectId=session.project_id,
+                stakeholderProfileId=session.stakeholder_profile_id,
                 status=session.status,
                 currentSectionId=session.current_section_id,
                 startedAt=session.started_at,

@@ -16,6 +16,7 @@ export type FileType = 'pdf' | 'docx' | 'doc' | 'md' | 'txt'
 export interface Document {
   id: string
   userId: string
+  project_id?: string
   title: string
   sourceFileUrl: string
   fileType: FileType

@@ -55,7 +55,8 @@ class DocumentService:
         db: Session,
         file: UploadFile,
         title: Optional[str] = None,
-        user_id: str = "user_default"  # TODO: Get from auth
+        user_id: str = "user_default",  # TODO: Get from auth
+        project_id: Optional[str] = None,
     ) -> Document:
         """
         Create a new document from uploaded file.
@@ -124,6 +125,7 @@ class DocumentService:
         document = Document(
             id=document_id,
             user_id=user_id,
+            project_id=project_id,
             title=title,
             source_file_url=source_file_url,
             file_type=file_ext,
@@ -216,6 +218,88 @@ class DocumentService:
 
         except Exception as e:
             logger.error(f"Failed to start document processing: {e}")
+
+        return document
+
+    @staticmethod
+    def create_document_from_text(
+        db: Session,
+        title: str,
+        content: str,
+        user_id: str = "user_default",
+        project_id: Optional[str] = None,
+    ) -> Document:
+        """Create a document directly from text content (no file upload)."""
+        document_id = f"doc_{uuid.uuid4().hex[:12]}"
+
+        document = Document(
+            id=document_id,
+            user_id=user_id,
+            project_id=project_id,
+            title=title,
+            source_file_url="topic://direct-input",
+            file_type="text",
+            status="uploaded",
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
+
+        db.add(document)
+        db.commit()
+        db.refresh(document)
+
+        # Create a single section with the topic content
+        from app.models.section import Section
+        section = Section(
+            id=f"sec_{uuid.uuid4().hex[:12]}",
+            document_id=document_id,
+            section_number=1,
+            title=title,
+            extracted_text=content,
+            created_at=datetime.utcnow(),
+        )
+        db.add(section)
+        db.commit()
+
+        # Create prep session
+        try:
+            from app.models.prep_session import PrepSession
+            prep_session = PrepSession(
+                id=document_id,
+                document_id=document_id,
+                user_id=user_id,
+                title=f"{title} - Prep Session",
+                status="preparing",
+                created_at=datetime.utcnow(),
+                updated_at=datetime.utcnow(),
+            )
+            db.add(prep_session)
+            db.commit()
+        except Exception as e:
+            logger.warning(f"Failed to create prep session: {e}")
+
+        # Enqueue analysis
+        try:
+            from app.workers.document_analysis_worker import analyze_document
+            try:
+                analyze_document.delay(document_id)
+            except Exception:
+                import threading
+                def _run_analysis():
+                    try:
+                        analyze_document(document_id)
+                        from app.models.prep_session import PrepSession
+                        analysis_db = SessionLocal()
+                        ps = analysis_db.query(PrepSession).filter(PrepSession.id == document_id).first()
+                        if ps:
+                            ps.status = "ready"
+                            analysis_db.commit()
+                        analysis_db.close()
+                    except Exception as e:
+                        logger.error(f"Background analysis failed: {e}")
+                threading.Thread(target=_run_analysis, daemon=True).start()
+        except Exception as e:
+            logger.error(f"Failed to start analysis: {e}")
 
         return document
 

@@ -61,6 +61,10 @@ def convert_card_to_schema(card) -> QuestionCardSchema:
         confidence=float(card.confidence) if card.confidence else None,
         evidence=evidence,
         ui=ui,
+        targetRoles=card.target_roles,
+        notRecommendedRoles=card.not_recommended_roles,
+        expertiseRequired=card.expertise_required,
+        questionIntent=card.question_intent,
         createdBy=card.created_by,
         createdAt=card.created_at,
         updatedAt=card.updated_at
@@ -157,3 +161,56 @@ async def reorder_question_cards(
     logger.info(f"Reordering {len(card_order)} question cards for section {section_id}")
     cards = question_card_service.reorder_question_cards(db, section_id, card_order)
     return [convert_card_to_schema(card) for card in cards]
+
+
+@router.post("/{card_id}/generate-role-targeting")
+async def generate_role_targeting(card_id: str, db: Session = Depends(get_db)):
+    """Generate role targeting metadata for a question card using AI."""
+    from app.models.question_card import QuestionCard
+    from app.services.ai_question_generator import ai_question_generator
+
+    card = db.query(QuestionCard).filter(QuestionCard.id == card_id).first()
+    if not card:
+        raise HTTPException(status_code=404, detail="Card not found")
+
+    targeting = ai_question_generator.generate_role_targeting(
+        question_text=card.question_text,
+        question_type=card.question_type,
+        section_context=card.focus_text or "",
+    )
+
+    card.target_roles = targeting["target_roles"]
+    card.not_recommended_roles = targeting["not_recommended_roles"]
+    card.expertise_required = targeting["expertise_required"]
+    card.question_intent = targeting["question_intent"]
+    db.commit()
+
+    return targeting
+
+
+@router.post("/document/{document_id}/generate-all-role-targeting")
+async def generate_all_role_targeting(document_id: str, db: Session = Depends(get_db)):
+    """Generate role targeting for all cards in a document that don't have it yet."""
+    from app.models.question_card import QuestionCard
+    from app.services.ai_question_generator import ai_question_generator
+
+    cards = db.query(QuestionCard).filter(
+        QuestionCard.document_id == document_id,
+        QuestionCard.target_roles == None,
+    ).all()
+
+    results = []
+    for card in cards:
+        targeting = ai_question_generator.generate_role_targeting(
+            question_text=card.question_text,
+            question_type=card.question_type,
+            section_context=card.focus_text or "",
+        )
+        card.target_roles = targeting["target_roles"]
+        card.not_recommended_roles = targeting["not_recommended_roles"]
+        card.expertise_required = targeting["expertise_required"]
+        card.question_intent = targeting["question_intent"]
+        results.append({"card_id": card.id, **targeting})
+
+    db.commit()
+    return {"updated": len(results), "cards": results}

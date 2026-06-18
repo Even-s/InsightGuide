@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { presentationAPI } from '@/api/presentation'
+import { apiClient } from '@/api/client'
 import { usePresentationSession } from '@/hooks/usePresentationSession'
 import { useRealtimeTranscription } from '@/hooks/useRealtimeTranscription'
+import { useMediaRecorder } from '@/hooks/useMediaRecorder'
 import { useSSEEvents } from '@/hooks/useSSEEvents'
 import { useResponsiveLayout } from '@/hooks/useResponsiveLayout'
 import type { CardState } from '@/types/presentation'
@@ -9,7 +11,6 @@ import type { CardStatus } from '@/types/questionCard'
 import LoadingSpinner from '@/components/common/LoadingSpinner'
 import SessionHeader from './SessionHeader'
 import TranscriptDisplay from './TranscriptDisplay'
-import MarkdownOutput from './MarkdownOutput'
 import { simplifiedToTraditional } from '@/utils/chineseConverter'
 import { formatFocusText, formatQuestionText, formatThemeTitle } from '@/utils/interviewCopy'
 
@@ -24,6 +25,8 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
   const [transcriptHistory, setTranscriptHistory] = useState<string[]>([]) // 保留最近 3 句
   const [pendingTranscript, setPendingTranscript] = useState('')
   const [transcriptionError, setTranscriptionError] = useState<string | null>(null)
+  const [followupQueue, setFollowupQueue] = useState<string[]>([]) // queue of card IDs
+  const [skippedCards, setSkippedCards] = useState<Set<string>>(new Set())
   const [slideOrientation] = useState<'landscape' | 'portrait' | 'unknown'>('unknown')
   const [isPreparingToPresent, setIsPreparingToPresent] = useState(false)
   const hasConfirmedScriptPreview = true
@@ -47,6 +50,11 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
     previousSlide,
     endSession,
   } = usePresentationSession(sessionId)
+
+  const { start: startRecording, stop: stopRecording } = useMediaRecorder()
+  const [isDiarizing, setIsDiarizing] = useState(false)
+  const recordingStartedAtRef = useRef<string | null>(null)
+  const finalRecordingBlobRef = useRef<Blob | null>(null)
 
   const currentSlideRef = useRef(currentSlide)
   const currentThemeRef = useRef(currentTheme)
@@ -139,7 +147,7 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
     setPendingTranscript('')
     setTranscriptionError(null)
 
-    // Save utterance — backend will classify speaker and evaluate
+    // Save utterance — evaluation is triggered immediately (speaker-agnostic)
     presentationAPI.createUtterance(
       sessionId,
       text,
@@ -205,6 +213,11 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
     stopTranscription,
     error: realtimeError,
   } = useRealtimeTranscription({
+    onMediaStreamReady: (stream) => {
+      if (import.meta.env.VITE_DISABLE_DIARIZATION === 'true') return
+      recordingStartedAtRef.current = recordingStartedAtRef.current ?? new Date().toISOString()
+      startRecording(stream)
+    },
     onSpeechStarted: () => {
       setTranscriptionError(null)
       setPendingTranscript('正在聽取...')
@@ -225,6 +238,7 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
     },
     onTranscriptCompleted: handleTranscriptCompleted,
   })
+
 
   const handleStartRequested = useCallback(async () => {
     if (session?.status === 'interviewing') return
@@ -315,6 +329,47 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
     startTranscription,
   ])
 
+  // Followup queue: add new listening/probably_sufficient cards that have followups
+  useEffect(() => {
+    const activeSectionId = currentTheme?.id ?? currentSlide?.id
+    if (!activeSectionId) return
+
+    const cardsWithFollowup = cardStates.filter((cs) => {
+      const qc = cs.questionCard
+      const isInSection = qc.interviewThemeId === activeSectionId || qc.sectionId === activeSectionId
+      const hasFollowup = cs.evidence && getEvidenceSuggestedFollowup(cs.evidence as Record<string, unknown>)
+      const needsFollowup = cs.status === 'listening' || cs.status === 'probably_sufficient'
+      return isInSection && needsFollowup && hasFollowup && !skippedCards.has(cs.questionCard.id)
+    })
+
+    setFollowupQueue((prev) => {
+      const existingSet = new Set(prev)
+      const newIds = cardsWithFollowup
+        .map((cs) => cs.questionCard.id)
+        .filter((id) => !existingSet.has(id))
+      if (newIds.length === 0) return prev
+      return [...prev, ...newIds]
+    })
+  }, [cardStates, currentTheme?.id, currentSlide?.id, skippedCards])
+
+  // Current followup: first in queue that still needs followup
+  const currentFollowupCard = followupQueue
+    .filter((id) => !skippedCards.has(id))
+    .map((id) => cardStates.find((cs) => cs.questionCard.id === id))
+    .find((cs) => cs && (cs.status === 'listening' || cs.status === 'probably_sufficient'))
+
+  const followupPrompt = currentFollowupCard
+    ? buildFollowupPrompt([currentFollowupCard], currentTheme?.id ?? currentSlide?.id)
+    : null
+
+  const followupQueueLength = followupQueue.filter((id) => !skippedCards.has(id)).length
+
+  const handleSkipFollowup = useCallback(() => {
+    if (currentFollowupCard) {
+      setSkippedCards((prev) => new Set([...prev, currentFollowupCard.questionCard.id]))
+    }
+  }, [currentFollowupCard])
+
   if (isLoading) {
     return <LoadingSpinner label="載入演講 Session..." />
   }
@@ -331,7 +386,6 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
   }
 
   const isStartControlPreparing = isPreparingToPresent || scriptReadiness.isPreparing
-  const followupPrompt = buildFollowupPrompt(cardStates, currentTheme?.id ?? currentSlide?.id)
 
   return (
     <div className="flex h-screen flex-col bg-cream-100 text-natural-800">
@@ -345,11 +399,56 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
         totalThemes={themes.length || slides.length}
         onStart={handleStartRequested}
         onPause={pausePresenting}
-        onEnd={endSession}
+        onEnd={async () => {
+          if (import.meta.env.VITE_DISABLE_DIARIZATION === 'true') {
+            endSession()
+            return
+          }
+
+          setIsDiarizing(true)
+          try {
+            const blob = finalRecordingBlobRef.current ?? await stopRecording()
+            finalRecordingBlobRef.current = blob
+
+            if (!blob || blob.size <= 1000) {
+              throw new Error('沒有取得有效的訪談錄音檔，請先確認麥克風已開始錄音再停止訪談。')
+            }
+
+            if (!recordingStartedAtRef.current) {
+              throw new Error('缺少錄音開始時間，無法產生正式逐字稿。')
+            }
+
+            const formData = new FormData()
+            formData.append('audio', blob, 'session_audio.webm')
+            formData.append('recording_started_at', recordingStartedAtRef.current)
+            await apiClient.post(`/api/realtime/diarize/${sessionId}`, formData, {
+              headers: { 'Content-Type': 'multipart/form-data' },
+              timeout: 300000,
+            })
+
+            finalRecordingBlobRef.current = null
+            setTranscriptionError(null)
+          } catch (err) {
+            console.warn('Diarization failed:', err)
+            setTranscriptionError(err instanceof Error ? err.message : '正式逐字稿產生失敗，訪談尚未結束。')
+            setIsDiarizing(false)
+            return
+          } finally {
+            setIsDiarizing(false)
+          }
+          endSession()
+        }}
       />
 
-      {session?.status === 'ended' ? (
-        <InterviewOutputsPanel sessionId={sessionId} deckId={deckId} />
+      {isDiarizing ? (
+        <div className="flex flex-1 items-center justify-center">
+          <div className="text-center">
+            <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-cream-300 border-t-sage-400" />
+            <p className="text-base font-medium text-natural-600">正在辨識語者...</p>
+          </div>
+        </div>
+      ) : session?.status === 'ended' ? (
+        (() => { window.location.assign(`/sessions/${sessionId}/insight-memo`); return null })()
       ) : (
         <>
           <main className="relative flex min-h-0 flex-1 overflow-hidden">
@@ -434,7 +533,7 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
                               {groupCardStates.map(({ card, status, confidence }, qi) => {
                                 const isDone = completedStatuses.has(status)
                                 const isListening = status === 'listening'
-                                const itemProgress = isDone ? 100 : Math.round((confidence ?? 0) * 100)
+                                const itemProgress = isDone ? 100 : isListening ? 0 : Math.round((confidence ?? 0) * 100)
 
                                 return (
                                   <div key={card.id} className={`rounded-2xl border bg-white p-4 shadow-sm transition-[border-color,background-color,box-shadow,opacity,transform] duration-500 ease-out ${isListening ? 'scale-[1.01] border-yellow-300 bg-yellow-50 shadow-yellow-100' : isDone ? 'border-green-200 bg-green-50/60' : 'border-cream-300'}`}>
@@ -466,6 +565,25 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
                                           />
                                         </div>
                                       </div>
+                                      {/* Reason why not 100% + followup suggestion */}
+                                      {!isDone && (() => {
+                                        const cs = cardStates.find(c => c.questionCard.id === card.id)
+                                        const ev = cs?.evidence as Record<string, unknown> | undefined
+                                        const judgment = ev?.judgment as Record<string, unknown> | undefined
+                                        const reason = judgment?.reason as string | undefined
+                                        const followup = judgment?.suggested_followup as string | undefined
+                                        if (!reason && !followup) return null
+                                        return (
+                                          <div className="mt-2 space-y-1">
+                                            {reason && (
+                                              <p className="text-xs text-natural-400 leading-relaxed">{reason}</p>
+                                            )}
+                                            {followup && (
+                                              <p className="text-xs text-sage-600 leading-relaxed">追問：{followup}</p>
+                                            )}
+                                          </div>
+                                        )
+                                      })()}
                                   </div>
                                 )
                               })}
@@ -485,8 +603,8 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
               ) : null}
             </div>
 
-            {/* 懸浮追問提示 */}
-            <FollowupPromptPanel prompt={followupPrompt} />
+            {/* 懸浮追問提示（排隊制） */}
+            <FollowupPromptPanel prompt={followupPrompt} queueLength={followupQueueLength} onSkip={handleSkipFollowup} />
           </main>
 
           {/* 底部：轉錄區 - 動態高度 */}
@@ -748,7 +866,7 @@ function AnimatedStrikeText({
   )
 }
 
-function FollowupPromptPanel({ prompt }: { prompt: FollowupPrompt | null }) {
+function FollowupPromptPanel({ prompt, queueLength, onSkip }: { prompt: FollowupPrompt | null; queueLength: number; onSkip: () => void }) {
   const promptKey = [
     prompt?.cardTitle,
     prompt?.suggestedFollowup,
@@ -760,11 +878,23 @@ function FollowupPromptPanel({ prompt }: { prompt: FollowupPrompt | null }) {
     <section className="absolute bottom-4 left-6 right-6 z-20" aria-live="polite">
       <div className="mx-auto max-w-5xl">
         <div className="min-w-0 rounded-2xl bg-white px-7 py-5 shadow-[0_0_20px_rgba(251,191,36,0.3),0_0_40px_rgba(251,191,36,0.15)]">
-          <div className="mb-3 flex min-w-0 items-center gap-3">
-            <span className="shrink-0 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-sm font-bold text-amber-800">仍需追問</span>
-            {prompt.cardTitle && (
-              <p key={prompt.cardTitle} className="animate-fadeIn truncate text-base font-medium text-natural-500">{prompt.cardTitle}</p>
-            )}
+          <div className="mb-3 flex min-w-0 items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="shrink-0 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-sm font-bold text-amber-800">仍需追問</span>
+              {prompt.cardTitle && (
+                <p key={prompt.cardTitle} className="animate-fadeIn truncate text-base font-medium text-natural-500">{prompt.cardTitle}</p>
+              )}
+              {queueLength > 1 && (
+                <span className="shrink-0 text-xs text-natural-400">+{queueLength - 1} 題待問</span>
+              )}
+            </div>
+            <button
+              type="button"
+              onClick={onSkip}
+              className="shrink-0 rounded-lg border border-cream-300 bg-cream-50 px-3 py-1 text-xs font-medium text-natural-500 hover:bg-cream-100 hover:text-natural-700 transition-colors"
+            >
+              跳過
+            </button>
           </div>
           <div key={promptKey} className="animate-fadeIn">
             <p className="text-base leading-relaxed text-natural-700">{prompt.suggestedFollowup}</p>
@@ -772,140 +902,5 @@ function FollowupPromptPanel({ prompt }: { prompt: FollowupPrompt | null }) {
         </div>
       </div>
     </section>
-  )
-}
-
-function InterviewOutputsPanel({ sessionId, deckId }: { sessionId: string; deckId: string }) {
-  const [isGenerating, setIsGenerating] = useState(false)
-  const [outputs, setOutputs] = useState<{
-    brd?: { markdown: string; openIssuesCount: number }
-    transcript?: { markdown: string; utteranceCount: number }
-  } | null>(null)
-  const [error, setError] = useState<string | null>(null)
-  const [activeTab, setActiveTab] = useState<'brd' | 'transcript'>('brd')
-
-  const handleGenerate = useCallback(async () => {
-    setIsGenerating(true)
-    setError(null)
-    try {
-      const response = await presentationAPI.generateOutputs(sessionId)
-      setOutputs(response)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to generate outputs')
-    } finally {
-      setIsGenerating(false)
-    }
-  }, [sessionId])
-
-  useEffect(() => {
-    handleGenerate()
-  }, [handleGenerate])
-
-  function downloadMarkdown(content: string, filename: string) {
-    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = filename
-    a.click()
-    URL.revokeObjectURL(url)
-  }
-
-  if (isGenerating) {
-    return (
-      <div className="flex min-h-0 flex-1 items-center justify-center bg-cream-100">
-        <div className="text-center">
-          <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-cream-300 border-t-sage-400" />
-          <p className="text-base font-medium text-natural-600">正在產生 BRD 與逐字稿...</p>
-        </div>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="flex min-h-0 flex-1 items-center justify-center bg-cream-100">
-        <div className="text-center">
-          <p className="text-red-600 mb-3">{error}</p>
-          <button onClick={handleGenerate} className="rounded-xl bg-sage-500 px-4 py-2 text-sm text-white hover:bg-sage-500">重試</button>
-        </div>
-      </div>
-    )
-  }
-
-  const markdownContent = activeTab === 'brd' ? outputs?.brd?.markdown : outputs?.transcript?.markdown
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
-      {/* Header */}
-      <div className="flex shrink-0 items-center justify-between border-b border-cream-300 bg-white px-5 py-3">
-        <div className="flex items-center gap-4">
-          <h2 className="text-base font-semibold text-natural-700">訪談產出</h2>
-          <div className="flex rounded-2xl border border-cream-300 bg-cream-100 p-0.5">
-            <button
-              type="button"
-              onClick={() => setActiveTab('brd')}
-              className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${activeTab === 'brd' ? 'bg-white text-natural-700 shadow-sm' : 'text-natural-400 hover:text-natural-600'}`}
-            >
-              BRD 草稿
-              {outputs?.brd?.openIssuesCount ? (
-                <span className="ml-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
-                  {outputs.brd.openIssuesCount} 待補
-                </span>
-              ) : null}
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('transcript')}
-              className={`rounded-md px-3 py-1 text-sm font-medium transition-colors ${activeTab === 'transcript' ? 'bg-white text-natural-700 shadow-sm' : 'text-natural-400 hover:text-natural-600'}`}
-            >
-              逐字稿
-              {outputs?.transcript?.utteranceCount ? (
-                <span className="ml-1.5 text-xs text-natural-300">{outputs.transcript.utteranceCount} 句</span>
-              ) : null}
-            </button>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          {outputs?.brd && (
-            <button
-              type="button"
-              onClick={() => downloadMarkdown(outputs.brd!.markdown, 'BRD_草稿.md')}
-              className="rounded-2xl border border-cream-400 bg-white px-3 py-1.5 text-xs font-medium text-natural-600 hover:bg-cream-100"
-            >
-              下載 BRD
-            </button>
-          )}
-          {outputs?.transcript && (
-            <button
-              type="button"
-              onClick={() => downloadMarkdown(outputs.transcript!.markdown, '訪談逐字稿.md')}
-              className="rounded-2xl border border-cream-400 bg-white px-3 py-1.5 text-xs font-medium text-natural-600 hover:bg-cream-100"
-            >
-              下載逐字稿
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => window.location.assign(`/editor/${deckId}`)}
-            className="rounded-2xl border border-cream-400 bg-white px-3 py-1.5 text-xs font-medium text-natural-600 hover:bg-cream-100"
-          >
-            回到編輯
-          </button>
-          <button
-            type="button"
-            onClick={() => window.location.assign(`/interview/${deckId}`)}
-            className="rounded-2xl bg-sage-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-sage-500"
-          >
-            重新訪談
-          </button>
-        </div>
-      </div>
-
-      {/* Markdown content */}
-      <div className="min-h-0 flex-1 overflow-y-auto bg-white px-8 py-6">
-        <MarkdownOutput content={markdownContent} variant={activeTab} />
-      </div>
-    </div>
   )
 }

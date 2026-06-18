@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import apiClient from '@/api/client'
 import Button from '@/components/common/Button'
 import MarkdownOutput from '@/components/common/MarkdownOutput'
 
 export default function InterviewReportPage() {
   const { deckId, sessionId } = useParams<{ deckId: string; sessionId: string }>()
+  const navigate = useNavigate()
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'brd' | 'transcript'>('brd')
@@ -107,6 +108,13 @@ export default function InterviewReportPage() {
               下載逐字稿
             </button>
           )}
+          <button
+            type="button"
+            onClick={() => navigate(`/sessions/${sessionId}/insight-memo`)}
+            className="rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-100"
+          >
+            訪談洞察
+          </button>
           <Button variant="secondary" onClick={() => window.location.assign(`/editor/${deckId}`)}>
             回到編輯
           </Button>

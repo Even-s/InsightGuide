@@ -115,7 +115,7 @@ GPT-5.4 mini 支持以下 OpenAI API 端點：
 
 ## 💡 實際應用範例
 
-### 1. SlideCue 中的應用場景
+### 1. InsightGuide 中的應用場景
 
 ```javascript
 // 生成演講建議逐字稿
@@ -183,10 +183,10 @@ const response = await openai.chat.completions.create({
 
 ---
 
-## 💼 在 SlideCue 中的應用
+## 💼 在 InsightGuide 中的應用
 
 ### 當前使用情境
-SlideCue 可以使用 GPT-5.4 mini 來：
+InsightGuide 可以使用 GPT-5.4 mini 來：
 
 1. **生成建議逐字稿**
    - 成本低廉，適合即時生成

@@ -64,10 +64,7 @@ class QuestionCardSchema(BaseModel):
     sectionNumber: Optional[int] = None
     focusText: Optional[str] = None
     questionText: str = Field(min_length=1, max_length=200)
-    questionType: Literal[
-        "clarification", "validation", "exploration",
-        "edge_case", "constraint", "priority"
-    ] = "clarification"
+    questionType: str = "clarification"
     importance: Literal["must", "should"]
     coverageRule: CoverageRule
     suggestedFollowup: Optional[str] = Field(None, max_length=2000)
@@ -76,11 +73,17 @@ class QuestionCardSchema(BaseModel):
     orderIndex: int = Field(default=0, ge=0)
     status: Literal[
         "pending", "listening", "probably_sufficient", "sufficient",
-        "at_risk", "skipped", "manually_checked", "disabled"
+        "at_risk", "skipped", "manually_checked", "disabled",
+        "not_applicable_for_role", "needs_different_stakeholder"
     ] = "pending"
     confidence: Optional[float] = Field(None, ge=0, le=1)
     evidence: Optional[SufficiencyEvidence] = None
     ui: Optional[CardUI] = None
+    # Role targeting (Phase 1)
+    targetRoles: Optional[List[str]] = None
+    notRecommendedRoles: Optional[List[str]] = None
+    expertiseRequired: Optional[List[str]] = None
+    questionIntent: Optional[str] = None
     createdBy: Literal["ai", "user", "system"] = "ai"
     createdAt: datetime
     updatedAt: datetime
@@ -100,14 +103,8 @@ class QuestionCardCreate(BaseModel):
     importance: Literal["must", "should"] = "must"
 
     # Optional - AI will generate if not provided
-    questionType: Optional[Literal[
-        "clarification", "validation", "exploration",
-        "edge_case", "constraint", "priority"
-    ]] = None
-    topicType: Optional[Literal[
-        "clarification", "validation", "exploration",
-        "edge_case", "constraint", "priority"
-    ]] = None
+    questionType: Optional[str] = None
+    topicType: Optional[str] = None
     coverageRule: Optional[CoverageRule] = None
     expectedAnswerElements: Optional[List[str]] = None
     estimatedSeconds: Optional[int] = Field(None, ge=5, le=300)
@@ -137,10 +134,7 @@ class QuestionCardUpdate(BaseModel):
     questionText: Optional[str] = Field(None, min_length=1, max_length=200)
     suggestedFollowup: Optional[str] = Field(None, max_length=2000)
     importance: Optional[Literal["must", "should"]] = None
-    questionType: Optional[Literal[
-        "clarification", "validation", "exploration",
-        "edge_case", "constraint", "priority"
-    ]] = None
+    questionType: Optional[str] = None
     coverageRule: Optional[CoverageRule] = None
     expectedAnswerElements: Optional[List[str]] = None
     estimatedSeconds: Optional[int] = Field(None, ge=5, le=300)

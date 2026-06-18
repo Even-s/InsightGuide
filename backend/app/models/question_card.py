@@ -32,6 +32,13 @@ class QuestionCard(Base):
     confidence = Column(Numeric(4, 3), nullable=True, default=0)
     ui = Column(JSON, nullable=True)
     created_by = Column(String, nullable=False, default="ai")
+
+    # Role targeting (Phase 1)
+    target_roles = Column(JSON, nullable=True)
+    not_recommended_roles = Column(JSON, nullable=True)
+    expertise_required = Column(JSON, nullable=True)
+    question_intent = Column(String, nullable=True)
+
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 

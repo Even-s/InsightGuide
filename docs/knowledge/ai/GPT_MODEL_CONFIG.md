@@ -62,5 +62,4 @@ npm run build
 
 - [GPT-5.5 model guide](GPT-5.5-MODEL-GUIDE.md)
 - [GPT-5.4-mini notes](GPT-5.4-MINI.md)
-- [Project status](../../reports/PROJECT_STATUS.md)
-- [Architecture](../../architecture/SlideCue_開發架構書.md)
+- [Architecture](../ARCHITECTURE.md)

@@ -59,11 +59,19 @@ interface SessionItem {
 
 export default function EditorPage() {
   const { deckId } = useParams<{ deckId: string }>()
+  const [projectId, setProjectId] = useState<string | null>(null)
   const [plan, setPlan] = useState<InterviewPlan | null>(null)
   const [cards, setCards] = useState<QuestionCard[]>([])
   const [selectedThemeId, setSelectedThemeId] = useState<string>('')
   const [isLoading, setIsLoading] = useState(true)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [analysisProgress, setAnalysisProgress] = useState<{
+    message: string
+    phase: string
+    percentage: number
+    currentTheme?: number
+    totalThemes?: number
+  }>({ message: '正在準備分析...', phase: 'init', percentage: 0 })
   const [error, setError] = useState<string | null>(null)
   const [showSessionPanel, setShowSessionPanel] = useState(false)
   const [sessions, setSessions] = useState<SessionItem[]>([])
@@ -75,8 +83,8 @@ export default function EditorPage() {
     const data: InterviewPlan = response.data
     setPlan(data)
 
-    if (data.themes.length > 0 && !selectedThemeId) {
-      setSelectedThemeId(data.themes[0].id)
+    if (data.themes.length > 0) {
+      setSelectedThemeId(prev => prev || data.themes[0].id)
     }
 
     // Also load full cards for editing
@@ -84,7 +92,7 @@ export default function EditorPage() {
     setCards(fullCards)
 
     return data
-  }, [deckId, selectedThemeId])
+  }, [deckId])
 
   useEffect(() => {
     if (!deckId) return
@@ -95,6 +103,12 @@ export default function EditorPage() {
       try {
         setIsLoading(true)
         setError(null)
+
+        // Load document to get project context
+        try {
+          const doc = await documentsAPI.getDocument(deckId!)
+          if (doc.project_id) setProjectId(doc.project_id)
+        } catch { /* continue without project context */ }
 
         const deckStatus = await documentsAPI.getDocumentStatus(deckId!)
         if (!isMounted) return
@@ -123,6 +137,37 @@ export default function EditorPage() {
     return () => { isMounted = false }
   }, [deckId, loadPlan])
 
+  // SSE progress subscription during analysis
+  useEffect(() => {
+    if (!deckId || !isAnalyzing) return
+    const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8002'
+    const eventSource = new EventSource(`${apiUrl}/api/events/sessions/${deckId}/stream`)
+
+    eventSource.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        if (data.type === 'ANALYSIS_PROGRESS') {
+          setAnalysisProgress({
+            message: data.message || '分析中...',
+            phase: data.phase || 'analyzing',
+            percentage: data.percentage || 0,
+            currentTheme: data.current_theme,
+            totalThemes: data.total_themes,
+          })
+        } else if (data.type === 'THEMES_CREATED') {
+          setAnalysisProgress(prev => ({
+            ...prev,
+            message: `已產生 ${data.theme_count} 個訪談單元，正在生成提問重點...`,
+            phase: 'cards',
+            percentage: 30,
+          }))
+        }
+      } catch { /* ignore parse errors */ }
+    }
+
+    return () => eventSource.close()
+  }, [deckId, isAnalyzing])
+
   // Poll during analysis
   useEffect(() => {
     if (!deckId || !isAnalyzing) return
@@ -130,8 +175,11 @@ export default function EditorPage() {
       try {
         const status = await documentsAPI.getDocumentStatus(deckId)
         if (status.status === 'analyzed') {
-          setIsAnalyzing(false)
-          await loadPlan()
+          setAnalysisProgress(prev => ({ ...prev, message: '分析完成！', percentage: 100 }))
+          setTimeout(() => {
+            setIsAnalyzing(false)
+            loadPlan()
+          }, 500)
         }
       } catch { /* ignore */ }
     }, 5000)
@@ -196,11 +244,41 @@ export default function EditorPage() {
   if (isAnalyzing) {
     return (
       <div className="flex h-screen items-center justify-center bg-cream-100 p-6">
-        <div className="w-full max-w-md rounded border border-cream-300 bg-white p-6 text-center">
-          <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-cream-300 border-t-sage-400" />
-          <p className="text-lg font-semibold text-natural-700">正在分析文件</p>
-          <p className="mt-2 text-sm text-natural-500">系統正在產生訪談單元與提問重點...</p>
-          <p className="mt-3 text-xs text-natural-400">完成後將自動載入。</p>
+        <div className="w-full max-w-md rounded-2xl border border-cream-300 bg-white p-6">
+          <div className="text-center mb-5">
+            <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-cream-300 border-t-sage-400" />
+            <p className="text-lg font-semibold text-natural-700">正在分析文件</p>
+          </div>
+
+          {/* Progress Bar */}
+          <div className="mb-4">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-xs font-medium text-natural-500">
+                {analysisProgress.phase === 'themes' ? '階段 1/2：產生訪談單元' :
+                 analysisProgress.phase === 'cards' ? '階段 2/2：產生提問重點' :
+                 analysisProgress.phase === 'init' ? '準備中' : '分析中'}
+              </span>
+              <span className="text-xs font-mono text-natural-400">{analysisProgress.percentage}%</span>
+            </div>
+            <div className="h-2 w-full rounded-full bg-cream-200 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-sage-400 transition-all duration-700 ease-out"
+                style={{ width: `${analysisProgress.percentage}%` }}
+              />
+            </div>
+          </div>
+
+          {/* Current Step */}
+          <div className="rounded-xl bg-cream-50 border border-cream-200 px-4 py-3">
+            <p className="text-sm text-natural-600">{analysisProgress.message}</p>
+            {analysisProgress.currentTheme && analysisProgress.totalThemes && (
+              <p className="mt-1 text-xs text-natural-400">
+                單元 {analysisProgress.currentTheme} / {analysisProgress.totalThemes}
+              </p>
+            )}
+          </div>
+
+          <p className="mt-4 text-center text-xs text-natural-400">完成後將自動載入</p>
         </div>
       </div>
     )
@@ -233,15 +311,23 @@ export default function EditorPage() {
     <div className="flex h-screen flex-col bg-cream-100">
       {/* Header */}
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-cream-300 bg-white px-5">
-        <div>
-          <h1 className="text-base font-semibold text-natural-700">準備模式</h1>
-          <p className="text-xs text-natural-400">
-            {plan.themes.length} 個訪談單元 · {plan.totalCards} 個提問重點
-          </p>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => projectId ? window.location.assign(`/projects/${projectId}`) : window.history.back()}
+            className="text-natural-400 hover:text-natural-600 text-sm"
+          >
+            &larr; 返回專案
+          </button>
+          <div>
+            <h1 className="text-base font-semibold text-natural-700">準備模式</h1>
+            <p className="text-xs text-natural-400">
+              {plan.themes.length} 個訪談單元 · {plan.totalCards} 個提問重點
+            </p>
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <Button variant="secondary" onClick={handleOpenSessionPanel}>管理訪談</Button>
-          <Button onClick={() => window.location.assign(`/interview/${deckId}`)}>開始訪談</Button>
+          <Button onClick={() => window.location.assign(`/interview/${deckId}${projectId ? `?projectId=${projectId}` : ''}`)}>開始訪談</Button>
         </div>
       </header>
 

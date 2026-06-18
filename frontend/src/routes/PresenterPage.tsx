@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 import { presentationAPI } from '@/api/presentation'
 import { prepSessionsAPI } from '@/api/prepSessions'
+import { apiClient } from '@/api/client'
 import PresenterLayout from '@/components/PresenterMode/PresenterLayout'
 import Button from '@/components/common/Button'
 import LoadingSpinner from '@/components/common/LoadingSpinner'
@@ -9,6 +10,9 @@ import type { PresentationSession } from '@/types/presentation'
 
 export default function PresenterPage() {
   const { deckId } = useParams<{ deckId: string }>()
+  const [searchParams] = useSearchParams()
+  const [projectId, setProjectId] = useState(searchParams.get('projectId') || undefined)
+  const [stakeholderId, setStakeholderId] = useState(searchParams.get('stakeholderId') || undefined)
   const [session, setSession] = useState<PresentationSession | null>(null)
   const [isCreating, setIsCreating] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -27,8 +31,34 @@ export default function PresenterPage() {
         setIsCreating(true)
         setError(null)
 
-        // First, find or create a prep session for this deck
-        // Check if there's an existing ready prep session
+        // Auto-detect project/stakeholder from document if not provided via URL
+        let resolvedProjectId = projectId
+        let resolvedStakeholderId = stakeholderId
+        if (!resolvedProjectId) {
+          try {
+            const docRes = await apiClient.get(`/api/documents/${deckId!}`)
+            const doc = docRes.data
+            if (doc.projectId || doc.project_id) {
+              resolvedProjectId = doc.projectId || doc.project_id
+              setProjectId(resolvedProjectId)
+
+              // Try to find the stakeholder linked to this document
+              const stakeholders = await apiClient.get(`/api/projects/${resolvedProjectId}/stakeholders`)
+              for (const s of stakeholders.data) {
+                try {
+                  const guide = await apiClient.get(`/api/projects/${resolvedProjectId}/stakeholders/${s.id}/interview-guide`)
+                  if (guide.data.document_id === deckId) {
+                    resolvedStakeholderId = s.id
+                    setStakeholderId(resolvedStakeholderId)
+                    break
+                  }
+                } catch { /* no guide for this stakeholder */ }
+              }
+            }
+          } catch { /* document lookup failed, proceed without context */ }
+        }
+
+        // Find or create a prep session for this deck
         const prepSessionsResponse = await prepSessionsAPI.listPrepSessions({
           deckId: deckId!,
           status: 'ready',
@@ -38,21 +68,21 @@ export default function PresenterPage() {
         let prepSessionId: string
 
         if (prepSessionsResponse.prepSessions.length > 0) {
-          // Use existing ready prep session
           prepSessionId = prepSessionsResponse.prepSessions[0].id
         } else {
-          // Create new prep session and set it to ready
           const newPrepSession = await prepSessionsAPI.createPrepSession({
             deckId: deckId!,
             title: 'Quick Start Session'
           })
-          // Update status to ready
           await prepSessionsAPI.updatePrepSession(newPrepSession.id, { status: 'ready' })
           prepSessionId = newPrepSession.id
         }
 
-        // Now create the presentation session under the prep session
-        const created = await presentationAPI.createSession(deckId!, prepSessionId)
+        // Create the interview session with project context
+        const created = await presentationAPI.createSession(deckId!, prepSessionId, {
+          projectId: resolvedProjectId,
+          stakeholderProfileId: resolvedStakeholderId,
+        })
         if (isMounted) setSession(created)
       } catch (err: unknown) {
         if (isMounted) {
