@@ -25,6 +25,7 @@ function App() {
           <Route path="/prep-sessions" element={<PrepSessionListPage />} />
           <Route path="/editor/:deckId" element={<EditorPage />} />
           <Route path="/interview/:deckId" element={<PresenterPage />} />
+          <Route path="/interview/session/:sessionId" element={<PresenterPage />} />
           <Route path="/interview/:deckId/report/:sessionId" element={<InterviewReportPage />} />
           <Route path="/interview/:sessionId/brd" element={<BRDGenerationPage />} />
           <Route path="/sessions/:sessionId/insight-memo" element={<InsightMemoPage />} />

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useParams, useSearchParams } from 'react-router-dom'
+import { useParams, useSearchParams, useNavigate } from 'react-router-dom'
 import { presentationAPI } from '@/api/presentation'
 import { prepSessionsAPI } from '@/api/prepSessions'
 import { apiClient } from '@/api/client'
@@ -9,120 +9,139 @@ import LoadingSpinner from '@/components/common/LoadingSpinner'
 import type { PresentationSession } from '@/types/presentation'
 
 export default function PresenterPage() {
-  const { deckId } = useParams<{ deckId: string }>()
+  const { deckId, sessionId: urlSessionId } = useParams<{ deckId?: string; sessionId?: string }>()
   const [searchParams] = useSearchParams()
-  const [projectId, setProjectId] = useState(searchParams.get('projectId') || undefined)
-  const [stakeholderId, setStakeholderId] = useState(searchParams.get('stakeholderId') || undefined)
+  const navigate = useNavigate()
   const [session, setSession] = useState<PresentationSession | null>(null)
-  const [isCreating, setIsCreating] = useState(true)
+  const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!deckId) {
-      setError('Missing deck id')
-      setIsCreating(false)
+    // Mode 1: Direct session access via /interview/session/:sessionId
+    if (urlSessionId) {
+      loadExistingSession(urlSessionId)
       return
     }
 
-    let isMounted = true
-
-    async function createSession() {
-      try {
-        setIsCreating(true)
-        setError(null)
-
-        // Auto-detect project/stakeholder from document if not provided via URL
-        let resolvedProjectId = projectId
-        let resolvedStakeholderId = stakeholderId
-
-        // Resolve project from document if not provided
-        if (!resolvedProjectId) {
-          try {
-            const docRes = await apiClient.get(`/api/documents/${deckId!}`)
-            const doc = docRes.data
-            if (doc.projectId || doc.project_id) {
-              resolvedProjectId = doc.projectId || doc.project_id
-              setProjectId(resolvedProjectId)
-            }
-          } catch { /* document lookup failed */ }
-        }
-
-        // Resolve stakeholder from interview guide if not provided
-        if (resolvedProjectId && !resolvedStakeholderId) {
-          try {
-            const stakeholders = await apiClient.get(`/api/projects/${resolvedProjectId}/stakeholders`)
-            for (const s of stakeholders.data) {
-              try {
-                const guide = await apiClient.get(`/api/projects/${resolvedProjectId}/stakeholders/${s.id}/interview-guide`)
-                if (guide.data.document_id === deckId) {
-                  resolvedStakeholderId = s.id
-                  setStakeholderId(resolvedStakeholderId)
-                  break
-                }
-              } catch { /* no guide for this stakeholder */ }
-            }
-          } catch { /* stakeholder lookup failed */ }
-        }
-
-        // Find or create a prep session for this deck
-        const prepSessionsResponse = await prepSessionsAPI.listPrepSessions({
-          deckId: deckId!,
-          status: 'ready',
-          limit: 1
-        })
-
-        let prepSessionId: string
-
-        if (prepSessionsResponse.prepSessions.length > 0) {
-          prepSessionId = prepSessionsResponse.prepSessions[0].id
-        } else {
-          const newPrepSession = await prepSessionsAPI.createPrepSession({
-            deckId: deckId!,
-            title: 'Quick Start Session'
-          })
-          await prepSessionsAPI.updatePrepSession(newPrepSession.id, { status: 'ready' })
-          prepSessionId = newPrepSession.id
-        }
-
-        // Create the interview session with project context
-        const created = await presentationAPI.createSession(deckId!, prepSessionId, {
-          projectId: resolvedProjectId,
-          stakeholderProfileId: resolvedStakeholderId,
-        })
-        if (isMounted) setSession(created)
-      } catch (err: unknown) {
-        if (isMounted) {
-          setError(getErrorMessage(err))
-        }
-      } finally {
-        if (isMounted) setIsCreating(false)
-      }
+    // Mode 2: Create/find session via /interview/:deckId
+    if (deckId) {
+      findOrCreateSession()
+      return
     }
 
-    createSession()
+    setError('Missing session or deck id')
+    setIsLoading(false)
+  }, [deckId, urlSessionId])
 
-    return () => {
-      isMounted = false
+  async function loadExistingSession(sessionId: string) {
+    try {
+      setIsLoading(true)
+      const sessionData = await presentationAPI.getSession(sessionId)
+      setSession(sessionData)
+    } catch (err: unknown) {
+      setError(getErrorMessage(err))
+    } finally {
+      setIsLoading(false)
     }
-  }, [deckId])
-
-  if (!deckId) {
-    return <ErrorState message="Missing deck id" />
   }
 
-  if (isCreating) {
+  async function findOrCreateSession() {
+    try {
+      setIsLoading(true)
+      setError(null)
+
+      const projectId = searchParams.get('projectId') || undefined
+      const stakeholderId = searchParams.get('stakeholderId') || undefined
+
+      // Auto-detect project/stakeholder from document if not provided
+      let resolvedProjectId = projectId
+      let resolvedStakeholderId = stakeholderId
+
+      if (!resolvedProjectId) {
+        try {
+          const docRes = await apiClient.get(`/api/documents/${deckId!}`)
+          const doc = docRes.data
+          resolvedProjectId = doc.projectId || doc.project_id
+        } catch { /* document lookup failed */ }
+      }
+
+      if (resolvedProjectId && !resolvedStakeholderId) {
+        try {
+          const stakeholders = await apiClient.get(`/api/projects/${resolvedProjectId}/stakeholders`)
+          for (const s of stakeholders.data) {
+            try {
+              const guide = await apiClient.get(`/api/projects/${resolvedProjectId}/stakeholders/${s.id}/interview-guide`)
+              if (guide.data.document_id === deckId) {
+                resolvedStakeholderId = s.id
+                break
+              }
+            } catch { /* no guide for this stakeholder */ }
+          }
+        } catch { /* stakeholder lookup failed */ }
+      }
+
+      // Check if an active (non-ended) session already exists for this deck
+      try {
+        const sessionsRes = await apiClient.get('/api/interview-sessions', {
+          params: { projectId: resolvedProjectId, limit: 50 }
+        })
+        const sessions = sessionsRes.data?.sessions || sessionsRes.data || []
+        const existing = sessions.find((s: PresentationSession) =>
+          s.documentId === deckId &&
+          s.status !== 'ended' &&
+          (!resolvedStakeholderId || s.stakeholderProfileId === resolvedStakeholderId)
+        )
+        if (existing) {
+          navigate(`/interview/session/${existing.id}`, { replace: true })
+          return
+        }
+      } catch { /* list failed, proceed to create */ }
+
+      // No existing session — create one
+      const prepSessionsResponse = await prepSessionsAPI.listPrepSessions({
+        deckId: deckId!,
+        status: 'ready',
+        limit: 1,
+      })
+
+      let prepSessionId: string
+      if (prepSessionsResponse.prepSessions.length > 0) {
+        prepSessionId = prepSessionsResponse.prepSessions[0].id
+      } else {
+        const newPrepSession = await prepSessionsAPI.createPrepSession({
+          deckId: deckId!,
+          title: 'Quick Start Session',
+        })
+        await prepSessionsAPI.updatePrepSession(newPrepSession.id, { status: 'ready' })
+        prepSessionId = newPrepSession.id
+      }
+
+      const created = await presentationAPI.createSession(deckId!, prepSessionId, {
+        projectId: resolvedProjectId,
+        stakeholderProfileId: resolvedStakeholderId,
+      })
+
+      // Redirect to session-based URL so refresh won't re-create
+      navigate(`/interview/session/${created.id}`, { replace: true })
+    } catch (err: unknown) {
+      setError(getErrorMessage(err))
+      setIsLoading(false)
+    }
+  }
+
+  if (isLoading) {
     return (
       <div className="h-screen bg-cream-100">
-        <LoadingSpinner label="建立演講 Session..." />
+        <LoadingSpinner label="載入訪談 Session..." />
       </div>
     )
   }
 
   if (error || !session) {
-    return <ErrorState message={error || 'No session created'} />
+    return <ErrorState message={error || 'No session found'} />
   }
 
-  return <PresenterLayout sessionId={session.id} deckId={deckId} />
+  return <PresenterLayout sessionId={session.id} deckId={session.documentId} />
 }
 
 function getErrorMessage(error: unknown) {
@@ -130,15 +149,14 @@ function getErrorMessage(error: unknown) {
     const response = (error as { response?: { data?: { detail?: unknown } } }).response
     if (typeof response?.data?.detail === 'string') return response.data.detail
   }
-
-  return error instanceof Error ? error.message : 'Failed to create presentation session'
+  return error instanceof Error ? error.message : 'Failed to load interview session'
 }
 
 function ErrorState({ message }: { message: string }) {
   return (
     <div className="flex h-screen items-center justify-center bg-cream-100 p-6">
       <div className="max-w-md rounded border border-red-200 bg-white p-6 text-center">
-        <p className="mb-2 text-lg font-semibold text-red-700">無法進入演講模式</p>
+        <p className="mb-2 text-lg font-semibold text-red-700">無法進入訪談模式</p>
         <p className="mb-5 text-sm text-natural-500">{message}</p>
         <div className="flex justify-center">
           <Button onClick={() => window.location.reload()}>重試</Button>

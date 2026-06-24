@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { presentationAPI } from '../api/presentation';
 import type { PresentationSession, SessionStatus, Slide } from '../types/presentation';
 import apiClient from '../api/client';
@@ -13,6 +13,7 @@ interface InterviewTheme {
   estimatedMinutes: number | null
   orderIndex: number
   isEnabled: boolean
+  rubricReady?: boolean
   cards: Array<{
     id: string
     focusText: string
@@ -47,7 +48,22 @@ export function usePresentationSession(sessionId: string) {
   const [slides, setSlides] = useState<Slide[]>([]);
   const [currentThemeIndex, setCurrentThemeIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
+  const [themePreparing, setThemePreparing] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const preparedThemes = useRef<Set<string>>(new Set());
+
+  const prepareTheme = useCallback(async (themeId: string) => {
+    if (preparedThemes.current.has(themeId)) return;
+    setThemePreparing(true);
+    try {
+      await apiClient.post(`/api/interview-sessions/${sessionId}/prepare-theme`, { themeId });
+      preparedThemes.current.add(themeId);
+    } catch (err) {
+      console.warn('Failed to prepare theme rubrics:', err);
+    } finally {
+      setThemePreparing(false);
+    }
+  }, [sessionId]);
 
   const loadSession = useCallback(async () => {
     try {
@@ -75,15 +91,33 @@ export function usePresentationSession(sessionId: string) {
       setSession(sessionData);
 
       // Load themes from interview plan
+      let loadedThemes: InterviewTheme[] = [];
       try {
         const planResponse = await apiClient.get(`/api/documents/${sessionData.documentId}/interview-plan`);
         const plan = planResponse.data;
-        const enabledThemes = (plan.themes || []).filter((t: InterviewTheme) => t.isEnabled);
-        setThemes(enabledThemes);
+        loadedThemes = (plan.themes || []).filter((t: InterviewTheme) => t.isEnabled);
+        setThemes(loadedThemes);
+
+        // Mark already-ready themes
+        for (const t of loadedThemes) {
+          if (t.rubricReady) preparedThemes.current.add(t.id);
+        }
       } catch {
         // Fallback: load slides for legacy mode
         const slidesData = await presentationAPI.getSlides(sessionData.documentId);
         setSlides(slidesData);
+      }
+
+      // Prepare first theme rubrics (blocking before UI becomes ready)
+      if (loadedThemes.length > 0 && !preparedThemes.current.has(loadedThemes[0].id)) {
+        setThemePreparing(true);
+        try {
+          await apiClient.post(`/api/interview-sessions/${sessionId}/prepare-theme`, { themeId: loadedThemes[0].id });
+          preparedThemes.current.add(loadedThemes[0].id);
+        } catch (err) {
+          console.warn('Failed to prepare first theme:', err);
+        }
+        setThemePreparing(false);
       }
 
       setIsLoading(false);
@@ -126,26 +160,38 @@ export function usePresentationSession(sessionId: string) {
       const newIndex = currentThemeIndex + 1;
       setCurrentThemeIndex(newIndex);
       const nextId = themes[newIndex]?.id ?? slides[newIndex]?.id;
+
+      // Ensure theme rubrics are ready before evaluation can start
+      if (nextId && themes[newIndex] && !preparedThemes.current.has(nextId)) {
+        await prepareTheme(nextId);
+      }
+
       try {
         await presentationAPI.updateSession(sessionId, { currentSectionId: nextId });
       } catch (err) {
         console.warn('Failed to update current section:', err);
       }
     }
-  }, [sessionId, themes, slides, currentThemeIndex]);
+  }, [sessionId, themes, slides, currentThemeIndex, prepareTheme]);
 
   const previousSlide = useCallback(async () => {
     if (currentThemeIndex > 0) {
       const newIndex = currentThemeIndex - 1;
       setCurrentThemeIndex(newIndex);
       const prevId = themes[newIndex]?.id ?? slides[newIndex]?.id;
+
+      // Ensure theme rubrics are ready
+      if (prevId && themes[newIndex] && !preparedThemes.current.has(prevId)) {
+        await prepareTheme(prevId);
+      }
+
       try {
         await presentationAPI.updateSession(sessionId, { currentSectionId: prevId });
       } catch (err) {
         console.warn('Failed to update current section:', err);
       }
     }
-  }, [sessionId, themes, slides, currentThemeIndex]);
+  }, [sessionId, themes, slides, currentThemeIndex, prepareTheme]);
 
   const endSession = useCallback(async () => {
     try {
@@ -180,6 +226,7 @@ export function usePresentationSession(sessionId: string) {
     currentSlide,
     currentSlideIndex: currentThemeIndex,
     isLoading,
+    themePreparing,
     error,
     startPresenting,
     pausePresenting,

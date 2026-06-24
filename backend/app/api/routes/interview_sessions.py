@@ -153,33 +153,82 @@ async def get_interview_session(
     session_id: str,
     db: Session = Depends(get_db),
 ):
-    """Get interview session by ID. Pre-warms rubrics before returning."""
+    """Get interview session by ID. Does not block on rubric prewarming."""
     logger.info(f"Retrieving interview session {session_id}")
     session = interview_service.get_session(db, session_id)
-
-    # Pre-warm rubrics synchronously — frontend waits until all rubrics are ready
-    if session and session.status in ("idle", "ready", "preparing"):
-        await run_in_threadpool(_pre_warm_rubrics_sync, session.document_id)
-
     return convert_session_to_schema(session, db)
 
 
-def _pre_warm_rubrics_sync(document_id: str):
-    """Compile rubrics for all cards in a document (blocking)."""
+@router.post("/{session_id}/prepare-theme")
+async def prepare_theme(
+    session_id: str,
+    body: dict,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+):
+    """Synchronously compile rubrics for a specific theme, then background-warm remaining themes.
+
+    Body: {"themeId": "theme_xxx"}
+
+    The first call (for page 1) blocks until that theme's cards have compiled rubrics.
+    After returning, remaining themes are queued for background prewarming in order.
+    """
+    from app.models.interview_theme import InterviewTheme
+    from app.models.question_card import QuestionCard
+    from app.services.question_rubric_service import question_rubric_service
+
+    theme_id = body.get("themeId")
+    if not theme_id:
+        raise HTTPException(status_code=400, detail="themeId is required")
+
+    session = interview_service.get_session(db, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Compile rubrics for the requested theme (blocking)
+    cards = db.query(QuestionCard).filter(
+        QuestionCard.interview_theme_id == theme_id,
+    ).order_by(QuestionCard.order_index).all()
+
+    if cards:
+        question_rubric_service.pre_warm_rubrics(db, cards)
+
+    # Queue background prewarming for remaining themes in order
+    background_tasks.add_task(
+        _prewarm_remaining_themes_sync, session.document_id, theme_id
+    )
+
+    return {
+        "themeId": theme_id,
+        "cardsReady": len(cards),
+        "status": "ready",
+    }
+
+
+def _prewarm_remaining_themes_sync(document_id: str, exclude_theme_id: str):
+    """Background: prewarm rubrics for all themes except the one already done, in order."""
     from app.db.session import SessionLocal
+    from app.models.interview_theme import InterviewTheme
     from app.models.question_card import QuestionCard
     from app.services.question_rubric_service import question_rubric_service
 
     db = SessionLocal()
     try:
-        cards = db.query(QuestionCard).filter(
-            QuestionCard.document_id == document_id,
-        ).all()
-        if cards:
-            question_rubric_service.pre_warm_rubrics(db, cards)
-            logger.info(f"Pre-warmed rubrics for {len(cards)} cards (doc={document_id})")
+        themes = db.query(InterviewTheme).filter(
+            InterviewTheme.document_id == document_id,
+            InterviewTheme.is_enabled == True,
+            InterviewTheme.id != exclude_theme_id,
+        ).order_by(InterviewTheme.order_index).all()
+
+        for theme in themes:
+            cards = db.query(QuestionCard).filter(
+                QuestionCard.interview_theme_id == theme.id,
+            ).all()
+            if cards:
+                question_rubric_service.pre_warm_rubrics(db, cards)
+                logger.info(f"Background pre-warmed rubrics for theme {theme.id} ({len(cards)} cards)")
     except Exception as e:
-        logger.warning(f"Rubric pre-warm failed: {e}")
+        logger.warning(f"Background rubric pre-warm failed: {e}")
     finally:
         db.close()
 
@@ -261,7 +310,6 @@ async def create_utterance(
         )
 
         theme_id = utterance.themeId or getattr(utterance_obj, 'section_id', None)
-        # Always evaluate — speaker doesn't matter for card coverage
         background_tasks.add_task(
             process_utterance_evaluation_background,
             session_id,
@@ -269,6 +317,7 @@ async def create_utterance(
             utterance_obj.transcript,
             theme_id,
             utterance_obj.speaker or "pending",
+            utterance.askedCardId,
         )
 
         return convert_utterance_to_schema(utterance_obj)
@@ -281,20 +330,45 @@ async def create_utterance(
         raise HTTPException(status_code=500, detail=f"Failed to create utterance: {str(e)}")
 
 
+_EVALUATION_DEBOUNCE_SECONDS = 1.5
+
+
 def process_utterance_evaluation_background(
     session_id: str,
     utterance_id: str,
     transcript: str,
     section_id: Optional[str],
     speaker: str,
+    asked_card_id: Optional[str] = None,
 ):
-    """Background task to process utterance evaluation."""
+    """Background task to process utterance evaluation with debounce.
+
+    Waits briefly, then checks if newer utterances have arrived.
+    If yes, skips (the newer task will evaluate with more context).
+    """
+    import time
     from app.db.session import SessionLocal
+    from app.models.live_utterance import LiveUtterance
     from app.services.answer_evaluation_engine import answer_evaluation_engine
     from app.services.event_service import event_service
 
+    time.sleep(_EVALUATION_DEBOUNCE_SECONDS)
+
     db = SessionLocal()
     try:
+        # Check if newer utterances arrived during debounce window
+        latest_utt = db.query(LiveUtterance).filter(
+            LiveUtterance.session_id == session_id,
+            LiveUtterance.is_partial == False,
+        ).order_by(LiveUtterance.sequence_index.desc()).first()
+
+        if latest_utt and latest_utt.id != utterance_id:
+            logger.info(
+                f"Debounce: skipping evaluation for {utterance_id}, "
+                f"newer utterance {latest_utt.id} will handle it"
+            )
+            return
+
         if not section_id:
             from app.models.interview_session import InterviewSession as IS
             from app.models.interview_theme import InterviewTheme
@@ -317,32 +391,78 @@ def process_utterance_evaluation_background(
             utterance_id=utterance_id,
             utterance_text=transcript,
             section_id=section_id,
-            speaker=speaker
+            speaker=speaker,
+            asked_card_id=asked_card_id,
         )
 
-        # Emit events for card state changes (use event names frontend expects)
-        STATUS_TO_EVENT = {
-            "sufficient": "CARD_COVERED",
-            "probably_sufficient": "CARD_PROBABLY_COVERED",
-            "listening": "CARD_LISTENING",
-            "at_risk": "CARD_AT_RISK",
-            "skipped": "CARD_SKIPPED",
-        }
+        # If question was detected and no card was auto-activated, emit candidates
+        if not updates and not asked_card_id and answer_evaluation_engine._is_question_like(transcript):
+            candidates = answer_evaluation_engine.find_candidate_cards(
+                db, session_id, section_id or "", transcript, top_k=3
+            )
+            if candidates:
+                event_service.publish_sync(session_id, {
+                    "type": "QUESTION_CARD_CANDIDATES",
+                    "utterance_id": utterance_id,
+                    "candidates": candidates,
+                })
+
+        # Emit events based on activation/completion separation
         for update in updates:
-            event_type = STATUS_TO_EVENT.get(update["new_status"], "CARD_LISTENING")
+            new_status = update["new_status"]
+            old_status = update["old_status"]
+            completion_score = update.get("completion_score", 0.0)
+            activation_score = update.get("activation_score", 0.0)
+
+            # Determine event type
+            if new_status == "sufficient":
+                event_type = "CARD_COVERED"
+            elif new_status == "probably_sufficient":
+                event_type = "CARD_PROGRESS_CHANGED"
+            elif new_status == "listening" and old_status == "pending":
+                event_type = "CARD_TOPIC_DETECTED"
+            elif new_status == "listening":
+                event_type = "CARD_LISTENING"
+            elif new_status == "at_risk":
+                event_type = "CARD_AT_RISK"
+            else:
+                event_type = "CARD_LISTENING"
+
             event_service.publish_sync(
                 session_id,
                 {
                     "type": event_type,
                     "card_id": update["card_id"],
-                    "old_status": update["old_status"],
-                    "new_status": update["new_status"],
+                    "old_status": old_status,
+                    "new_status": new_status,
+                    "activation_score": activation_score,
+                    "completion_score": completion_score,
                     "confidence": update["confidence"],
                     "evidence": update.get("evidence"),
                     "evidenceTranscript": update.get("evidence_transcript"),
-                    "evaluationSeq": update.get("evaluation_seq"),  # Phase 2: for versioned SSE
+                    "evaluationSeq": update.get("evaluation_seq"),
                 }
             )
+
+            # Emit granular evidence events only for real answer progress
+            if completion_score > 0:
+                criterion_evals = (update.get("judgment") or {}).get("criterion_evaluations", [])
+                for crit_eval in criterion_evals:
+                    crit_status = crit_eval.get("status", "not_addressed")
+                    if crit_status in ("not_addressed",):
+                        continue
+                    event_service.publish_sync(
+                        session_id,
+                        {
+                            "type": "CARD_EVIDENCE_ADDED",
+                            "card_id": update["card_id"],
+                            "criterion_id": crit_eval.get("criterion_id"),
+                            "status": crit_status,
+                            "evidence_quote": (crit_eval.get("evidence_quotes") or [None])[0],
+                            "completion_score": completion_score,
+                            "evaluationSeq": update.get("evaluation_seq"),
+                        }
+                    )
 
     except Exception as e:
         logger.error(f"Error processing utterance evaluation: {str(e)}", exc_info=True)
@@ -1058,3 +1178,242 @@ def _brief_to_response(brief) -> dict:
         "notes": brief.notes,
         "generatedAt": brief.generated_at.isoformat() if brief.generated_at else None,
     }
+
+
+# --- Human-in-the-loop Card Routing ---
+
+@router.post("/{session_id}/route-question")
+async def route_question(session_id: str, body: dict, db: Session = Depends(get_db)):
+    """Find top candidate cards for a question. Does not auto-activate."""
+    from app.services.answer_evaluation_engine import answer_evaluation_engine
+
+    text = body.get("text", "")
+    theme_id = body.get("themeId")
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+
+    session = interview_service.get_session(db, session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    section_id = theme_id or session.current_section_id or session.current_theme_id
+    if not section_id:
+        raise HTTPException(status_code=400, detail="No theme/section context")
+
+    candidates = answer_evaluation_engine.find_candidate_cards(
+        db, session_id, section_id, text, top_k=3
+    )
+    return {"candidates": candidates}
+
+
+@router.post("/{session_id}/active-card")
+async def set_active_card(session_id: str, body: dict, db: Session = Depends(get_db)):
+    """User confirms which card is currently being discussed."""
+    from app.models.interview_session import InterviewSession as IS, InterviewCardState
+    from app.models.card_coverage_evaluation import CardCoverageEvaluation
+    from app.services.event_service import event_service
+    from datetime import datetime
+    import uuid
+
+    card_id = body.get("cardId")
+    source = body.get("source", "user_confirmed")
+    if not card_id:
+        raise HTTPException(status_code=400, detail="cardId is required")
+
+    session = db.query(IS).filter(IS.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Update session active card
+    session.active_card_id = card_id
+    session.active_card_hint_id = card_id
+    session.active_card_source = source
+    session.active_card_confirmed_at = datetime.utcnow()
+
+    # Activate the card (pending → listening)
+    card_state = db.query(InterviewCardState).filter(
+        InterviewCardState.session_id == session_id,
+        InterviewCardState.question_card_id == card_id,
+    ).first()
+
+    result_status = "listening"
+    if card_state and card_state.status == 'pending':
+        card_state.status = 'listening'
+        card_state.activation_score = 1.0
+        card_state.updated_at = datetime.utcnow()
+        result_status = "listening"
+    elif card_state:
+        result_status = card_state.status
+
+    # Replay buffered answers if any
+    buffer = session.pending_answer_buffer or []
+    session.pending_answer_buffer = None
+    db.commit()
+
+    # Emit event
+    event_service.publish_sync(session_id, {
+        "type": "ACTIVE_CARD_CHANGED",
+        "card_id": card_id,
+        "status": result_status,
+        "source": source,
+        "activation_score": 1.0,
+        "completion_score": 0.0,
+    })
+
+    # Replay buffered utterances against the confirmed card (idempotent: buffer already cleared above)
+    if buffer:
+        from app.models.live_utterance import LiveUtterance
+        from app.services.answer_evaluation_engine import answer_evaluation_engine
+
+        section_id = session.current_section_id or session.current_theme_id or ""
+        for utt_id in buffer:
+            utt = db.query(LiveUtterance).filter(LiveUtterance.id == utt_id).first()
+            if not utt:
+                continue
+            updates = answer_evaluation_engine._evaluate_answer(
+                db, session_id, utt.id, utt.transcript, section_id,
+                utt.speaker or "interviewee",
+            )
+            for update in updates:
+                new_status = update["new_status"]
+                event_type = "CARD_COVERED" if new_status == "sufficient" else "CARD_PROGRESS_CHANGED"
+                event_service.publish_sync(session_id, {
+                    "type": event_type,
+                    "card_id": update["card_id"],
+                    "old_status": update["old_status"],
+                    "new_status": new_status,
+                    "activation_score": update.get("activation_score", 1.0),
+                    "completion_score": update.get("completion_score", 0),
+                    "confidence": update["confidence"],
+                    "evidence": update.get("evidence"),
+                    "evidenceTranscript": update.get("evidence_transcript"),
+                    "evaluationSeq": update.get("evaluation_seq"),
+                })
+
+        event_service.publish_sync(session_id, {
+            "type": "ANSWER_BUFFER_REPLAYED",
+            "card_id": card_id,
+            "replayed_count": len(buffer),
+        })
+
+    return {
+        "cardId": card_id,
+        "status": result_status,
+        "activationScore": 1.0,
+        "bufferedAnswersReplayed": len(buffer),
+    }
+
+
+@router.delete("/{session_id}/active-card")
+async def clear_active_card(session_id: str, db: Session = Depends(get_db)):
+    """Clear the active card."""
+    from app.models.interview_session import InterviewSession as IS
+    from app.services.event_service import event_service
+
+    session = db.query(IS).filter(IS.id == session_id).first()
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    session.active_card_id = None
+    session.active_card_hint_id = None
+    session.active_card_source = "cleared"
+    session.pending_answer_buffer = None
+    db.commit()
+
+    event_service.publish_sync(session_id, {"type": "ACTIVE_CARD_CLEARED"})
+    return {"ok": True}
+
+
+@router.post("/{session_id}/cards/{card_id}/manual-complete")
+async def manual_complete_card(session_id: str, card_id: str, body: dict, db: Session = Depends(get_db)):
+    """User manually marks a card as completed."""
+    from app.models.interview_session import InterviewCardState
+    from app.models.card_coverage_evaluation import CardCoverageEvaluation
+    from app.services.event_service import event_service
+    from datetime import datetime
+    import uuid
+
+    note = body.get("note", "")
+
+    card_state = db.query(InterviewCardState).filter(
+        InterviewCardState.session_id == session_id,
+        InterviewCardState.question_card_id == card_id,
+    ).first()
+    if not card_state:
+        raise HTTPException(status_code=404, detail="Card state not found")
+
+    old_status = card_state.status
+    card_state.status = "sufficient"
+    card_state.completion_source = "manual"
+    card_state.manual_note = note or None
+    card_state.completion_score = 1.0
+    card_state.confidence = 1.0
+    card_state.answered_at = datetime.utcnow()
+    card_state.updated_at = datetime.utcnow()
+
+    # Write audit record
+    coverage_eval = CardCoverageEvaluation(
+        id=f"cce_{uuid.uuid4().hex[:12]}",
+        session_id=session_id,
+        card_id=card_id,
+        basis_type="live",
+        transcript_revision_id=None,
+        state="sufficient",
+        confidence=1.0,
+        covered_element_ids=[],
+        missing_element_ids=[],
+        evidence=[{"manual_note": note}] if note else [],
+        evaluation_seq=999,
+        model="manual",
+        prompt_version=None,
+        created_at=datetime.utcnow(),
+    )
+    db.add(coverage_eval)
+    db.commit()
+
+    event_service.publish_sync(session_id, {
+        "type": "CARD_MANUALLY_COMPLETED",
+        "card_id": card_id,
+        "old_status": old_status,
+        "new_status": "sufficient",
+        "completion_source": "manual",
+        "note": note,
+    })
+
+    return {
+        "cardId": card_id,
+        "status": "sufficient",
+        "completionSource": "manual",
+    }
+
+
+@router.post("/{session_id}/cards/{card_id}/undo-complete")
+async def undo_complete_card(session_id: str, card_id: str, db: Session = Depends(get_db)):
+    """Undo a manual completion — revert card to its previous state."""
+    from app.models.interview_session import InterviewCardState
+    from app.services.event_service import event_service
+    from datetime import datetime
+
+    card_state = db.query(InterviewCardState).filter(
+        InterviewCardState.session_id == session_id,
+        InterviewCardState.question_card_id == card_id,
+    ).first()
+    if not card_state:
+        raise HTTPException(status_code=404, detail="Card state not found")
+
+    # Revert to listening (or pending if no activation)
+    prev_status = "listening" if float(card_state.activation_score or 0) > 0 else "pending"
+    card_state.status = prev_status
+    card_state.completion_source = None
+    card_state.manual_note = None
+    card_state.confidence = float(card_state.completion_score or 0)
+    card_state.updated_at = datetime.utcnow()
+    db.commit()
+
+    event_service.publish_sync(session_id, {
+        "type": "CARD_UNDO_COMPLETED",
+        "card_id": card_id,
+        "new_status": prev_status,
+    })
+
+    return {"cardId": card_id, "status": prev_status}

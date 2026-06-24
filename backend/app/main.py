@@ -105,6 +105,22 @@ async def startup_event():
     logger.info(f"Environment: {settings.ENVIRONMENT}")
     logger.info(f"Debug mode: {settings.DEBUG}")
 
+    # Ensure demo user exists (required by FK on projects/sessions)
+    from app.db.session import SessionLocal
+    from sqlalchemy import text
+    db = SessionLocal()
+    try:
+        db.execute(text(
+            "INSERT INTO users (id, email, hashed_password, created_at, updated_at) "
+            "VALUES ('user_default', 'demo@insightguide.local', 'not_used', NOW(), NOW()) "
+            "ON CONFLICT (id) DO NOTHING"
+        ))
+        db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
 
 @app.on_event("shutdown")
 async def shutdown_event():

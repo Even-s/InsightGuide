@@ -291,33 +291,6 @@ class TestDocumentService:
         assert exc_info.value.status_code == 404
         assert "not found" in str(exc_info.value.detail).lower()
 
-    def test_update_document_status(self, mock_db, sample_document):
-        """Test updating document status."""
-        mock_db.query().filter().first.return_value = sample_document
-
-        updated = DocumentService.update_document_status(
-            mock_db,
-            "doc_123abc",
-            "analyzing"
-        )
-
-        assert updated.status == "analyzing"
-        assert updated.updated_at is not None
-        mock_db.commit.assert_called_once()
-
-    def test_update_document_status_not_found(self, mock_db):
-        """Test update status fails when document not found."""
-        mock_db.query().filter().first.return_value = None
-
-        with pytest.raises(HTTPException) as exc_info:
-            DocumentService.update_document_status(
-                mock_db,
-                "nonexistent",
-                "analyzing"
-            )
-
-        assert exc_info.value.status_code == 404
-
     @patch('app.services.document_service.s3_service')
     @patch('app.services.document_service.settings')
     def test_delete_document_success(

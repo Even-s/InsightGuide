@@ -145,31 +145,8 @@ class TestBillingService:
 
     # --- calculate_audio_cost ---
 
-    def test_audio_cost_known_model(self):
-        cost, pricing = billing_service.calculate_audio_cost(
-            model="gpt-realtime-whisper",
-            audio_seconds=Decimal("60")
-        )
-        assert cost > ZERO
-        assert pricing["type"] == "audio_seconds"
-        assert "missingPrice" not in pricing
 
-    def test_audio_cost_unknown_model(self):
-        cost, pricing = billing_service.calculate_audio_cost(
-            model="unknown-audio",
-            audio_seconds=Decimal("60")
-        )
-        assert cost == ZERO
-        assert pricing["missingPrice"] is True
 
-    def test_audio_cost_zero_seconds(self):
-        cost, _ = billing_service.calculate_audio_cost(
-            model="gpt-realtime-whisper",
-            audio_seconds=Decimal("0")
-        )
-        assert cost == ZERO
-
-    # --- _round_money ---
 
     def test_round_money(self):
         result = billing_service._round_money(Decimal("0.1234567"))
@@ -180,17 +157,6 @@ class TestBillingService:
         assert result == Decimal("1.000000")
 
     # --- record_chat_completion ---
-
-    def test_record_chat_completion_no_session(self):
-        # Should early return without error
-        billing_service.record_chat_completion(
-            presentation_session_id=None,
-            operation="test",
-            model="gpt-5.4-mini",
-            response=Mock()
-        )
-
-    # --- empty_summary ---
 
     def test_empty_summary(self):
         summary = billing_service.empty_summary()

@@ -327,32 +327,6 @@ class DocumentService:
         return document
 
     @staticmethod
-    def update_document_status(
-        db: Session,
-        document_id: str,
-        status: str
-    ) -> Document:
-        """
-        Update document status.
-
-        Args:
-            db: Database session
-            document_id: Document ID
-            status: New status
-
-        Returns:
-            Updated Document instance
-        """
-        document = DocumentService.get_document(db, document_id)
-        document.status = status
-        document.updated_at = datetime.utcnow()
-
-        db.commit()
-        db.refresh(document)
-        logger.info(f"Updated document {document_id} status to {status}")
-        return document
-
-    @staticmethod
     def delete_document(db: Session, document_id: str, commit: bool = True) -> None:
         """
         Delete a document and its associated files.

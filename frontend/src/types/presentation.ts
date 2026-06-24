@@ -39,6 +39,8 @@ export interface PresentationSession {
   prepSessionId: string
   documentId: string
   userId: string
+  projectId?: string
+  stakeholderProfileId?: string
   status: SessionStatus
   currentSectionId?: string
   startedAt?: string

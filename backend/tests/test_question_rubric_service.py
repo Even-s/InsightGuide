@@ -28,16 +28,17 @@ class TestCompileRubricFromElements:
         }
         return card
 
-    def test_single_element_becomes_critical(self):
+    def test_single_element_expands_to_multiple_criteria(self):
+        """Single element should expand to 2-3 criteria for better granularity."""
         card = self._make_card(elements=[{"text": "最花時間的步驟"}])
         rubric = self.service.compile_rubric_from_elements(card)
 
         assert rubric["rubricVersion"] == "v1"
-        assert len(rubric["criteria"]) == 1
+        assert len(rubric["criteria"]) >= 2
         assert rubric["criteria"][0]["critical"] is True
-        assert rubric["criteria"][0]["required"] is True
-        assert rubric["criteria"][0]["weight"] == 1.0
-        assert "最花時間的步驟" in rubric["criteria"][0]["description"]
+        assert rubric["criteria"][0]["weight"] > rubric["criteria"][1]["weight"]
+        total_weight = sum(c["weight"] for c in rubric["criteria"])
+        assert abs(total_weight - 1.0) < 0.01
 
     def test_multiple_elements_distribute_weight(self):
         card = self._make_card(elements=[
@@ -84,13 +85,14 @@ class TestCompileRubricFromElements:
         assert rubric["criteria"][1]["id"] == "criterion_1"
         assert rubric["criteria"][2]["id"] == "criterion_2"
 
-    def test_element_with_aliases_included(self):
+    def test_element_with_aliases_still_expands(self):
+        """Single element with aliases still expands for granularity."""
         card = self._make_card(elements=[
             {"text": "最花時間的步驟", "aliases": ["瓶頸", "耗時"]}
         ])
         rubric = self.service.compile_rubric_from_elements(card)
 
-        assert len(rubric["criteria"]) == 1
+        assert len(rubric["criteria"]) >= 2
 
     def test_empty_elements_and_anchors_returns_minimal(self):
         card = self._make_card(elements=[], anchors=[])
@@ -136,8 +138,7 @@ class TestGetOrCompileRubric:
         rubric = self.service.get_or_compile_rubric(db, card)
 
         assert rubric["rubricVersion"] == "v1"
-        assert len(rubric["criteria"]) == 1
-        # Verify it was flushed (saved within transaction)
+        assert len(rubric["criteria"]) >= 2  # Single element expands
         db.flush.assert_called()
 
     @patch("app.services.question_rubric_service.openai_service")

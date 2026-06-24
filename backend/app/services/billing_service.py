@@ -125,63 +125,8 @@ class BillingService:
             "outputPerMillion": str(pricing.output_per_million),
         }
 
-    def calculate_audio_cost(self, model: str, audio_seconds: Decimal) -> tuple[Decimal, Dict[str, Any]]:
-        normalized_model = self._normalize_model(model)
-        pricing = MODEL_AUDIO_PRICES.get(normalized_model)
-        if not pricing:
-            return ZERO, {
-                "type": "audio_seconds",
-                "model": model,
-                "pricedModel": normalized_model,
-                "missingPrice": True,
-            }
-
-        cost = max(audio_seconds, ZERO) * pricing.per_second
-        return self._round_money(cost), {
-            "type": "audio_seconds",
-            "model": model,
-            "pricedModel": normalized_model,
-            "perSecond": str(pricing.per_second),
-        }
-
     def _round_money(self, value: Decimal) -> Decimal:
         return value.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
-
-    def record_chat_completion(
-        self,
-        presentation_session_id: Optional[str],
-        operation: str,
-        model: str,
-        response: Any,
-        source_id: Optional[str] = None,
-    ) -> None:
-        if not presentation_session_id:
-            return
-
-        usage = getattr(response, "usage", None)
-        input_tokens = self._usage_value(usage, "prompt_tokens")
-        output_tokens = self._usage_value(usage, "completion_tokens")
-        total_tokens = self._usage_value(usage, "total_tokens", input_tokens + output_tokens)
-        cached_input_tokens = self._cached_input_tokens(usage)
-        cost, pricing = self.calculate_token_cost(
-            model=model,
-            input_tokens=input_tokens,
-            cached_input_tokens=cached_input_tokens,
-            output_tokens=output_tokens,
-        )
-
-        self.record_usage_event(
-            presentation_session_id=presentation_session_id,
-            operation=operation,
-            model=model,
-            input_tokens=input_tokens,
-            cached_input_tokens=cached_input_tokens,
-            output_tokens=output_tokens,
-            total_tokens=total_tokens,
-            cost_usd=cost,
-            pricing=pricing,
-            source_id=source_id,
-        )
 
     def record_deck_chat_completion(
         self,
@@ -215,28 +160,6 @@ class BillingService:
             cached_input_tokens=cached_input_tokens,
             output_tokens=output_tokens,
             total_tokens=total_tokens,
-            cost_usd=cost,
-            pricing=pricing,
-            source_id=source_id,
-            idempotent=True,
-        )
-
-    def record_realtime_transcription(
-        self,
-        presentation_session_id: str,
-        model: str,
-        audio_seconds: float,
-        source_id: str,
-    ) -> None:
-        seconds = Decimal(str(max(audio_seconds, 0))).quantize(Decimal("0.001"))
-        if seconds <= ZERO:
-            return
-        cost, pricing = self.calculate_audio_cost(model=model, audio_seconds=seconds)
-        self.record_usage_event(
-            presentation_session_id=presentation_session_id,
-            operation="realtime_transcription",
-            model=model,
-            audio_seconds=seconds,
             cost_usd=cost,
             pricing=pricing,
             source_id=source_id,
@@ -378,9 +301,6 @@ class BillingService:
 
     def summarize_session(self, db: Session, session_id: str) -> Dict[str, Any]:
         return self.summarize_sessions(db, [session_id]).get(session_id, self.empty_summary())
-
-    def summarize_deck(self, db: Session, deck_id: str) -> Dict[str, Any]:
-        return self.summarize_decks(db, [deck_id]).get(deck_id, self.empty_summary())
 
     def empty_summary(self) -> Dict[str, Any]:
         return self._summary_dict(0, 0, 0, 0, ZERO, ZERO)

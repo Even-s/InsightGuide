@@ -54,40 +54,9 @@ class TestQuestionCardService:
         assert isinstance(question_card_service, QuestionCardService)
         assert question_card_service.MAX_IMPORTANT_ELEMENTS == 3
 
-    def test_normalize_text_key_english(self):
-        """Test text normalization for English."""
-        text = "Hello, World!"
-        key = QuestionCardService._normalize_text_key(text)
 
-        assert key == "helloworld"
-        assert " " not in key
-        assert "," not in key
-        assert "!" not in key
 
-    def test_normalize_text_key_chinese(self):
-        """Test text normalization for Chinese."""
-        text = "你好，世界！"
-        key = QuestionCardService._normalize_text_key(text)
 
-        assert "，" not in key
-        assert "！" not in key
-        # Should keep Chinese characters
-        assert len(key) > 0
-
-    def test_normalize_text_key_mixed(self):
-        """Test text normalization for mixed language."""
-        text = "Hello 世界, test！"
-        key = QuestionCardService._normalize_text_key(text)
-
-        assert " " not in key
-        assert "," not in key
-        assert "！" not in key
-
-    def test_normalize_text_key_empty(self):
-        """Test normalizing empty text."""
-        assert QuestionCardService._normalize_text_key("") == ""
-        assert QuestionCardService._normalize_text_key(None) == ""
-        assert QuestionCardService._normalize_text_key("   ") == ""
 
     def test_element_text_dict(self):
         """Test extracting text from dict element."""
@@ -129,54 +98,6 @@ class TestQuestionCardService:
         """Test cleaning text without numbers."""
         text = "Plain text"
         assert QuestionCardService._clean_numbered_point(text) == text
-
-    def test_is_represented_by_element_exact_match(self):
-        """Test element representation with exact match."""
-        anchor = "revenue growth"
-        elements = [
-            {"text": "Revenue growth target", "aliases": [], "subpoints": []}
-        ]
-
-        assert QuestionCardService._is_represented_by_element(anchor, elements) is True
-
-    def test_is_represented_by_element_alias_match(self):
-        """Test element representation with alias match."""
-        anchor = "income"
-        elements = [
-            {
-                "text": "Revenue",
-                "aliases": ["income", "earnings"],
-                "subpoints": []
-            }
-        ]
-
-        assert QuestionCardService._is_represented_by_element(anchor, elements) is True
-
-    def test_is_represented_by_element_subpoint_match(self):
-        """Test element representation with subpoint match."""
-        anchor = "Q1 target"
-        elements = [
-            {
-                "text": "Revenue goals",
-                "aliases": [],
-                "subpoints": ["Q1 target", "Q2 target"]
-            }
-        ]
-
-        assert QuestionCardService._is_represented_by_element(anchor, elements) is True
-
-    def test_is_represented_by_element_no_match(self):
-        """Test element representation with no match."""
-        anchor = "completely different"
-        elements = [
-            {"text": "Revenue", "aliases": [], "subpoints": []}
-        ]
-
-        assert QuestionCardService._is_represented_by_element(anchor, elements) is False
-
-    def test_is_represented_by_element_empty_anchor(self):
-        """Test with empty anchor."""
-        assert QuestionCardService._is_represented_by_element("", []) is True
 
     def test_normalize_coverage_rule_basic(self):
         """Test basic coverage rule normalization."""
@@ -375,20 +296,6 @@ class TestQuestionCardService:
         elements = normalized.get("mustMentionElements", [])
         assert len(elements) == 3
 
-    def test_normalize_text_key_punctuation_removal(self):
-        """Test that various punctuation marks are removed."""
-        test_cases = [
-            ("Hello, World!", "helloworld"),
-            ("Test: Example", "testexample"),
-            ("Question?", "question"),
-            ("Answer!", "answer"),
-            ("「Chinese」", "chinese"),
-            ("（test）", "test")
-        ]
-
-        for input_text, expected in test_cases:
-            result = QuestionCardService._normalize_text_key(input_text)
-            assert result == expected
 
     def test_element_text_with_empty_dict(self):
         """Test extracting text from dict without text key."""
@@ -396,12 +303,3 @@ class TestQuestionCardService:
         text = QuestionCardService._element_text(element)
 
         assert text == ""
-
-    def test_is_represented_case_insensitive(self):
-        """Test that element matching is case-insensitive."""
-        anchor = "REVENUE GROWTH"
-        elements = [
-            {"text": "revenue growth", "aliases": [], "subpoints": []}
-        ]
-
-        assert QuestionCardService._is_represented_by_element(anchor, elements) is True

@@ -11,6 +11,7 @@ cd "$ROOT_DIR"
 FRONTEND_URL="http://localhost:5174"
 BACKEND_URL="http://localhost:8002"
 API_DOCS_URL="http://localhost:8002/docs"
+DOCKER_COMPOSE_FILE="$ROOT_DIR/docker-compose.yml"
 
 bold() {
     printf "\033[1m%s\033[0m\n" "$1"
@@ -26,7 +27,7 @@ http_ok() {
 
 compose() {
     if command -v docker-compose >/dev/null 2>&1; then
-        docker-compose "$@"
+        docker-compose -f "$DOCKER_COMPOSE_FILE" "$@"
     else
         docker compose "$@"
     fi
@@ -42,6 +43,20 @@ open_url() {
     else
         info "Open this URL in your browser: $url"
     fi
+}
+
+wait_for_http() {
+    local name="$1"
+    local url="$2"
+    local attempts="${3:-20}"
+
+    for _ in $(seq 1 "$attempts"); do
+        if http_ok "$url"; then
+            info "✅ $name is ready"
+            return 0
+        fi
+        sleep 1
+    done
 }
 
 print_header() {
@@ -111,6 +126,49 @@ stop_app() {
     print_header
     bold "Stopping InsightGuide services..."
     "$ROOT_DIR/stop-services.sh"
+}
+
+restart_backend() {
+    bold "Restarting Backend..."
+    info "Stopping old backend process..."
+    pkill -f "uvicorn app.main:app.*--port 8002" 2>/dev/null || true
+    lsof -ti:8002 | xargs kill -9 2>/dev/null || true
+    sleep 1
+
+    info "Starting new backend process..."
+    cd "$ROOT_DIR/backend"
+    source venv/bin/activate
+    nohup python -m uvicorn app.main:app --host 0.0.0.0 --port 8002 --reload > "$ROOT_DIR/logs/backend.log" 2>&1 &
+    echo $! > "$ROOT_DIR/logs/backend.pid"
+    cd "$ROOT_DIR"
+
+    wait_for_http "Backend" "$BACKEND_URL/health"
+    bold "Backend restart complete."
+}
+
+restart_frontend() {
+    bold "Restarting Frontend..."
+    info "Stopping old frontend process..."
+    pkill -f "frontend/node_modules/.bin/vite" 2>/dev/null || true
+    lsof -ti:5174 | xargs kill -9 2>/dev/null || true
+    sleep 1
+
+    info "Starting new frontend process..."
+    cd "$ROOT_DIR/frontend"
+    nohup npm run dev > "$ROOT_DIR/logs/frontend.log" 2>&1 &
+    echo $! > "$ROOT_DIR/logs/frontend.pid"
+    cd "$ROOT_DIR"
+
+    wait_for_http "Frontend" "$FRONTEND_URL"
+    bold "Frontend restart complete."
+}
+
+restart_service() {
+    case "$1" in
+        backend) restart_backend ;;
+        frontend) restart_frontend ;;
+        *) restart_app ;;
+    esac
 }
 
 show_status() {
@@ -221,7 +279,7 @@ Usage:
   ./insightguide.sh                 Open the interactive control center
   ./insightguide.sh launch          Start services if needed, then open InsightGuide
   ./insightguide.sh start           Start services if needed
-  ./insightguide.sh restart         Restart all services
+  ./insightguide.sh restart [all|backend|frontend]
   ./insightguide.sh stop            Stop all services
   ./insightguide.sh status          Show detailed service status
   ./insightguide.sh open            Open InsightGuide in the browser
@@ -236,7 +294,7 @@ case "${1:-menu}" in
     menu) interactive_menu ;;
     launch) start_app --open ;;
     start) start_app ;;
-    restart) restart_app "${2:-}" ;;
+    restart) restart_service "${2:-all}" ;;
     stop) stop_app ;;
     status) show_status ;;
     open) open_url "$FRONTEND_URL" ;;

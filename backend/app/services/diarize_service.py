@@ -83,45 +83,5 @@ class DiarizeService:
             logger.error(f"Diarize transcription failed for session {session_id} chunk {chunk_index}: {e}")
             return []
 
-    def resolve_speaker_role(self, speaker_id: str, session_id: str) -> str:
-        """Map a diarization speaker_id to interviewer/interviewee.
-
-        Heuristic: first speaker in the session is the interviewer.
-        """
-        key = f"{session_id}"
-        if key not in self.speaker_map:
-            self.speaker_map[key] = {}
-
-        mapping = self.speaker_map[key]
-        if speaker_id not in mapping:
-            if len(mapping) == 0:
-                mapping[speaker_id] = "interviewer"
-            else:
-                mapping[speaker_id] = "interviewee"
-
-        return mapping[speaker_id]
-
-    def _pcm_to_wav(self, pcm_bytes: bytes, sample_rate: int) -> bytes:
-        """Convert raw PCM16 mono to WAV format."""
-        import struct
-
-        num_samples = len(pcm_bytes) // 2
-        data_size = num_samples * 2
-        file_size = 36 + data_size
-
-        header = struct.pack(
-            '<4sI4s4sIHHIIHH4sI',
-            b'RIFF', file_size, b'WAVE',
-            b'fmt ', 16,
-            1,  # PCM format
-            1,  # mono
-            sample_rate,
-            sample_rate * 2,  # byte rate
-            2,  # block align
-            16,  # bits per sample
-            b'data', data_size,
-        )
-        return header + pcm_bytes
-
 
 diarize_service = DiarizeService()

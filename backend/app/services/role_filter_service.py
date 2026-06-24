@@ -1,7 +1,7 @@
 """Role Filter Service - filters question cards based on stakeholder role."""
 
 import logging
-from typing import Dict, List, Any, Optional
+from typing import Dict, List
 from sqlalchemy.orm import Session
 
 from app.models.question_card import QuestionCard
@@ -172,73 +172,6 @@ class RoleFilterService:
                 card.not_recommended_roles = []
                 card.question_intent = "business_process"
             # If mixed or unclear, leave empty (will be categorized as "applicable" for all)
-
-    def is_card_applicable_for_stakeholder(
-        self,
-        card: QuestionCard,
-        stakeholder: Optional[StakeholderProfile],
-    ) -> bool:
-        """Quick check: is this card applicable for the given stakeholder?
-
-        Returns True if no stakeholder is set (backwards compatibility).
-        """
-        if not stakeholder:
-            return True
-
-        category = self._categorize_card(
-            card,
-            stakeholder.stakeholder_type,
-            set(stakeholder.expertise_tags or []),
-            set(stakeholder.knowledge_boundaries or []),
-        )
-        return category != "not_applicable"
-
-    def get_card_coverage_for_project(
-        self,
-        db: Session,
-        project_id: str,
-    ) -> Dict[str, Any]:
-        """Get role coverage analysis for the entire project."""
-        from app.models.document import Document
-
-        documents = db.query(Document).filter(
-            Document.project_id == project_id
-        ).all()
-        if not documents:
-            return {"total_cards": 0, "coverage_by_role": {}}
-
-        doc_ids = [d.id for d in documents]
-        cards = db.query(QuestionCard).filter(
-            QuestionCard.document_id.in_(doc_ids)
-        ).all()
-
-        # Analyze which roles are needed
-        role_needs: Dict[str, int] = {}
-        for card in cards:
-            for role in (card.target_roles or []):
-                role_needs[role] = role_needs.get(role, 0) + 1
-
-        # Check which roles have been interviewed
-        from app.models.stakeholder_profile import StakeholderProfile as SP
-        profiles = db.query(SP).filter(
-            SP.project_id == project_id,
-            SP.status == "interviewed",
-        ).all()
-        interviewed_roles = {p.stakeholder_type for p in profiles}
-
-        coverage_by_role = {}
-        for role, count in role_needs.items():
-            coverage_by_role[role] = {
-                "applicable_cards": count,
-                "has_been_interviewed": role in interviewed_roles,
-            }
-
-        return {
-            "total_cards": len(cards),
-            "cards_with_role_targeting": len([c for c in cards if c.target_roles]),
-            "coverage_by_role": coverage_by_role,
-            "roles_not_yet_interviewed": [r for r in role_needs if r not in interviewed_roles],
-        }
 
 
 role_filter_service = RoleFilterService()

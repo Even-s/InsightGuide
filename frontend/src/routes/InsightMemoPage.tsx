@@ -5,12 +5,12 @@ import { apiClient } from '@/api/client'
 
 function SeverityBadge({ severity }: { severity: string }) {
   const colors: Record<string, string> = {
-    high: 'bg-red-100 text-red-700',
-    medium: 'bg-amber-100 text-amber-700',
-    low: 'bg-cream-100 text-natural-600',
+    high: 'bg-wood-100 text-wood-500',
+    medium: 'bg-wood-50 text-wood-400',
+    low: 'bg-cream-200 text-natural-500',
   }
   return (
-    <span className={`px-1.5 py-0.5 text-xs rounded ${colors[severity] || colors.low}`}>
+    <span className={`px-1.5 py-0.5 text-xs rounded-xl ${colors[severity] || colors.low}`}>
       {severity === 'high' ? '高' : severity === 'medium' ? '中' : '低'}
     </span>
   )
@@ -18,9 +18,9 @@ function SeverityBadge({ severity }: { severity: string }) {
 
 function SourceBadge({ source }: { source: string }) {
   const colors: Record<string, string> = {
-    explicit: 'bg-green-100 text-green-700',
-    inferred: 'bg-blue-100 text-blue-700',
-    unverified: 'bg-orange-100 text-orange-700',
+    explicit: 'bg-sage-100 text-sage-500',
+    inferred: 'bg-cream-300 text-natural-600',
+    unverified: 'bg-wood-100 text-wood-500',
   }
   const labels: Record<string, string> = {
     explicit: '明確',
@@ -28,7 +28,7 @@ function SourceBadge({ source }: { source: string }) {
     unverified: '待驗證',
   }
   return (
-    <span className={`px-1.5 py-0.5 text-xs rounded ${colors[source] || 'bg-cream-100 text-natural-600'}`}>
+    <span className={`px-1.5 py-0.5 text-xs rounded-xl ${colors[source] || 'bg-cream-200 text-natural-500'}`}>
       {labels[source] || source}
     </span>
   )
@@ -145,11 +145,11 @@ export default function InsightMemoPage() {
       <div className="max-w-4xl mx-auto px-6 py-8">
         <h1 className="text-2xl font-bold text-natural-800 mb-4">訪談洞察紀錄</h1>
         <p className="text-natural-500 mb-4">尚未產生此訪談的洞察紀錄。</p>
-        {error && <p className="text-red-500 text-sm mb-4">{error}</p>}
+        {error && <p className="text-wood-500 text-sm mb-4">{error}</p>}
         <button
           onClick={handleGenerate}
           disabled={generating}
-          className="px-4 py-2 bg-sage-400 text-white rounded-lg hover:bg-sage-500 disabled:opacity-50"
+          className="px-4 py-2 bg-sage-400 text-white rounded-xl hover:bg-sage-500 disabled:opacity-50 shadow-natural"
         >
           {generating ? '分析中...' : '產生洞察紀錄'}
         </button>
@@ -175,32 +175,32 @@ export default function InsightMemoPage() {
           {memo.projectId && (
             <button
               onClick={() => navigate(`/projects/${memo.projectId}`)}
-              className="px-3 py-1.5 text-xs font-medium text-sage-600 border border-sage-200 rounded-lg hover:bg-sage-50"
+              className="px-3 py-1.5 text-xs font-medium text-sage-500 border border-sage-200 rounded-xl hover:bg-sage-50"
             >
               回到專案
             </button>
           )}
           {activeTab === 'memo' && memo.sourceDistinction && (
             <div className="flex gap-2 text-xs">
-              <span className="px-2 py-0.5 bg-green-50 text-green-600 rounded">明確 {memo.sourceDistinction.explicit_statements}</span>
-              <span className="px-2 py-0.5 bg-blue-50 text-blue-600 rounded">推論 {memo.sourceDistinction.inferences}</span>
-              <span className="px-2 py-0.5 bg-orange-50 text-orange-600 rounded">待驗 {memo.sourceDistinction.unverified}</span>
+              <span className="px-2 py-0.5 bg-sage-50 text-sage-500 rounded-xl">明確 {memo.sourceDistinction.explicit_statements}</span>
+              <span className="px-2 py-0.5 bg-cream-200 text-natural-500 rounded-xl">推論 {memo.sourceDistinction.inferences}</span>
+              <span className="px-2 py-0.5 bg-wood-50 text-wood-400 rounded-xl">待驗 {memo.sourceDistinction.unverified}</span>
             </div>
           )}
         </div>
       </div>
 
       {/* Tab switcher */}
-      <div className="flex rounded-lg border border-cream-300 bg-cream-100 p-0.5 w-fit mb-6">
+      <div className="flex rounded-xl border border-cream-300 bg-cream-100 p-0.5 w-fit mb-6">
         <button
           onClick={() => setActiveTab('memo')}
-          className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${activeTab === 'memo' ? 'bg-white text-natural-700 shadow-sm' : 'text-natural-400 hover:text-natural-600'}`}
+          className={`rounded-xl px-4 py-1.5 text-sm font-medium transition-colors ${activeTab === 'memo' ? 'bg-white text-natural-700 shadow-natural' : 'text-natural-400 hover:text-natural-600'}`}
         >
           洞察分析
         </button>
         <button
           onClick={() => setActiveTab('transcript')}
-          className={`rounded-md px-4 py-1.5 text-sm font-medium transition-colors ${activeTab === 'transcript' ? 'bg-white text-natural-700 shadow-sm' : 'text-natural-400 hover:text-natural-600'}`}
+          className={`rounded-xl px-4 py-1.5 text-sm font-medium transition-colors ${activeTab === 'transcript' ? 'bg-white text-natural-700 shadow-natural' : 'text-natural-400 hover:text-natural-600'}`}
         >
           逐字稿
         </button>
@@ -298,7 +298,7 @@ export default function InsightMemoPage() {
                   </p>
                 )}
                 {r.needs_validation_from.length > 0 && (
-                  <div className="text-xs text-amber-600 mt-1">
+                  <div className="text-xs text-wood-400 mt-1">
                     需驗證：{r.needs_validation_from.join(', ')}
                   </div>
                 )}
@@ -315,8 +315,8 @@ export default function InsightMemoPage() {
           <div className="space-y-2">
             {mergedConstraints.map((c, i) => (
               <div key={i} className="flex items-start gap-2 text-sm">
-                <span className={`px-1.5 py-0.5 text-xs rounded ${
-                  c.type === 'assumption' ? 'bg-blue-50 text-blue-600' : 'bg-red-50 text-red-600'
+                <span className={`px-1.5 py-0.5 text-xs rounded-xl ${
+                  c.type === 'assumption' ? 'bg-cream-200 text-natural-600' : 'bg-wood-100 text-wood-500'
                 }`}>
                   {c.type === 'assumption' ? '假設' : '限制'}
                 </span>

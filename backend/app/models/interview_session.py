@@ -29,6 +29,13 @@ class InterviewSession(Base):
     paused_duration_seconds = Column(Integer, nullable=False, default=0)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
+    # Active card routing — which card is currently being discussed
+    active_card_hint_id = Column(String, nullable=True)  # legacy, kept for compat
+    active_card_id = Column(String, nullable=True)
+    active_card_source = Column(String, nullable=True)  # system_suggested | user_confirmed | manual_selected | cleared
+    active_card_confirmed_at = Column(DateTime, nullable=True)
+    pending_answer_buffer = Column(JSON, nullable=True)  # list of utterance_ids waiting for card confirmation
+
     # Transcript management (Phase 1: Data flow separation)
     transcript_status = Column(String, nullable=False, default="live_only")
     # live_only | diarizing | finalized | diarize_failed
@@ -63,6 +70,10 @@ class InterviewCardState(Base):
     question_card_id = Column(String, ForeignKey("question_cards.id"), nullable=False, index=True)
     status = Column(String, nullable=False, default="pending")  # pending, listening, probably_sufficient, sufficient, at_risk, skipped, manually_checked, disabled
     confidence = Column(Numeric(4, 3), nullable=True)
+    activation_score = Column(Numeric(4, 3), nullable=False, server_default="0")
+    completion_score = Column(Numeric(4, 3), nullable=False, server_default="0")
+    completion_source = Column(String, nullable=True)  # ai | manual | final
+    manual_note = Column(Text, nullable=True)
     answered_at = Column(DateTime, nullable=True)
     evidence_transcript = Column(Text, nullable=True)
     evidence = Column(JSON, nullable=True)

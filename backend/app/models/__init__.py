@@ -15,6 +15,7 @@ from app.models.live_utterance import LiveUtterance
 from app.models.transcript_revision import TranscriptRevision
 from app.models.final_utterance import FinalUtterance
 from app.models.card_coverage_evaluation import CardCoverageEvaluation
+from app.models.card_criterion_evidence import CardCriterionEvidence
 from app.models.question_instance import QuestionInstance
 from app.models.question_answer import QuestionAnswer
 from app.models.utterance_alignment import UtteranceAlignment
@@ -42,6 +43,7 @@ __all__ = [
     "TranscriptRevision",
     "FinalUtterance",
     "CardCoverageEvaluation",
+    "CardCriterionEvidence",
     "QuestionInstance",
     "QuestionAnswer",
     "UtteranceAlignment",

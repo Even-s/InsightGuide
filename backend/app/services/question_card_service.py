@@ -13,7 +13,6 @@ import uuid
 from app.models.question_card import QuestionCard
 from app.models.section import Section
 from app.schemas.question_card import CoverageRule, QuestionCardCreate, QuestionCardUpdate
-from app.services.ai_card_generator import ai_card_generator
 
 logger = logging.getLogger(__name__)
 
@@ -23,46 +22,11 @@ class QuestionCardService:
 
     MAX_IMPORTANT_ELEMENTS = 3
 
-    @staticmethod
-    def _normalize_text_key(text: str) -> str:
-        """Create a lightweight key for deduping Chinese/English text."""
-        return "".join(
-            char.lower()
-            for char in str(text or "")
-            if not char.isspace() and char not in "，。、；：:,.!！?？「」『』（）()[]【】"
-        )
-
     @classmethod
     def _element_text(cls, element: Any) -> str:
         if isinstance(element, dict):
             return str(element.get("text", "") or "").strip()
         return str(element or "").strip()
-
-    @classmethod
-    def _is_represented_by_element(cls, anchor: str, elements: List[Dict[str, Any]]) -> bool:
-        anchor_key = cls._normalize_text_key(anchor)
-        if not anchor_key:
-            return True
-
-        for element in elements:
-            element_key = cls._normalize_text_key(cls._element_text(element))
-            alias_keys = [
-                cls._normalize_text_key(alias)
-                for alias in element.get("aliases", [])
-                if alias
-            ]
-            subpoint_keys = [
-                cls._normalize_text_key(subpoint)
-                for subpoint in element.get("subpoints", [])
-                if subpoint
-            ]
-            if element_key and (anchor_key in element_key or element_key in anchor_key):
-                return True
-            if any(anchor_key in alias_key or alias_key in anchor_key for alias_key in alias_keys if alias_key):
-                return True
-            if any(anchor_key in subpoint_key or subpoint_key in anchor_key for subpoint_key in subpoint_keys if subpoint_key):
-                return True
-        return False
 
     @staticmethod
     def _clean_numbered_point(text: str) -> str:

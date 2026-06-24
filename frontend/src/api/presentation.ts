@@ -154,11 +154,12 @@ export const presentationAPI = {
     themeId: string,
     realtimeItemId?: string,
     startedAt?: string,
-    endedAt?: string
+    endedAt?: string,
+    askedCardId?: string,
   ) {
     const response = await apiClient.post(
       `/api/interview-sessions/${sessionId}/utterances`,
-      { transcript, themeId, sectionId: themeId, realtimeItemId, startedAt, endedAt }
+      { transcript, themeId, sectionId: themeId, realtimeItemId, startedAt, endedAt, askedCardId }
     );
     return response.data;
   },
@@ -181,6 +182,34 @@ export const presentationAPI = {
     const response = await apiClient.post(
       `/api/interview-sessions/${sessionId}/partial-transcript-match`,
       { transcript, themeId, sectionId: themeId, activeCardId, realtimeItemId }
+    );
+    return response.data;
+  },
+
+  async confirmActiveCard(sessionId: string, cardId: string, source: string = 'user_confirmed') {
+    const response = await apiClient.post(
+      `/api/interview-sessions/${sessionId}/active-card`,
+      { cardId, source }
+    );
+    return response.data;
+  },
+
+  async clearActiveCard(sessionId: string) {
+    const response = await apiClient.delete(`/api/interview-sessions/${sessionId}/active-card`);
+    return response.data;
+  },
+
+  async manualCompleteCard(sessionId: string, cardId: string, note?: string) {
+    const response = await apiClient.post(
+      `/api/interview-sessions/${sessionId}/cards/${cardId}/manual-complete`,
+      { note: note || '' }
+    );
+    return response.data;
+  },
+
+  async undoCompleteCard(sessionId: string, cardId: string) {
+    const response = await apiClient.post(
+      `/api/interview-sessions/${sessionId}/cards/${cardId}/undo-complete`
     );
     return response.data;
   },

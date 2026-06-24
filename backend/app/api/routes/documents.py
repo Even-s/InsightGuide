@@ -219,6 +219,11 @@ async def get_interview_plan(document_id: str, db: Session = Depends(get_db)):
     themes_data = []
     for theme in themes:
         theme_cards = cards_by_theme.get(theme.id, [])
+        # Check if all cards in this theme have compiled rubrics
+        rubric_ready = all(
+            (c.coverage_rule or {}).get("rubricVersion") and (c.coverage_rule or {}).get("criteria")
+            for c in theme_cards
+        ) if theme_cards else True
         themes_data.append({
             "id": theme.id,
             "themeNumber": theme.theme_number,
@@ -232,6 +237,7 @@ async def get_interview_plan(document_id: str, db: Session = Depends(get_db)):
             "isRequired": theme.is_required,
             "isEnabled": theme.is_enabled,
             "userNotes": theme.user_notes,
+            "rubricReady": rubric_ready,
             "cards": [
                 {
                     "id": c.id,

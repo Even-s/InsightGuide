@@ -132,34 +132,6 @@ class S3Service:
             logger.error(f"Failed to delete file {object_key}: {e}")
             raise
 
-    def get_file_url(self, object_key: str) -> str:
-        """
-        Get the URL for a file in S3.
-
-        Args:
-            object_key: Key (path) of the object
-
-        Returns:
-            URL of the file
-        """
-        return f"{settings.S3_ENDPOINT_URL}/{self.bucket_name}/{object_key}"
-
-    def file_exists(self, object_key: str) -> bool:
-        """
-        Check if a file exists in S3.
-
-        Args:
-            object_key: Key (path) of the object
-
-        Returns:
-            True if file exists, False otherwise
-        """
-        try:
-            self.client.head_object(Bucket=self.bucket_name, Key=object_key)
-            return True
-        except ClientError:
-            return False
-
     def generate_presigned_url(
         self,
         file_url: str,

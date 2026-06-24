@@ -10,6 +10,36 @@ interface SSEEvent {
   confidence?: number;
   evidence?: Record<string, unknown>;
   evidenceTranscript?: string;
+  evaluationSeq?: number;
+}
+
+interface SSEEvidenceEvent {
+  type: 'CARD_EVIDENCE_ADDED';
+  card_id: string;
+  criterion_id: string;
+  status: string;
+  evidence_quote: string | null;
+  completion_score: number;
+  evaluationSeq: number;
+}
+
+interface CandidateCard {
+  cardId: string;
+  questionText: string;
+  focusText: string;
+  score: number;
+  status: string;
+}
+
+interface QuestionCandidatesEvent {
+  utterance_id: string;
+  candidates: CandidateCard[];
+}
+
+interface ActiveCardChangedEvent {
+  card_id: string;
+  status: string;
+  source: string;
 }
 
 interface UseSSEEventsOptions {
@@ -18,6 +48,11 @@ interface UseSSEEventsOptions {
   onCardProbablyCovered?: (data: SSEEvent) => void;
   onCardAtRisk?: (data: SSEEvent) => void;
   onCardSkipped?: (data: SSEEvent) => void;
+  onCardEvidenceAdded?: (data: SSEEvidenceEvent) => void;
+  onQuestionCardCandidates?: (data: QuestionCandidatesEvent) => void;
+  onActiveCardChanged?: (data: ActiveCardChangedEvent) => void;
+  onCardManuallyCompleted?: (data: SSEEvent) => void;
+  onActiveCardCleared?: () => void;
   onMatchingError?: (data: { error: string; utterance_id: string; timestamp: string }) => void;
 }
 
@@ -41,6 +76,18 @@ export function useSSEEvents(sessionId: string, options: UseSSEEventsOptions = {
 
     eventSource.addEventListener('connected', (e) => {
       console.log('SSE connected:', e.data);
+    });
+
+    eventSource.addEventListener('CARD_TOPIC_DETECTED', (e) => {
+      const data: SSEEvent = JSON.parse(e.data);
+      console.log('💡 CARD_TOPIC_DETECTED:', { card_id: data.card_id });
+      optionsRef.current.onCardListening?.(data);
+    });
+
+    eventSource.addEventListener('CARD_PROGRESS_CHANGED', (e) => {
+      const data: SSEEvent = JSON.parse(e.data);
+      console.log('📊 CARD_PROGRESS_CHANGED:', { card_id: data.card_id, completion: data.confidence });
+      optionsRef.current.onCardProbablyCovered?.(data);
     });
 
     eventSource.addEventListener('CARD_LISTENING', (e) => {
@@ -78,6 +125,34 @@ export function useSSEEvents(sessionId: string, options: UseSSEEventsOptions = {
       const data: SSEEvent = JSON.parse(e.data);
       console.log('Card skipped:', data);
       optionsRef.current.onCardSkipped?.(data);
+    });
+
+    eventSource.addEventListener('CARD_EVIDENCE_ADDED', (e) => {
+      const data: SSEEvidenceEvent = JSON.parse(e.data);
+      optionsRef.current.onCardEvidenceAdded?.(data);
+    });
+
+    eventSource.addEventListener('QUESTION_CARD_CANDIDATES', (e) => {
+      const data: QuestionCandidatesEvent = JSON.parse(e.data);
+      console.log('🎯 QUESTION_CARD_CANDIDATES:', data.candidates.length, 'candidates');
+      optionsRef.current.onQuestionCardCandidates?.(data);
+    });
+
+    eventSource.addEventListener('ACTIVE_CARD_CHANGED', (e) => {
+      const data: ActiveCardChangedEvent = JSON.parse(e.data);
+      console.log('🎯 ACTIVE_CARD_CHANGED:', data.card_id);
+      optionsRef.current.onActiveCardChanged?.(data);
+    });
+
+    eventSource.addEventListener('CARD_MANUALLY_COMPLETED', (e) => {
+      const data: SSEEvent = JSON.parse(e.data);
+      console.log('✅ CARD_MANUALLY_COMPLETED:', data.card_id);
+      optionsRef.current.onCardManuallyCompleted?.(data);
+    });
+
+    eventSource.addEventListener('ACTIVE_CARD_CLEARED', () => {
+      console.log('🎯 ACTIVE_CARD_CLEARED');
+      optionsRef.current.onActiveCardCleared?.();
     });
 
     eventSource.addEventListener('MATCHING_ERROR', (e) => {

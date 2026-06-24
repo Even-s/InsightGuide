@@ -43,6 +43,7 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
     currentSlide,
     slides,
     isLoading,
+    themePreparing,
     error,
     startPresenting,
     pausePresenting,
@@ -53,6 +54,9 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
 
   const { start: startRecording, stop: stopRecording } = useMediaRecorder()
   const [isDiarizing, setIsDiarizing] = useState(false)
+  const [candidateCards, setCandidateCards] = useState<Array<{ cardId: string; questionText: string; focusText: string; score: number }>>([])
+  const [activeCardId, setActiveCardId] = useState<string | null>(null)
+  const [bufferedAnswerCount, setBufferedAnswerCount] = useState(0)
   const recordingStartedAtRef = useRef<string | null>(null)
   const finalRecordingBlobRef = useRef<Blob | null>(null)
 
@@ -108,6 +112,22 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
     onCardProbablyCovered: (data) => updateCardFromEvent(data.card_id, statusFromEvent(data, 'probably_sufficient'), data.confidence, data.evidence, data.evidenceTranscript),
     onCardAtRisk: (data) => updateCardFromEvent(data.card_id, statusFromEvent(data, 'at_risk'), data.confidence, data.evidence, data.evidenceTranscript),
     onCardSkipped: (data) => updateCardFromEvent(data.card_id, statusFromEvent(data, 'skipped'), data.confidence, data.evidence, data.evidenceTranscript),
+    onQuestionCardCandidates: (data) => {
+      setCandidateCards(data.candidates)
+    },
+    onActiveCardChanged: (data) => {
+      setActiveCardId(data.card_id)
+      setCandidateCards([])
+      setBufferedAnswerCount(0)
+      updateCardFromEvent(data.card_id, 'listening', 0, undefined, undefined)
+    },
+    onCardManuallyCompleted: (data) => {
+      updateCardFromEvent(data.card_id, statusFromEvent(data, 'sufficient'), 1.0, data.evidence, data.evidenceTranscript)
+      if (activeCardId === data.card_id) setActiveCardId(null)
+    },
+    onActiveCardCleared: () => {
+      setActiveCardId(null)
+    },
     onMatchingError: (data) => {
       console.error('Topic matching error received:', data)
       setTranscriptionError(`Topic matching failed: ${data.error}`)
@@ -147,15 +167,24 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
     setPendingTranscript('')
     setTranscriptionError(null)
 
-    // Save utterance — evaluation is triggered immediately (speaker-agnostic)
+    // Detect if this utterance is asking a specific card (for question routing)
+    const askedCard = findAskedCard(text, cardStatesRef.current, activeId)
+
     presentationAPI.createUtterance(
       sessionId,
       text,
       activeId,
       payload.itemId,
       payload.startedAt,
-      payload.endedAt
+      payload.endedAt,
+      askedCard ?? undefined,
     )
+      .then(() => {
+        // Track buffered answers when candidates are showing (waiting for user to pick a card)
+        if (candidateCards.length > 0 && !askedCard) {
+          setBufferedAnswerCount(prev => prev + 1)
+        }
+      })
       .catch((err) => {
         console.error('Failed to save utterance:', err)
         setTranscriptionError(err instanceof Error ? err.message : 'Failed to save transcript')
@@ -374,6 +403,10 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
     return <LoadingSpinner label="載入演講 Session..." />
   }
 
+  if (themePreparing) {
+    return <LoadingSpinner label="準備訪談問題中..." />
+  }
+
   if (error) {
     return (
       <div className="flex h-screen items-center justify-center bg-cream-100 p-6">
@@ -478,6 +511,45 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
 
             {/* Questions with inline strikethrough status */}
             <div className="min-h-0 flex-1 overflow-y-auto bg-cream-100 px-14 py-5">
+
+              {/* Candidate suggestion bar */}
+              {candidateCards.length > 0 && (
+                <div className="mx-auto max-w-3xl mb-4 rounded-xl border border-wood-200 bg-wood-50 p-3 shadow-natural animate-themeFadeIn">
+                  <p className="text-xs font-medium text-wood-500 mb-2">系統建議正在問的問題：</p>
+                  <div className="space-y-1.5">
+                    {candidateCards.map((c) => (
+                      <button
+                        key={c.cardId}
+                        onClick={() => {
+                          presentationAPI.confirmActiveCard(sessionId, c.cardId)
+                          setActiveCardId(c.cardId)
+                          setCandidateCards([])
+                          setBufferedAnswerCount(0)
+                        }}
+                        className="w-full text-left px-3 py-2 rounded-xl border border-wood-100 bg-white hover:bg-wood-50 hover:border-wood-300 transition-colors text-sm"
+                      >
+                        <span className="text-natural-700">{c.focusText || c.questionText}</span>
+                        <span className="ml-2 text-xs text-wood-400">{Math.round(c.score * 100)}%</span>
+                      </button>
+                    ))}
+                  </div>
+                  <div className="mt-2 flex items-center justify-between">
+                    <button
+                      onClick={() => { setCandidateCards([]); setBufferedAnswerCount(0) }}
+                      className="text-xs text-natural-400 hover:text-natural-600"
+                    >
+                      忽略
+                    </button>
+                    {bufferedAnswerCount > 0 && (
+                      <span className="text-xs text-wood-400">
+                        💬 {bufferedAnswerCount} 句回答已暫存，選擇問題卡後將自動記錄
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+
+
               {currentTheme ? (
                 <div key={currentTheme.id} className="mx-auto max-w-3xl space-y-4 animate-themeFadeIn">
                   {(() => {
@@ -506,25 +578,25 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
                       const groupProgress = groupCardStates.length > 0 ? Math.round((groupConfidenceSum / groupCardStates.length) * 100) : 0
 
                       return (
-                        <div key={gi} className={`relative rounded-2xl border shadow-sm overflow-hidden ${groupDone ? 'border-green-200' : 'border-cream-300'}`}>
+                        <div key={gi} className={`relative rounded-2xl border shadow-sm overflow-hidden ${groupDone ? 'border-sage-200' : 'border-cream-300'}`}>
                           {/* Water fill background for the whole group */}
                           <div
                             className="pointer-events-none absolute inset-x-0 bottom-0 z-0 transition-[height] duration-1000 ease-out"
                             style={{ height: `${groupProgress}%` }}
                             aria-hidden="true"
                           >
-                            <div className={`absolute inset-0 ${groupDone ? 'bg-green-100/60' : 'bg-sage-50/50'}`} />
+                            <div className={`absolute inset-0 ${groupDone ? 'bg-sage-100/60' : 'bg-sage-50/50'}`} />
                           </div>
 
                           {/* Content on top */}
                           <div className="relative z-10">
                             {group.focus && (
-                              <div className={`border-b px-5 py-2.5 ${groupDone ? 'border-green-200' : 'border-sage-100'}`}>
+                              <div className={`border-b px-5 py-2.5 ${groupDone ? 'border-sage-200' : 'border-sage-100'}`}>
                                 <div className="flex items-center justify-between">
                                   <AnimatedStrikeText
                                     text={`${groupDone ? '✓ ' : ''}${formatFocusText(group.focus)}`}
                                     done={groupDone}
-                                    className={`text-sm font-semibold transition-colors duration-500 ease-out ${groupDone ? 'text-green-800' : 'text-sage-500'}`}
+                                    className={`text-sm font-semibold transition-colors duration-500 ease-out ${groupDone ? 'text-sage-500' : 'text-sage-400'}`}
                                   />
                                 </div>
                               </div>
@@ -532,15 +604,15 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
                             <div className="space-y-3 p-3">
                               {groupCardStates.map(({ card, status, confidence }, qi) => {
                                 const isDone = completedStatuses.has(status)
-                                const isListening = status === 'listening'
-                                const itemProgress = isDone ? 100 : isListening ? 0 : Math.round((confidence ?? 0) * 100)
+                                const isActive = status === 'listening' || status === 'probably_sufficient'
+                                const itemProgress = isDone ? 100 : status === 'listening' ? 0 : Math.round((confidence ?? 0) * 100)
 
                                 return (
-                                  <div key={card.id} className={`rounded-2xl border bg-white p-4 shadow-sm transition-[border-color,background-color,box-shadow,opacity,transform] duration-500 ease-out ${isListening ? 'scale-[1.01] border-yellow-300 bg-yellow-50 shadow-yellow-100' : isDone ? 'border-green-200 bg-green-50/60' : 'border-cream-300'}`}>
+                                  <div key={card.id} className={`rounded-2xl border bg-white p-4 shadow-sm transition-[border-color,background-color,box-shadow,opacity,transform] duration-500 ease-out ${isActive ? 'scale-[1.01] border-yellow-300 bg-yellow-50 shadow-yellow-100' : isDone ? 'border-sage-200 bg-sage-50/60' : 'border-cream-300'}`}>
                                     <div className="mb-3 flex items-center justify-between gap-3">
                                       <div className="flex items-center gap-2">
                                         <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-sm font-semibold transition-[background-color,color,transform,opacity] duration-500 ease-out ${
-                                          isDone ? 'bg-green-100 text-green-700' : isListening ? 'bg-yellow-200 text-yellow-800 animate-pulse' : 'bg-cream-200 text-natural-500'
+                                          isDone ? 'bg-sage-100 text-sage-500' : isActive ? 'bg-yellow-200 text-yellow-800 animate-pulse' : 'bg-cream-200 text-natural-500'
                                         }`}>
                                           {isDone ? '✓' : qi + 1}
                                         </span>
@@ -560,7 +632,7 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
                                       <div className={`mt-2 overflow-hidden transition-[max-height,opacity] duration-500 ease-out ${isDone ? 'max-h-0 opacity-0' : 'max-h-4 opacity-100'}`}>
                                         <div className="h-1 w-full overflow-hidden rounded-full bg-cream-300">
                                           <div
-                                            className={`h-1 rounded-full transition-[width,background-color,opacity] duration-700 ease-out ${isListening ? 'bg-yellow-400' : 'bg-sage-400'}`}
+                                            className={`h-1 rounded-full transition-[width,background-color,opacity] duration-700 ease-out ${isActive ? 'bg-yellow-400' : 'bg-sage-400'}`}
                                             style={{ width: `${itemProgress}%` }}
                                           />
                                         </div>
@@ -584,6 +656,58 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
                                           </div>
                                         )
                                       })()}
+                                      {/* Manual card actions */}
+                                      {!isDone && (
+                                        <div className="mt-3 flex gap-2">
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation()
+                                              presentationAPI.manualCompleteCard(sessionId, card.id)
+                                              updateCardFromEvent(card.id, 'sufficient', 1.0, undefined, undefined)
+                                            }}
+                                            className="px-2.5 py-1 text-xs bg-sage-50 text-sage-500 border border-sage-200 rounded-xl hover:bg-sage-100 transition-colors"
+                                          >
+                                            標記完成
+                                          </button>
+                                          {activeCardId === card.id ? (
+                                            <button
+                                              onClick={(e) => {
+                                                e.stopPropagation()
+                                                presentationAPI.clearActiveCard(sessionId)
+                                                setActiveCardId(null)
+                                              }}
+                                              className="px-2.5 py-1 text-xs bg-wood-100 text-wood-500 border border-wood-200 rounded-xl hover:bg-wood-200 transition-colors"
+                                            >
+                                              取消目前問題
+                                            </button>
+                                          ) : (
+                                            <button
+                                              onClick={(e) => {
+                                                e.stopPropagation()
+                                                presentationAPI.confirmActiveCard(sessionId, card.id)
+                                                setActiveCardId(card.id)
+                                              }}
+                                              className="px-2.5 py-1 text-xs bg-wood-50 text-wood-500 border border-wood-200 rounded-xl hover:bg-wood-100 transition-colors"
+                                            >
+                                              設為目前問題
+                                            </button>
+                                          )}
+                                        </div>
+                                      )}
+                                      {isDone && (
+                                        <div className="mt-2">
+                                          <button
+                                            onClick={(e) => {
+                                              e.stopPropagation()
+                                              presentationAPI.undoCompleteCard(sessionId, card.id)
+                                              updateCardFromEvent(card.id, 'listening', 0, undefined, undefined)
+                                            }}
+                                            className="px-2.5 py-1 text-xs bg-cream-100 text-natural-400 border border-cream-300 rounded-xl hover:bg-cream-200 transition-colors"
+                                          >
+                                            復原
+                                          </button>
+                                        </div>
+                                      )}
                                   </div>
                                 )
                               })}
@@ -731,6 +855,51 @@ function getActiveCardId(cardStates: CardState[], activeSectionId?: string) {
   return activeCard?.questionCard.id ?? null
 }
 
+function findAskedCard(text: string, cardStates: CardState[], activeSectionId?: string): string | null {
+  if (!activeSectionId || !text) return null
+
+  const QUESTION_ENDINGS = ['?', '？', '呢', '嗎']
+  const isQuestion = QUESTION_ENDINGS.some(e => text.trim().endsWith(e))
+  if (!isQuestion) return null
+
+  const sectionCards = cardStates.filter(cs => {
+    const qc = cs.questionCard
+    return (qc.interviewThemeId === activeSectionId || qc.sectionId === activeSectionId)
+      && cs.status !== 'sufficient'
+  })
+
+  let bestScore = 0
+  let bestId: string | null = null
+  const textLower = text.toLowerCase()
+
+  for (const cs of sectionCards) {
+    const qc = cs.questionCard
+    let score = 0
+
+    // Check overlap with questionText
+    if (qc.questionText) {
+      const words = qc.questionText.toLowerCase().split('').filter(c => c.trim())
+      const overlap = words.filter(w => textLower.includes(w)).length / Math.max(words.length, 1)
+      score += overlap * 2
+    }
+
+    // Check overlap with focusText
+    if (qc.focusText) {
+      const focusChars = qc.focusText.toLowerCase()
+      for (let i = 0; i < focusChars.length - 1; i++) {
+        if (textLower.includes(focusChars.slice(i, i + 2))) score += 0.3
+      }
+    }
+
+    if (score > bestScore) {
+      bestScore = score
+      bestId = qc.id
+    }
+  }
+
+  return bestScore > 1.0 ? bestId : null
+}
+
 interface FollowupPrompt {
   cardTitle: string
   missingItems: string[]
@@ -749,7 +918,7 @@ function buildFollowupPrompt(
     const isInActiveSection =
       questionCard.interviewThemeId === activeSectionId ||
       questionCard.sectionId === activeSectionId
-    return isInActiveSection && cardState.status === 'listening'
+    return isInActiveSection && (cardState.status === 'listening' || cardState.status === 'probably_sufficient')
   })
   if (!activeCardState) return null
 
@@ -877,10 +1046,10 @@ function FollowupPromptPanel({ prompt, queueLength, onSkip }: { prompt: Followup
   return (
     <section className="absolute bottom-4 left-6 right-6 z-20" aria-live="polite">
       <div className="mx-auto max-w-5xl">
-        <div className="min-w-0 rounded-2xl bg-white px-7 py-5 shadow-[0_0_20px_rgba(251,191,36,0.3),0_0_40px_rgba(251,191,36,0.15)]">
+        <div className="min-w-0 rounded-2xl bg-white px-7 py-5 shadow-[0_0_20px_rgba(160,137,104,0.2),0_0_40px_rgba(160,137,104,0.1)]">
           <div className="mb-3 flex min-w-0 items-center justify-between gap-3">
             <div className="flex min-w-0 items-center gap-3">
-              <span className="shrink-0 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-1 text-sm font-bold text-amber-800">仍需追問</span>
+              <span className="shrink-0 rounded-xl border border-wood-200 bg-wood-50 px-2.5 py-1 text-sm font-bold text-wood-500">仍需追問</span>
               {prompt.cardTitle && (
                 <p key={prompt.cardTitle} className="animate-fadeIn truncate text-base font-medium text-natural-500">{prompt.cardTitle}</p>
               )}
