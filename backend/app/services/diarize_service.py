@@ -1,13 +1,12 @@
 """Diarization service using GPT-4o-transcribe with speaker identification."""
 
-import io
 import logging
 from dataclasses import dataclass
-from typing import List
+from typing import List, Optional
 
-from openai import OpenAI
+from sqlalchemy.orm import Session
 
-from app.core.config import settings
+from app.services.openai_service import openai_service
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +23,6 @@ class DiarizeService:
     """Transcribes audio chunks with speaker diarization."""
 
     def __init__(self):
-        self.client = OpenAI(api_key=settings.OPENAI_API_KEY, timeout=30.0)
         self.model = "gpt-4o-transcribe"
         self.speaker_map: dict = {}  # Maps model speaker IDs to roles
 
@@ -35,28 +33,34 @@ class DiarizeService:
         chunk_index: int,
         filename: str = "session_audio.webm",
         content_type: str = "audio/webm",
+        db: Optional[Session] = None,
+        document_id: Optional[str] = None,
     ) -> List[DiarizedSegment]:
         """Transcribe an audio chunk with diarization.
 
         Args:
             audio_bytes: Encoded audio bytes uploaded by the browser.
-            session_id: For speaker mapping continuity
+            session_id: For speaker mapping continuity and billing
             chunk_index: Sequential chunk number
             filename: Original upload filename
             content_type: Original upload MIME type
+            db: Database session for billing tracking (optional)
+            document_id: Document ID for billing (optional)
         """
         if len(audio_bytes) < 1600:
             return []
 
         try:
-            upload_name = filename or "session_audio.webm"
-            upload_type = content_type or "audio/webm"
-            response = self.client.audio.transcriptions.create(
+            # Use centralized OpenAI wrapper for billing and retry logic
+            response = openai_service.audio_transcription(
+                audio_bytes=audio_bytes,
                 model=self.model,
-                file=(upload_name, io.BytesIO(audio_bytes), upload_type),
                 response_format="verbose_json",
                 timestamp_granularities=["segment"],
-                include=["logprobs"],
+                db=db,
+                session_id=session_id,
+                document_id=document_id,
+                purpose="diarization",
             )
 
             segments = []

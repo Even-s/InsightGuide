@@ -100,13 +100,15 @@ async def diarize_session_audio(
     db.commit()
 
     try:
-        # Perform diarization
+        # Perform diarization (with billing tracking)
         segments = await diarize_service.transcribe_chunk(
             audio_bytes=audio_bytes,
             session_id=session_id,
             chunk_index=0,
             filename=upload_filename,
             content_type=content_type,
+            db=db,
+            document_id=session.document_id,
         )
 
         if not segments:
