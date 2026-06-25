@@ -22,7 +22,9 @@ class InterviewSession(Base):
         String, ForeignKey("stakeholder_profiles.id"), nullable=True, index=True
     )
     interview_objective = Column(Text, nullable=True)
-    interview_scope = Column(JSON, nullable=True)
+    interview_scope = Column(
+        JSON, nullable=True
+    )  # DEPRECATED: Never populated or read. Candidate for removal in schema cleanup.
     status = Column(
         String, nullable=False, default="idle", index=True
     )  # idle, preparing, ready, interviewing, paused, ended, failed
