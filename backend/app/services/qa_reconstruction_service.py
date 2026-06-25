@@ -312,8 +312,7 @@ class QAReconstructionService:
                 continue
 
             try:
-                response = openai_service.client.chat.completions.create(
-                    model="gpt-5.4-mini",
+                summary = openai_service.chat_completion(
                     messages=[
                         {
                             "role": "system",
@@ -327,10 +326,16 @@ class QAReconstructionService:
                             "content": f"問題：{question.asked_text}\n\n受訪者回答：\n{answer.answer_text[:1500]}",
                         },
                     ],
+                    model="gpt-5.4-mini",
                     temperature=0,
-                    max_completion_tokens=200,
+                    max_tokens=200,
+                    db=db,
+                    session_id=session_id,
+                    purpose="qa_reconstruction",
                 )
-                answer.answer_summary = response.choices[0].message.content.strip()
+                answer.answer_summary = (
+                    summary.strip() if isinstance(summary, str) else str(summary)
+                )
                 logger.debug(f"Summarized answer {answer.id}: {answer.answer_summary[:100]}")
             except Exception as e:
                 logger.error(f"Failed to summarize answer {answer.id}: {e}")

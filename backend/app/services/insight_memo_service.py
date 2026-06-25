@@ -248,8 +248,7 @@ class InsightMemoService:
                 "- 只回傳 JSON，不要其他文字"
             )
 
-            response = openai_service.client.chat.completions.create(
-                model="gpt-5.4-mini",
+            result = openai_service.chat_completion(
                 messages=[
                     {
                         "role": "system",
@@ -257,15 +256,23 @@ class InsightMemoService:
                     },
                     {"role": "user", "content": prompt},
                 ],
+                model="gpt-5.4-mini",
                 temperature=0.2,
-                max_completion_tokens=3000,
+                max_tokens=3000,
+                response_format={"type": "json_object"},
+                db=db,
+                session_id=session.id,
+                purpose="insight_memo_analysis",
             )
 
-            content = response.choices[0].message.content.strip()
-            if content.startswith("```"):
-                content = content.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+            # The wrapper already parses JSON, but handle markdown code blocks if present
+            if isinstance(result, str):
+                content = result.strip()
+                if content.startswith("```"):
+                    content = content.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+                return json.loads(content)
 
-            return json.loads(content)
+            return result
 
         except Exception as e:
             logger.error(f"AI insight analysis failed: {e}")

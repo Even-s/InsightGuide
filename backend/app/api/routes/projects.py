@@ -131,8 +131,7 @@ async def voice_to_project_fields(audio: UploadFile = File(...)):
 
     # Step 2: GPT parse transcript into project fields
     try:
-        parse_response = openai_service.client.chat.completions.create(
-            model="gpt-5.4-mini",
+        ai_result = openai_service.chat_completion(
             messages=[
                 {
                     "role": "system",
@@ -158,15 +157,21 @@ async def voice_to_project_fields(audio: UploadFile = File(...)):
                     ),
                 },
             ],
+            model="gpt-5.4-mini",
             temperature=0.2,
-            max_completion_tokens=500,
+            max_tokens=500,
+            response_format={"type": "json_object"},
+            purpose="project_voice_parse",
         )
 
-        content = parse_response.choices[0].message.content.strip()
-        if content.startswith("```"):
-            content = content.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-
-        parsed = json.loads(content)
+        # The wrapper already parses JSON, but handle markdown code blocks if present
+        if isinstance(ai_result, str):
+            content = ai_result.strip()
+            if content.startswith("```"):
+                content = content.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+            parsed = json.loads(content)
+        else:
+            parsed = ai_result
     except Exception as e:
         logger.error(f"GPT parsing failed: {e}")
         # Return raw transcript so user can still see what was said

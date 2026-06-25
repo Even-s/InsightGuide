@@ -120,21 +120,27 @@ class StakeholderPlanService:
                 "- 兩個角色的知識領域重疊超過 50% → 合併成一個\n"
             )
 
-            response = openai_service.client.chat.completions.create(
-                model="gpt-5.4-mini",
+            result = openai_service.chat_completion(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
+                model="gpt-5.4-mini",
                 temperature=0.4,
-                max_completion_tokens=2500,
+                max_tokens=2500,
+                response_format={"type": "json_object"},
+                db=db,
+                purpose="stakeholder_plan_generation",
             )
 
-            content = response.choices[0].message.content.strip()
-            if content.startswith("```"):
-                content = content.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-
-            slots = json.loads(content)
+            # The wrapper already parses JSON, but handle markdown code blocks if present
+            if isinstance(result, str):
+                content = result.strip()
+                if content.startswith("```"):
+                    content = content.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+                slots = json.loads(content)
+            else:
+                slots = result
             if isinstance(slots, list) and len(slots) > 0:
                 return slots
 

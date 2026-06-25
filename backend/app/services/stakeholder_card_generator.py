@@ -435,21 +435,27 @@ class StakeholderCardGenerator:
 
 請為這位受訪者設計訪談主題。以 JSON 格式回傳。"""
 
-            response = openai_service.client.chat.completions.create(
-                model="gpt-5.4-mini",
+            ai_result = openai_service.chat_completion(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
+                model="gpt-5.4-mini",
                 temperature=0.4,
-                max_completion_tokens=2000,
+                max_tokens=2000,
+                response_format={"type": "json_object"},
+                purpose="stakeholder_card_themes",
             )
 
-            content = response.choices[0].message.content.strip()
-            if content.startswith("```"):
-                content = content.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+            # The wrapper already parses JSON, but handle markdown code blocks if present
+            if isinstance(ai_result, str):
+                content = ai_result.strip()
+                if content.startswith("```"):
+                    content = content.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+                result = json.loads(content)
+            else:
+                result = ai_result
 
-            result = json.loads(content)
             themes = result.get("themes", [])
 
             if themes:
@@ -584,21 +590,27 @@ class StakeholderCardGenerator:
 
 請為這個主題設計訪談問題。以 JSON 格式回傳。"""
 
-            response = openai_service.client.chat.completions.create(
-                model="gpt-5.4-mini",
+            ai_result = openai_service.chat_completion(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
+                model="gpt-5.4-mini",
                 temperature=0.4,
-                max_completion_tokens=2000,
+                max_tokens=2000,
+                response_format={"type": "json_object"},
+                purpose="stakeholder_card_questions",
             )
 
-            content = response.choices[0].message.content.strip()
-            if content.startswith("```"):
-                content = content.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+            # The wrapper already parses JSON, but handle markdown code blocks if present
+            if isinstance(ai_result, str):
+                content = ai_result.strip()
+                if content.startswith("```"):
+                    content = content.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+                result = json.loads(content)
+            else:
+                result = ai_result
 
-            result = json.loads(content)
             cards = result.get("cards", [])
 
             if cards:

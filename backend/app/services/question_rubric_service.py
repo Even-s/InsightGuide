@@ -317,21 +317,20 @@ class QuestionRubricService:
 """
 
         try:
-            response = openai_service.client.chat.completions.create(
-                model=settings.SEMANTIC_UNDERSTANDING_MODEL,
+            rubric = openai_service.chat_completion(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
+                model=settings.SEMANTIC_UNDERSTANDING_MODEL,
                 temperature=0.3,
                 response_format={"type": "json_object"},
+                purpose="rubric_generation",
             )
 
-            content = response.choices[0].message.content
-            if not content:
-                raise ValueError("Empty response from OpenAI")
+            if not rubric or not isinstance(rubric, dict):
+                raise ValueError("Empty or invalid response from OpenAI")
 
-            rubric = json.loads(content)
             logger.info(
                 f"Generated rubric with {len(rubric.get('criteria', []))} criteria for card {card.id}"
             )

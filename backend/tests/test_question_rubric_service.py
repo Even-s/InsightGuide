@@ -149,18 +149,25 @@ class TestGetOrCompileRubric:
         card.coverage_rule = {}
         db = Mock()
 
-        mock_response = Mock()
-        mock_response.choices = [Mock()]
-        mock_response.choices[0].message.content = (
-            '{"answerTarget": "找出專案挑戰", "criteria": [{"id": "criterion_0", "description": "主要挑戰", "type": "value_slot", "required": true, "critical": true, "weight": 1.0}]}'
-        )
-        mock_openai.client.chat.completions.create.return_value = mock_response
+        mock_openai.chat_completion.return_value = {
+            "answerTarget": "找出專案挑戰",
+            "criteria": [
+                {
+                    "id": "criterion_0",
+                    "description": "主要挑戰",
+                    "type": "value_slot",
+                    "required": True,
+                    "critical": True,
+                    "weight": 1.0,
+                }
+            ],
+        }
 
         rubric = self.service.get_or_compile_rubric(db, card)
 
         assert rubric["rubricVersion"] == "v1"
         assert len(rubric["criteria"]) >= 1
-        mock_openai.client.chat.completions.create.assert_called_once()
+        mock_openai.chat_completion.assert_called_once()
 
 
 class TestRubricStability:

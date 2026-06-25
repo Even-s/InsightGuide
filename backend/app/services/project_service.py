@@ -51,8 +51,7 @@ class ProjectService:
         try:
             from app.services.openai_service import openai_service
 
-            response = openai_service.client.chat.completions.create(
-                model="gpt-5.4-mini",
+            result = openai_service.chat_completion(
                 messages=[
                     {
                         "role": "system",
@@ -60,12 +59,13 @@ class ProjectService:
                     },
                     {"role": "user", "content": f"專案名稱：{title}\n原始描述：{description}"},
                 ],
+                model="gpt-5.4-mini",
                 temperature=0.2,
-                max_completion_tokens=100,
+                max_tokens=100,
+                purpose="project_description_summary",
             )
-            result = response.choices[0].message.content.strip()
-            if result:
-                return result
+            if isinstance(result, str) and result.strip():
+                return result.strip()
         except Exception as e:
             logger.warning(f"Failed to summarize project description: {e}")
 

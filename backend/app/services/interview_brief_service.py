@@ -162,21 +162,26 @@ class InterviewBriefService:
                 "- 只回傳 JSON，不要其他文字"
             )
 
-            response = openai_service.client.chat.completions.create(
-                model="gpt-5.4-mini",
+            ai_result = openai_service.chat_completion(
                 messages=[
                     {"role": "system", "content": "你是專業的訪談規劃師。只回傳 JSON。"},
                     {"role": "user", "content": prompt},
                 ],
+                model="gpt-5.4-mini",
                 temperature=0.3,
-                max_completion_tokens=1200,
+                max_tokens=1200,
+                response_format={"type": "json_object"},
+                purpose="interview_brief_generation",
             )
 
-            content = response.choices[0].message.content.strip()
-            if content.startswith("```"):
-                content = content.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-
-            result = json.loads(content)
+            # The wrapper already parses JSON, but handle markdown code blocks if present
+            if isinstance(ai_result, str):
+                content = ai_result.strip()
+                if content.startswith("```"):
+                    content = content.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+                result = json.loads(content)
+            else:
+                result = ai_result
             return {
                 "interview_objective": result.get(
                     "interview_objective",

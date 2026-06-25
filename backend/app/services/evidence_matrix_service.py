@@ -179,21 +179,27 @@ class EvidenceMatrixService:
                 "- 只回傳 JSON"
             )
 
-            response = openai_service.client.chat.completions.create(
-                model="gpt-5.4-mini",
+            result = openai_service.chat_completion(
                 messages=[
                     {"role": "system", "content": "你是需求分析師。合併相似需求。只回傳 JSON。"},
                     {"role": "user", "content": prompt},
                 ],
+                model="gpt-5.4-mini",
                 temperature=0.1,
-                max_completion_tokens=2000,
+                max_tokens=2000,
+                response_format={"type": "json_object"},
+                db=db,
+                purpose="evidence_deduplication",
             )
 
-            content = response.choices[0].message.content.strip()
-            if content.startswith("```"):
-                content = content.split("\n", 1)[1].rsplit("```", 1)[0].strip()
-
-            merged_raw = json.loads(content)
+            # The wrapper already parses JSON, but handle markdown code blocks if present
+            if isinstance(result, str):
+                content = result.strip()
+                if content.startswith("```"):
+                    content = content.split("\n", 1)[1].rsplit("```", 1)[0].strip()
+                merged_raw = json.loads(content)
+            else:
+                merged_raw = result
 
             # Build proper entries from AI merge result
             entries = []
