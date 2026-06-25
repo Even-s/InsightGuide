@@ -414,10 +414,7 @@ class TestQuestionGuardAndReduceState:
     """Tests for question-like utterance detection and state reduction with response_status."""
 
     def test_is_question_like_chinese_question_mark(self):
-        assert (
-            is_question_like("你有哪些情境是需要馬上有人幫忙的呢？")
-            is True
-        )
+        assert is_question_like("你有哪些情境是需要馬上有人幫忙的呢？") is True
 
     def test_is_question_like_english_question_mark(self):
         assert is_question_like("What scenarios need help?") is True
@@ -432,10 +429,7 @@ class TestQuestionGuardAndReduceState:
         assert is_question_like("請問什麼時候會發生這個問題") is True
 
     def test_is_question_like_answer_not_detected(self):
-        assert (
-            is_question_like("我們主要用 PostgreSQL 處理這個流程")
-            is False
-        )
+        assert is_question_like("我們主要用 PostgreSQL 處理這個流程") is False
 
     def test_is_question_like_partial_answer_not_detected(self):
         assert is_question_like("最常遇到的情境是客戶突然改需求") is False

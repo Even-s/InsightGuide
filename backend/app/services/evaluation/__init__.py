@@ -9,10 +9,7 @@ from app.services.evaluation.criterion_evidence import (
     load_existing_evidence,
     persist_criterion_evidence,
 )
-from app.services.evaluation.utterance_classifier import (
-    is_question_like,
-    should_skip_utterance,
-)
+from app.services.evaluation.utterance_classifier import is_question_like, should_skip_utterance
 
 __all__ = [
     "is_question_like",
