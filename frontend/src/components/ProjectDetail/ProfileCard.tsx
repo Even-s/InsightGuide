@@ -49,9 +49,9 @@ export function ProfileCard({ profile, projectId, guide, onDelete, onShowGuideSe
             <>
               <button
                 onClick={() => navigate(`/editor/${guide.document_id}`)}
-                className="px-2 py-1 text-xs text-blue-700 hover:bg-blue-50 rounded"
+                className="px-2.5 py-1 text-xs bg-sage-400 text-white rounded-lg hover:bg-sage-500"
               >
-                編輯大綱
+                編輯訪談大綱
               </button>
               {profile.interviewCount > 0 && (
                 <button
@@ -67,12 +67,6 @@ export function ProfileCard({ profile, projectId, guide, onDelete, onShowGuideSe
                   訪談紀錄
                 </button>
               )}
-              <button
-                onClick={() => navigate(`/interview/${guide.document_id}?projectId=${projectId}&stakeholderId=${profile.id}`)}
-                className="px-2.5 py-1 text-xs bg-sage-400 text-white rounded-lg hover:bg-sage-500"
-              >
-                開始訪談
-              </button>
             </>
           ) : (
             <button
