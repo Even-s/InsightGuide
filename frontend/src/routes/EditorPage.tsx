@@ -58,7 +58,7 @@ interface SessionItem {
 }
 
 export default function EditorPage() {
-  const { deckId } = useParams<{ deckId: string }>()
+  const { documentId } = useParams<{ documentId: string }>()
   const [projectId, setProjectId] = useState<string | null>(null)
   const [plan, setPlan] = useState<InterviewPlan | null>(null)
   const [cards, setCards] = useState<QuestionCard[]>([])
@@ -78,8 +78,8 @@ export default function EditorPage() {
   const [sessionsLoading, setSessionsLoading] = useState(false)
 
   const loadPlan = useCallback(async () => {
-    if (!deckId) return
-    const response = await apiClient.get(`/api/documents/${deckId}/interview-plan`)
+    if (!documentId) return
+    const response = await apiClient.get(`/api/documents/${documentId}/interview-plan`)
     const data: InterviewPlan = response.data
     setPlan(data)
 
@@ -88,14 +88,14 @@ export default function EditorPage() {
     }
 
     // Also load full cards for editing
-    const fullCards = await questionCardsAPI.getDocumentCards(deckId)
+    const fullCards = await questionCardsAPI.getDocumentCards(documentId)
     setCards(fullCards)
 
     return data
-  }, [deckId])
+  }, [documentId])
 
   useEffect(() => {
-    if (!deckId) return
+    if (!documentId) return
 
     let isMounted = true
 
@@ -106,11 +106,11 @@ export default function EditorPage() {
 
         // Load document to get project context
         try {
-          const doc = await documentsAPI.getDocument(deckId!)
+          const doc = await documentsAPI.getDocument(documentId!)
           if (doc.project_id) setProjectId(doc.project_id)
         } catch { /* continue without project context */ }
 
-        const deckStatus = await documentsAPI.getDocumentStatus(deckId!)
+        const deckStatus = await documentsAPI.getDocumentStatus(documentId!)
         if (!isMounted) return
 
         if (deckStatus.status === 'failed') {
@@ -135,13 +135,13 @@ export default function EditorPage() {
 
     init()
     return () => { isMounted = false }
-  }, [deckId, loadPlan])
+  }, [documentId, loadPlan])
 
   // SSE progress subscription during analysis
   useEffect(() => {
-    if (!deckId || !isAnalyzing) return
+    if (!documentId || !isAnalyzing) return
     const apiUrl = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8002'
-    const eventSource = new EventSource(`${apiUrl}/api/events/sessions/${deckId}/stream`)
+    const eventSource = new EventSource(`${apiUrl}/api/events/sessions/${documentId}/stream`)
 
     eventSource.onmessage = (event) => {
       try {
@@ -166,14 +166,14 @@ export default function EditorPage() {
     }
 
     return () => eventSource.close()
-  }, [deckId, isAnalyzing])
+  }, [documentId, isAnalyzing])
 
   // Poll during analysis
   useEffect(() => {
-    if (!deckId || !isAnalyzing) return
+    if (!documentId || !isAnalyzing) return
     const interval = window.setInterval(async () => {
       try {
-        const status = await documentsAPI.getDocumentStatus(deckId)
+        const status = await documentsAPI.getDocumentStatus(documentId)
         if (status.status === 'analyzed') {
           setAnalysisProgress(prev => ({ ...prev, message: '分析完成！', percentage: 100 }))
           setTimeout(() => {
@@ -184,7 +184,7 @@ export default function EditorPage() {
       } catch { /* ignore */ }
     }, 5000)
     return () => window.clearInterval(interval)
-  }, [deckId, isAnalyzing, loadPlan])
+  }, [documentId, isAnalyzing, loadPlan])
 
   const selectedTheme = plan?.themes.find((t) => t.id === selectedThemeId) ?? null
   const themeCards = useMemo(
@@ -196,7 +196,7 @@ export default function EditorPage() {
     setShowSessionPanel(true)
     setSessionsLoading(true)
     try {
-      const response = await apiClient.get(`/api/prep-sessions/${deckId}/presentation-sessions`)
+      const response = await apiClient.get(`/api/prep-sessions/${documentId}/interview-sessions`)
       setSessions(response.data)
     } catch {
       setSessions([])
@@ -206,37 +206,52 @@ export default function EditorPage() {
   }
 
   async function updateCard(cardId: string, form: QuestionCardFormData) {
-    const updated = await questionCardsAPI.updateCard(cardId, form)
-    setCards((prev) => prev.map((c) => (c.id === updated.id ? updated : c)))
+    try {
+      const updated = await questionCardsAPI.updateCard(cardId, form)
+      setCards((prev) => prev.map((c) => (c.id === updated.id ? updated : c)))
+    } catch (err) {
+      setError(getErrorMessage(err))
+    }
   }
-
 
   async function createCard() {
     if (!selectedTheme) return
-    const firstSectionId = selectedTheme.cards[0]?.id ? undefined : undefined
-    const newCard = await questionCardsAPI.createCard({
-      sectionId: firstSectionId ?? selectedThemeId,
-      questionText: '新問題',
-      suggestedFollowup: '請輸入追問內容',
-      importance: 'must',
-    })
-    setCards((prev) => [...prev, newCard])
+    try {
+      const firstSectionId = selectedTheme.cards[0]?.id ? undefined : undefined
+      const newCard = await questionCardsAPI.createCard({
+        sectionId: firstSectionId ?? selectedThemeId,
+        questionText: '新問題',
+        suggestedFollowup: '請輸入追問內容',
+        importance: 'must',
+      })
+      setCards((prev) => [...prev, newCard])
+    } catch (err) {
+      setError(getErrorMessage(err))
+    }
   }
 
   async function deleteCard(card: QuestionCard) {
-    await questionCardsAPI.deleteCard(card.id)
-    setCards((prev) => prev.filter((c) => c.id !== card.id))
+    try {
+      await questionCardsAPI.deleteCard(card.id)
+      setCards((prev) => prev.filter((c) => c.id !== card.id))
+    } catch (err) {
+      setError(getErrorMessage(err))
+    }
   }
 
   async function reorderCards(reordered: QuestionCard[]) {
-    const updated = await questionCardsAPI.reorderSectionCards(
-      selectedThemeId,
-      reordered.map((c) => c.id)
-    )
-    setCards((prev) => {
-      const others = prev.filter((c) => c.interviewThemeId !== selectedThemeId)
-      return [...others, ...updated]
-    })
+    try {
+      const updated = await questionCardsAPI.reorderSectionCards(
+        selectedThemeId,
+        reordered.map((c) => c.id)
+      )
+      setCards((prev) => {
+        const others = prev.filter((c) => c.interviewThemeId !== selectedThemeId)
+        return [...others, ...updated]
+      })
+    } catch (err) {
+      setError(getErrorMessage(err))
+    }
   }
 
   if (isLoading) return <LoadingSpinner label="載入編輯器..." />
@@ -327,7 +342,7 @@ export default function EditorPage() {
         </div>
         <div className="flex items-center gap-3">
           <Button variant="secondary" onClick={handleOpenSessionPanel}>管理訪談</Button>
-          <Button onClick={() => window.location.assign(`/interview/${deckId}${projectId ? `?projectId=${projectId}` : ''}`)}>開始訪談</Button>
+          <Button onClick={() => window.location.assign(`/interview/${documentId}${projectId ? `?projectId=${projectId}` : ''}`)}>開始訪談</Button>
         </div>
       </header>
 
@@ -483,7 +498,7 @@ export default function EditorPage() {
                         {session.status === 'ended' && (
                           <button
                             type="button"
-                            onClick={() => window.location.assign(`/interview/${deckId}/report/${session.id}`)}
+                            onClick={() => window.location.assign(`/interview/${documentId}/report/${session.id}`)}
                             className="rounded border border-cream-300 px-2 py-1 text-xs text-natural-500 hover:bg-cream-100"
                           >
                             查看報告
@@ -492,7 +507,7 @@ export default function EditorPage() {
                         {(session.status === 'interviewing' || session.status === 'paused') && (
                           <button
                             type="button"
-                            onClick={() => window.location.assign(`/interview/${deckId}`)}
+                            onClick={() => window.location.assign(`/interview/${documentId}`)}
                             className="rounded bg-sage-500 px-2 py-1 text-xs text-white hover:bg-sage-500"
                           >
                             繼續訪談

@@ -9,27 +9,22 @@ export interface AIUsageSummary {
   totalCostUsd: number;
 }
 
-export interface PrepSessionWithDeck {
+export interface PrepSessionResponse {
   id: string;
-  deckId: string;
-  deckTitle: string;
-  documentId?: string;
-  documentTitle?: string;
+  documentId: string;
+  documentTitle: string;
   userId: string;
   title?: string;
   status: 'preparing' | 'ready' | 'archived';
   createdAt: string;
   updatedAt: string;
-  presentationSessionsCount: number;
-  interviewSessionsCount?: number;
-  deckCostUsd: number;
-  documentCostUsd?: number;
-  deckAiUsage: AIUsageSummary;
-  documentAiUsage?: AIUsageSummary;
+  interviewSessionsCount: number;
+  documentCostUsd: number;
+  documentAiUsage: AIUsageSummary;
 }
 
 export interface PrepSessionListResponse {
-  prepSessions: PrepSessionWithDeck[];
+  prepSessions: PrepSessionResponse[];
   total: number;
   limit: number;
   offset: number;
@@ -37,7 +32,7 @@ export interface PrepSessionListResponse {
 
 export interface PrepSessionListParams {
   status?: string;
-  deckId?: string;
+  documentId?: string;
   limit?: number;
   offset?: number;
   sortBy?: 'createdAt' | 'updatedAt' | 'status';
@@ -45,7 +40,7 @@ export interface PrepSessionListParams {
 }
 
 export interface PrepSessionCreate {
-  deckId: string;
+  documentId: string;
   title?: string;
 }
 
@@ -54,13 +49,13 @@ export interface PrepSessionUpdate {
   status?: 'preparing' | 'ready' | 'archived';
 }
 
-export interface PresentationSessionForPrep {
+export interface InterviewSessionForPrep {
   id: string;
   prepSessionId: string;
-  deckId: string;
+  documentId: string;
   userId: string;
-  status: 'idle' | 'preparing' | 'ready' | 'interviewing' | 'paused' | 'slide_transitioning' | 'recovering' | 'ended' | 'failed';
-  currentSlideId?: string;
+  status: 'idle' | 'preparing' | 'ready' | 'interviewing' | 'paused' | 'transitioning' | 'recovering' | 'ended' | 'failed';
+  currentSectionId?: string;
   startedAt?: string;
   endedAt?: string;
   createdAt: string;
@@ -68,46 +63,34 @@ export interface PresentationSessionForPrep {
   aiUsage: AIUsageSummary;
 }
 
-type PrepSessionApiResponse = PrepSessionWithDeck & {
-  deckId?: string;
-  deckTitle?: string;
-  documentId?: string;
-  documentTitle?: string;
-  title?: string;
-  presentationSessionsCount?: number;
-  interviewSessionsCount?: number;
-  deckCostUsd?: number;
-  documentCostUsd?: number;
-  deckAiUsage?: AIUsageSummary;
-  documentAiUsage?: AIUsageSummary;
+const emptyUsage: AIUsageSummary = {
+  inputTokens: 0,
+  cachedInputTokens: 0,
+  outputTokens: 0,
+  totalTokens: 0,
+  realtimeSeconds: 0,
+  totalCostUsd: 0,
 };
 
-function normalizePrepSession(raw: PrepSessionApiResponse): PrepSessionWithDeck {
-  const deckId = raw.deckId ?? raw.documentId ?? '';
-  const deckTitle = raw.deckTitle ?? raw.documentTitle ?? raw.title ?? deckId;
-  const presentationSessionsCount = raw.presentationSessionsCount ?? raw.interviewSessionsCount ?? 0;
-  const deckCostUsd = raw.deckCostUsd ?? raw.documentCostUsd ?? 0;
-  const deckAiUsage = raw.deckAiUsage ?? raw.documentAiUsage ?? {
-    inputTokens: 0,
-    cachedInputTokens: 0,
-    outputTokens: 0,
-    totalTokens: 0,
-    realtimeSeconds: 0,
-    totalCostUsd: 0,
-  };
+function normalizePrepSession(raw: Record<string, unknown>): PrepSessionResponse {
+  const documentId = (raw.documentId ?? raw.deckId ?? '') as string;
+  const documentTitle = (raw.documentTitle ?? raw.deckTitle ?? raw.title ?? documentId) as string;
+  const interviewSessionsCount = (raw.interviewSessionsCount ?? raw.presentationSessionsCount ?? 0) as number;
+  const documentCostUsd = (raw.documentCostUsd ?? raw.deckCostUsd ?? 0) as number;
+  const documentAiUsage = (raw.documentAiUsage ?? raw.deckAiUsage ?? emptyUsage) as AIUsageSummary;
 
   return {
-    ...raw,
-    deckId,
-    deckTitle,
-    documentId: raw.documentId ?? deckId,
-    documentTitle: raw.documentTitle ?? deckTitle,
-    presentationSessionsCount,
-    interviewSessionsCount: raw.interviewSessionsCount ?? presentationSessionsCount,
-    deckCostUsd,
-    documentCostUsd: raw.documentCostUsd ?? deckCostUsd,
-    deckAiUsage,
-    documentAiUsage: raw.documentAiUsage ?? deckAiUsage,
+    id: raw.id as string,
+    documentId,
+    documentTitle,
+    userId: raw.userId as string,
+    title: raw.title as string | undefined,
+    status: raw.status as PrepSessionResponse['status'],
+    createdAt: raw.createdAt as string,
+    updatedAt: raw.updatedAt as string,
+    interviewSessionsCount,
+    documentCostUsd,
+    documentAiUsage,
   };
 }
 
@@ -116,7 +99,7 @@ export const prepSessionsAPI = {
     const response = await apiClient.get('/api/prep-sessions/', {
       params: {
         status: params.status,
-        deckId: params.deckId,
+        deckId: params.documentId,
         limit: params.limit || 50,
         offset: params.offset || 0,
         sortBy: params.sortBy || 'createdAt',
@@ -129,20 +112,20 @@ export const prepSessionsAPI = {
     };
   },
 
-  async createPrepSession(data: PrepSessionCreate): Promise<PrepSessionWithDeck> {
+  async createPrepSession(data: PrepSessionCreate): Promise<PrepSessionResponse> {
     const response = await apiClient.post('/api/prep-sessions/', {
-      documentId: data.deckId,
+      documentId: data.documentId,
       title: data.title,
     });
     return normalizePrepSession(response.data);
   },
 
-  async getPrepSession(prepSessionId: string): Promise<PrepSessionWithDeck> {
+  async getPrepSession(prepSessionId: string): Promise<PrepSessionResponse> {
     const response = await apiClient.get(`/api/prep-sessions/${prepSessionId}`);
     return normalizePrepSession(response.data);
   },
 
-  async updatePrepSession(prepSessionId: string, data: PrepSessionUpdate): Promise<PrepSessionWithDeck> {
+  async updatePrepSession(prepSessionId: string, data: PrepSessionUpdate): Promise<PrepSessionResponse> {
     const response = await apiClient.patch(`/api/prep-sessions/${prepSessionId}`, data);
     return normalizePrepSession(response.data);
   },
@@ -155,32 +138,30 @@ export const prepSessionsAPI = {
     await apiClient.delete('/api/prep-sessions/all');
   },
 
-  async getPrepSessionPresentationSessions(prepSessionId: string): Promise<PresentationSessionForPrep[]> {
-    const response = await apiClient.get(`/api/prep-sessions/${prepSessionId}/presentation-sessions`);
+  async getInterviewSessions(prepSessionId: string): Promise<InterviewSessionForPrep[]> {
+    const response = await apiClient.get(`/api/prep-sessions/${prepSessionId}/interview-sessions`);
     return response.data;
   },
 
-  async createPresentationSessionForPrep(prepSessionId: string): Promise<PresentationSessionForPrep> {
-    const response = await apiClient.post(`/api/prep-sessions/${prepSessionId}/presentation-sessions`);
+  async createInterviewSession(prepSessionId: string): Promise<InterviewSessionForPrep> {
+    const response = await apiClient.post(`/api/prep-sessions/${prepSessionId}/interview-sessions`);
     return response.data;
   },
 
   async getPrepSessionStats() {
-    // Fetch enough prep sessions to calculate accurate stats (up to 1000)
     const response = await apiClient.get('/api/prep-sessions/', {
       params: { limit: 1000, offset: 0 },
     });
 
-    const prepSessions: PrepSessionWithDeck[] = (response.data.prepSessions ?? []).map(normalizePrepSession);
+    const prepSessions: PrepSessionResponse[] = (response.data.prepSessions ?? []).map(normalizePrepSession);
     const total = response.data.total;
 
     const preparing = prepSessions.filter((s) => s.status === 'preparing').length;
     const ready = prepSessions.filter((s) => s.status === 'ready').length;
     const archived = prepSessions.filter((s) => s.status === 'archived').length;
 
-    // Total presentation sessions across all prep sessions
-    const totalPresentationSessions = prepSessions.reduce(
-      (sum, ps) => sum + ps.presentationSessionsCount,
+    const totalInterviewSessions = prepSessions.reduce(
+      (sum, ps) => sum + ps.interviewSessionsCount,
       0
     );
 
@@ -189,7 +170,7 @@ export const prepSessionsAPI = {
       preparing,
       ready,
       archived,
-      totalPresentationSessions,
+      totalInterviewSessions,
     };
   },
 };

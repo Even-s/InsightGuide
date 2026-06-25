@@ -142,7 +142,7 @@ def export_brd(
         elif request.format == "pdf":
             download_url = f"/api/brd/{brd_id}/download/pdf"
         elif request.format == "docx":
-            raise HTTPException(status_code=400, detail="DOCX export not yet implemented")
+            raise HTTPException(status_code=501, detail="DOCX export is not yet available. Use PDF or Markdown.")
         else:
             raise HTTPException(status_code=400, detail=f"Unsupported export format: {request.format}")
 

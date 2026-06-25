@@ -1,18 +1,18 @@
 import { useEffect, useState } from 'react'
 import { useParams, useSearchParams, useNavigate } from 'react-router-dom'
-import { presentationAPI } from '@/api/presentation'
+import { interviewAPI } from '@/api/interview'
 import { prepSessionsAPI } from '@/api/prepSessions'
 import { apiClient } from '@/api/client'
 import PresenterLayout from '@/components/PresenterMode/PresenterLayout'
 import Button from '@/components/common/Button'
 import LoadingSpinner from '@/components/common/LoadingSpinner'
-import type { PresentationSession } from '@/types/presentation'
+import type { InterviewSession } from '@/types/interview'
 
 export default function PresenterPage() {
-  const { deckId, sessionId: urlSessionId } = useParams<{ deckId?: string; sessionId?: string }>()
+  const { documentId, sessionId: urlSessionId } = useParams<{ documentId?: string; sessionId?: string }>()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
-  const [session, setSession] = useState<PresentationSession | null>(null)
+  const [session, setSession] = useState<InterviewSession | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -23,20 +23,20 @@ export default function PresenterPage() {
       return
     }
 
-    // Mode 2: Create/find session via /interview/:deckId
-    if (deckId) {
+    // Mode 2: Create/find session via /interview/:documentId
+    if (documentId) {
       findOrCreateSession()
       return
     }
 
     setError('Missing session or deck id')
     setIsLoading(false)
-  }, [deckId, urlSessionId])
+  }, [documentId, urlSessionId])
 
   async function loadExistingSession(sessionId: string) {
     try {
       setIsLoading(true)
-      const sessionData = await presentationAPI.getSession(sessionId)
+      const sessionData = await interviewAPI.getSession(sessionId)
       setSession(sessionData)
     } catch (err: unknown) {
       setError(getErrorMessage(err))
@@ -59,7 +59,7 @@ export default function PresenterPage() {
 
       if (!resolvedProjectId) {
         try {
-          const docRes = await apiClient.get(`/api/documents/${deckId!}`)
+          const docRes = await apiClient.get(`/api/documents/${documentId!}`)
           const doc = docRes.data
           resolvedProjectId = doc.projectId || doc.project_id
         } catch { /* document lookup failed */ }
@@ -71,7 +71,7 @@ export default function PresenterPage() {
           for (const s of stakeholders.data) {
             try {
               const guide = await apiClient.get(`/api/projects/${resolvedProjectId}/stakeholders/${s.id}/interview-guide`)
-              if (guide.data.document_id === deckId) {
+              if (guide.data.document_id === documentId) {
                 resolvedStakeholderId = s.id
                 break
               }
@@ -86,8 +86,8 @@ export default function PresenterPage() {
           params: { projectId: resolvedProjectId, limit: 50 }
         })
         const sessions = sessionsRes.data?.sessions || sessionsRes.data || []
-        const existing = sessions.find((s: PresentationSession) =>
-          s.documentId === deckId &&
+        const existing = sessions.find((s: InterviewSession) =>
+          s.documentId === documentId &&
           s.status !== 'ended' &&
           (!resolvedStakeholderId || s.stakeholderProfileId === resolvedStakeholderId)
         )
@@ -99,7 +99,7 @@ export default function PresenterPage() {
 
       // No existing session — create one
       const prepSessionsResponse = await prepSessionsAPI.listPrepSessions({
-        deckId: deckId!,
+        documentId: documentId!,
         status: 'ready',
         limit: 1,
       })
@@ -109,14 +109,14 @@ export default function PresenterPage() {
         prepSessionId = prepSessionsResponse.prepSessions[0].id
       } else {
         const newPrepSession = await prepSessionsAPI.createPrepSession({
-          deckId: deckId!,
+          documentId: documentId!,
           title: 'Quick Start Session',
         })
         await prepSessionsAPI.updatePrepSession(newPrepSession.id, { status: 'ready' })
         prepSessionId = newPrepSession.id
       }
 
-      const created = await presentationAPI.createSession(deckId!, prepSessionId, {
+      const created = await interviewAPI.createSession(documentId!, prepSessionId, {
         projectId: resolvedProjectId,
         stakeholderProfileId: resolvedStakeholderId,
       })
@@ -141,7 +141,7 @@ export default function PresenterPage() {
     return <ErrorState message={error || 'No session found'} />
   }
 
-  return <PresenterLayout sessionId={session.id} deckId={session.documentId} />
+  return <PresenterLayout sessionId={session.id} documentId={session.documentId} />
 }
 
 function getErrorMessage(error: unknown) {

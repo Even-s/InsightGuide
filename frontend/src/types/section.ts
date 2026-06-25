@@ -14,13 +14,3 @@ export interface Section {
   createdAt?: string
 }
 
-export interface SectionWithQuestionCards extends Section {
-  questionCards: QuestionCardSummary[]
-}
-
-interface QuestionCardSummary {
-  id: string
-  questionText: string
-  importance: 'must' | 'should'
-  status: string
-}

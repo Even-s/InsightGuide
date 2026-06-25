@@ -5,7 +5,7 @@ import Button from '@/components/common/Button'
 import MarkdownOutput from '@/components/common/MarkdownOutput'
 
 export default function InterviewReportPage() {
-  const { deckId, sessionId } = useParams<{ deckId: string; sessionId: string }>()
+  const { documentId, sessionId } = useParams<{ documentId: string; sessionId: string }>()
   const navigate = useNavigate()
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -115,7 +115,7 @@ export default function InterviewReportPage() {
           >
             訪談洞察
           </button>
-          <Button variant="secondary" onClick={() => window.location.assign(`/editor/${deckId}`)}>
+          <Button variant="secondary" onClick={() => window.location.assign(`/editor/${documentId}`)}>
             回到編輯
           </Button>
         </div>

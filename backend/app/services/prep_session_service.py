@@ -88,7 +88,7 @@ class PrepSessionService:
         db.refresh(prep_session)
 
         logger.info(
-            f"Created prep session {prep_session.id} for deck {prep_session_data.documentId}"
+            f"Created prep session {prep_session.id} for document {prep_session_data.documentId}"
         )
 
         return prep_session
@@ -133,14 +133,14 @@ class PrepSessionService:
 
     def delete_prep_session(self, db: Session, prep_session_id: str) -> None:
         """
-        Delete a prep session and all related data including the deck.
+        Delete a prep session and all related data including the document.
 
         This will delete:
         - Prep session
-        - All presentation sessions (cascade)
-        - The associated deck
-        - All slides (cascade from deck)
-        - All topic cards (cascade from deck)
+        - All interview sessions (cascade)
+        - The associated document
+        - All sections (cascade from document)
+        - All topic cards (cascade from document)
 
         Args:
             db: Database session
@@ -207,7 +207,7 @@ class PrepSessionService:
         db: Session,
         user_id: str,
         status_filter: Optional[str] = None,
-        deck_id: Optional[str] = None,
+        document_id: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
         sort_by: str = "createdAt",
@@ -220,7 +220,7 @@ class PrepSessionService:
             db: Database session
             user_id: User ID (for filtering)
             status_filter: Filter by prep session status
-            deck_id: Filter by deck ID
+            document_id: Filter by document ID
             limit: Maximum number of prep sessions to return
             offset: Number of prep sessions to skip
             sort_by: Field to sort by (createdAt, updatedAt, status)
@@ -234,8 +234,8 @@ class PrepSessionService:
         # Apply filters
         if status_filter:
             query = query.filter(PrepSession.status == status_filter)
-        if deck_id:
-            query = query.filter(PrepSession.document_id == deck_id)
+        if document_id:
+            query = query.filter(PrepSession.document_id == document_id)
 
         # Get total count before pagination
         total = query.count()
@@ -249,17 +249,17 @@ class PrepSessionService:
 
         # Apply pagination
         prep_sessions = query.offset(offset).limit(limit).all()
-        deck_usage = billing_service.summarize_decks(
+        document_usage = billing_service.summarize_documents(
             db,
             [prep_session.document_id for prep_session in prep_sessions],
         )
 
-        # Convert to response schema with deck info and presentation session count
+        # Convert to response schema with document info and interview session count
         prep_sessions_with_deck = []
         for prep_session in prep_sessions:
-            usage = deck_usage.get(prep_session.document_id, billing_service.empty_summary())
-            # Count presentation sessions for this prep session
-            presentation_count = db.query(func.count(InterviewSession.id)).filter(
+            usage = document_usage.get(prep_session.document_id, billing_service.empty_summary())
+            # Count interview sessions for this prep session
+            interview_count = db.query(func.count(InterviewSession.id)).filter(
                 InterviewSession.prep_session_id == prep_session.id
             ).scalar()
 
@@ -273,7 +273,7 @@ class PrepSessionService:
                     status=prep_session.status,
                     createdAt=prep_session.created_at,
                     updatedAt=prep_session.updated_at,
-                    interviewSessionsCount=presentation_count or 0,
+                    interviewSessionsCount=interview_count or 0,
                     documentCostUsd=usage["totalCostUsd"],
                     documentAiUsage=usage,
                 )
@@ -295,12 +295,12 @@ class PrepSessionService:
         }
         return field_map.get(sort_by, "created_at")
 
-    def get_prep_session_presentation_sessions(
+    def get_prep_session_interview_sessions(
         self,
         db: Session,
         prep_session_id: str
     ) -> List[InterviewSession]:
-        """Get all presentation sessions for a prep session."""
+        """Get all interview sessions for a prep session."""
         self.get_prep_session(db, prep_session_id)  # Verify prep session exists
 
         sessions = db.query(InterviewSession).filter(

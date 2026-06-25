@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
-import type { PresentationSession } from '@/types/presentation'
+import type { InterviewSession } from '@/types/interview'
 import Button from '@/components/common/Button'
 import { formatElapsedTime } from '@/utils/formatters'
 
 interface SessionHeaderProps {
-  session: PresentationSession | null
-  deckId: string
+  session: InterviewSession | null
+  documentId: string
   isRecording: boolean
   isPreparingToPresent?: boolean
   currentThemeTitle?: string
@@ -23,7 +23,7 @@ function parseApiDate(value?: string | null) {
   return Number.isFinite(time) ? time : null
 }
 
-function calculateActiveElapsedSeconds(session: PresentationSession | null) {
+function calculateActiveElapsedSeconds(session: InterviewSession | null) {
   if (!session?.startedAt) return 0
 
   const startedAt = parseApiDate(session.startedAt)

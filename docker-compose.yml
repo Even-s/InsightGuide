@@ -1,3 +1,5 @@
+# Local development: infrastructure services only.
+# Backend, Celery, and frontend run locally via ./insightguide.sh launch
 version: '3.8'
 
 services:

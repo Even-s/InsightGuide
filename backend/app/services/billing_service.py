@@ -54,7 +54,7 @@ MODEL_AUDIO_PRICES: Dict[str, AudioPricing] = {
 
 
 class BillingService:
-    """Record AI usage events and summarize presentation-session costs."""
+    """Record AI usage events and summarize interview session costs."""
 
     def _normalize_model(self, model: str) -> str:
         model = (model or "").strip()
@@ -130,13 +130,13 @@ class BillingService:
 
     def record_deck_chat_completion(
         self,
-        deck_id: Optional[str],
+        document_id: Optional[str],
         operation: str,
         model: str,
         response: Any,
         source_id: Optional[str] = None,
     ) -> None:
-        if not deck_id:
+        if not document_id:
             return
 
         usage = getattr(response, "usage", None)
@@ -152,8 +152,8 @@ class BillingService:
         )
 
         self.record_usage_event(
-            presentation_session_id=None,
-            deck_id=deck_id,
+            session_id=None,
+            document_id=document_id,
             operation=operation,
             model=model,
             input_tokens=input_tokens,
@@ -168,10 +168,10 @@ class BillingService:
 
     def record_usage_event(
         self,
-        presentation_session_id: Optional[str],
+        session_id: Optional[str],
         operation: str,
         model: str,
-        deck_id: Optional[str] = None,
+        document_id: Optional[str] = None,
         input_tokens: int = 0,
         cached_input_tokens: int = 0,
         output_tokens: int = 0,
@@ -182,7 +182,7 @@ class BillingService:
         source_id: Optional[str] = None,
         idempotent: bool = False,
     ) -> None:
-        if not presentation_session_id and not deck_id:
+        if not session_id and not document_id:
             return
 
         db = SessionLocal()
@@ -192,18 +192,18 @@ class BillingService:
                     AIUsageEvent.operation == operation,
                     AIUsageEvent.source_id == source_id,
                 )
-                if presentation_session_id:
-                    query = query.filter(AIUsageEvent.interview_session_id == presentation_session_id)
-                if deck_id:
-                    query = query.filter(AIUsageEvent.document_id == deck_id)
+                if session_id:
+                    query = query.filter(AIUsageEvent.interview_session_id == session_id)
+                if document_id:
+                    query = query.filter(AIUsageEvent.document_id == document_id)
                 existing = query.first()
                 if existing:
                     return
 
             event = AIUsageEvent(
                 id=f"aiusage_{uuid.uuid4().hex[:12]}",
-                interview_session_id=presentation_session_id,
-                document_id=deck_id,
+                interview_session_id=session_id,
+                document_id=document_id,
                 operation=operation,
                 source_id=source_id,
                 model=model,
@@ -219,10 +219,10 @@ class BillingService:
             db.add(event)
             db.commit()
             logger.info(
-                "Recorded AI usage event id=%s session=%s deck=%s operation=%s model=%s total_tokens=%s cost_usd=%s",
+                "Recorded AI usage event id=%s session=%s document=%s operation=%s model=%s total_tokens=%s cost_usd=%s",
                 event.id,
-                presentation_session_id,
-                deck_id,
+                session_id,
+                document_id,
                 operation,
                 model,
                 event.total_tokens,
@@ -231,9 +231,9 @@ class BillingService:
         except Exception as exc:
             db.rollback()
             logger.warning(
-                "Failed to record AI usage event session=%s deck=%s operation=%s: %s",
-                presentation_session_id,
-                deck_id,
+                "Failed to record AI usage event session=%s document=%s operation=%s: %s",
+                session_id,
+                document_id,
                 operation,
                 exc,
                 exc_info=True,
@@ -270,8 +270,8 @@ class BillingService:
             for row in rows
         }
 
-    def summarize_decks(self, db: Session, deck_ids: Iterable[str]) -> Dict[str, Dict[str, Any]]:
-        ids = [deck_id for deck_id in deck_ids if deck_id]
+    def summarize_documents(self, db: Session, document_ids: Iterable[str]) -> Dict[str, Dict[str, Any]]:
+        ids = [doc_id for doc_id in document_ids if doc_id]
         if not ids:
             return {}
 

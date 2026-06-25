@@ -22,7 +22,7 @@ class ReportAnalyticsService:
         self, db: Session, session_id: str
     ) -> Dict[str, Any]:
         """
-        Generate comprehensive analytics report for a presentation session.
+        Generate comprehensive analytics report for an interview session.
 
         Args:
             db: Database session
@@ -411,7 +411,7 @@ class ReportAnalyticsService:
             insights["recommendations"].append({
                 "category": "coverage",
                 "priority": "high",
-                "recommendation": "Review uncovered topics and ensure all 'must' items are included in next presentation",
+                "recommendation": "Review uncovered topics and ensure all 'must' items are included in next interview",
             })
 
         # Analyze must-have topics
@@ -424,7 +424,7 @@ class ReportAnalyticsService:
             insights["recommendations"].append({
                 "category": "critical_topics",
                 "priority": "high",
-                "recommendation": "Focus on covering all 'must' topics - they are essential to your presentation",
+                "recommendation": "Focus on covering all 'must' topics - they are essential to your interview",
             })
         else:
             insights["strengths"].append({

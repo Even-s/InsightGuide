@@ -1,5 +1,5 @@
 import { apiClient } from './client';
-import type { CardState, PresentationCardState, PresentationSession, Slide } from '../types/presentation';
+import type { CardState, InterviewCardState, InterviewSession, DocumentSection } from '../types/interview';
 import type { CardStatus, QuestionCard } from '../types/questionCard';
 
 type ApiRecord = Record<string, unknown>;
@@ -18,10 +18,10 @@ function normalizeImageUrl(value: unknown) {
   return url.replace('http://minio:9000', 'http://localhost:9000');
 }
 
-function normalizeSlide(raw: ApiRecord): Slide {
+function normalizeSection(raw: ApiRecord): DocumentSection {
   return {
     id: asString(raw.id) ?? '',
-    deckId: asString(raw.deckId) ?? asString(raw.deck_id) ?? '',
+    documentId: asString(raw.documentId) ?? asString(raw.document_id) ?? asString(raw.deckId) ?? asString(raw.deck_id) ?? '',
     pageNumber: asNumber(raw.pageNumber ?? raw.page_number),
     title: asString(raw.title),
     imageUrl: normalizeImageUrl(raw.imageUrl ?? raw.image_url),
@@ -33,12 +33,12 @@ function normalizeSlide(raw: ApiRecord): Slide {
   };
 }
 
-function normalizeCardState(raw: ApiRecord): PresentationCardState {
+function normalizeCardState(raw: ApiRecord): InterviewCardState {
   return {
     id: asString(raw.id) ?? '',
     sessionId: asString(raw.sessionId) ?? '',
     topicCardId: asString(raw.questionCardId) ?? asString(raw.topicCardId) ?? '',
-    status: raw.status as PresentationCardState['status'],
+    status: raw.status as InterviewCardState['status'],
     confidence: typeof raw.confidence === 'number' ? raw.confidence : null,
     coveredAt: asString(raw.coveredAt) ?? asString(raw.answeredAt) ?? null,
     evidenceTranscript: asString(raw.evidenceTranscript) ?? null,
@@ -48,30 +48,30 @@ function normalizeCardState(raw: ApiRecord): PresentationCardState {
   };
 }
 
-export const presentationAPI = {
+export const interviewAPI = {
   async createSession(
-    deckId: string,
+    documentId: string,
     prepSessionId: string,
     opts?: { projectId?: string; stakeholderProfileId?: string }
-  ): Promise<PresentationSession> {
+  ): Promise<InterviewSession> {
     const response = await apiClient.post('/api/interview-sessions/', {
       prepSessionId,
-      documentId: deckId,
+      documentId,
       ...(opts?.projectId && { projectId: opts.projectId }),
       ...(opts?.stakeholderProfileId && { stakeholderProfileId: opts.stakeholderProfileId }),
     });
     return response.data;
   },
 
-  async getSession(sessionId: string): Promise<PresentationSession> {
+  async getSession(sessionId: string): Promise<InterviewSession> {
     const response = await apiClient.get(`/api/interview-sessions/${sessionId}`);
     return response.data;
   },
 
   async updateSession(
     sessionId: string,
-    data: Partial<PresentationSession>
-  ): Promise<PresentationSession> {
+    data: Partial<InterviewSession>
+  ): Promise<InterviewSession> {
     const response = await apiClient.patch(
       `/api/interview-sessions/${sessionId}`,
       data
@@ -79,25 +79,26 @@ export const presentationAPI = {
     return response.data;
   },
 
-  async endSession(sessionId: string): Promise<PresentationSession> {
+  async endSession(sessionId: string): Promise<InterviewSession> {
     const response = await apiClient.post(
       `/api/interview-sessions/${sessionId}/end`
     );
     return response.data;
   },
 
-  async getSlides(deckId: string): Promise<Slide[]> {
-    const response = await apiClient.get(`/api/documents/${deckId}/analysis`);
-    const slides = Array.isArray(response.data.slides) ? response.data.slides : [];
-    return slides.map((slide: ApiRecord) => normalizeSlide(slide));
+  async getSections(documentId: string): Promise<DocumentSection[]> {
+    const response = await apiClient.get(`/api/documents/${documentId}/analysis`);
+    const sections = Array.isArray(response.data.sections) ? response.data.sections :
+                     Array.isArray(response.data.slides) ? response.data.slides : [];
+    return sections.map((s: ApiRecord) => normalizeSection(s));
   },
 
-  async getDeckQuestionCards(deckId: string): Promise<QuestionCard[]> {
-    const response = await apiClient.get(`/api/question-cards/document/${deckId}`);
+  async getDocumentQuestionCards(documentId: string): Promise<QuestionCard[]> {
+    const response = await apiClient.get(`/api/question-cards/document/${documentId}`);
     return response.data;
   },
 
-  async getCardStates(sessionId: string): Promise<PresentationCardState[]> {
+  async getCardStates(sessionId: string): Promise<InterviewCardState[]> {
     const response = await apiClient.get(
       `/api/interview-sessions/${sessionId}/card-states`
     );
@@ -105,10 +106,10 @@ export const presentationAPI = {
     return states.map((state: ApiRecord) => normalizeCardState(state));
   },
 
-  async getSessionCards(sessionId: string, deckId: string): Promise<CardState[]> {
+  async getSessionCards(sessionId: string, documentId: string): Promise<CardState[]> {
     const [cardStates, questionCards] = await Promise.all([
       this.getCardStates(sessionId),
-      this.getDeckQuestionCards(deckId),
+      this.getDocumentQuestionCards(documentId),
     ]);
 
     const cardsById = new Map(questionCards.map((card) => [card.id, card]));
@@ -140,7 +141,7 @@ export const presentationAPI = {
       evidenceTranscript?: string | null;
       evidence?: Record<string, unknown> | null;
     }
-  ): Promise<PresentationCardState> {
+  ): Promise<InterviewCardState> {
     const response = await apiClient.patch(
       `/api/interview-sessions/${sessionId}/card-states/${cardStateId}`,
       data
@@ -222,3 +223,6 @@ export const presentationAPI = {
     return response.data;
   }
 };
+
+// Backward-compatible export
+export const presentationAPI = interviewAPI;

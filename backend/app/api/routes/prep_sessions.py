@@ -36,7 +36,7 @@ def convert_prep_session_to_schema(prep_session) -> PrepSessionSchema:
     """Convert prep session model to schema."""
     return PrepSessionSchema(
         id=prep_session.id,
-        deckId=prep_session.document_id,
+        documentId=prep_session.document_id,
         userId=prep_session.user_id,
         title=prep_session.title,
         status=prep_session.status,
@@ -45,8 +45,8 @@ def convert_prep_session_to_schema(prep_session) -> PrepSessionSchema:
     )
 
 
-def convert_presentation_session_to_schema(session, db: Optional[Session] = None) -> InterviewSessionSchema:
-    """Convert presentation session model to schema."""
+def convert_interview_session_to_schema(session, db: Optional[Session] = None) -> InterviewSessionSchema:
+    """Convert interview session model to schema."""
     usage = billing_service.summarize_session(db, session.id) if db else billing_service.empty_summary()
     return InterviewSessionSchema(
         id=session.id,
@@ -68,7 +68,7 @@ def convert_presentation_session_to_schema(session, db: Optional[Session] = None
 @router.get("/", response_model=PrepSessionListResponse)
 async def list_prep_sessions(
     status_filter: Optional[str] = Query(None, alias="status"),
-    deck_id: Optional[str] = Query(None, alias="deckId"),
+    document_id: Optional[str] = Query(None, alias="deckId"),
     limit: int = Query(50, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     sort_by: str = Query("createdAt", alias="sortBy", regex="^(createdAt|updatedAt|status)$"),
@@ -80,13 +80,13 @@ async def list_prep_sessions(
 
     Query parameters:
     - status: Filter by prep session status (preparing, ready, archived)
-    - deckId: Filter by deck ID
+    - deckId: Filter by document ID
     - limit: Number of prep sessions to return (1-1000, default 50)
     - offset: Number of prep sessions to skip (for pagination)
     - sortBy: Field to sort by (createdAt, updatedAt, status)
     - order: Sort order (asc or desc, default desc)
     """
-    logger.info(f"Listing prep sessions: status={status_filter}, deck_id={deck_id}, limit={limit}, offset={offset}")
+    logger.info(f"Listing prep sessions: status={status_filter}, document_id={document_id}, limit={limit}, offset={offset}")
 
     # For MVP, use default user
     user_id = "user_default"
@@ -95,7 +95,7 @@ async def list_prep_sessions(
         db=db,
         user_id=user_id,
         status_filter=status_filter,
-        deck_id=deck_id,
+        document_id=document_id,
         limit=limit,
         offset=offset,
         sort_by=sort_by,
@@ -111,11 +111,11 @@ async def create_prep_session(
     db: Session = Depends(get_db)
 ):
     """
-    Create a new prep session for a deck.
+    Create a new prep session for a document.
 
-    This initializes a prep session that can contain multiple presentation sessions.
+    This initializes a prep session that can contain multiple interview sessions.
     """
-    logger.info(f"Creating prep session for deck {prep_session_data.deckId}")
+    logger.info(f"Creating prep session for document {prep_session_data.documentId}")
 
     # For MVP, use default user
     user_id = "user_default"
@@ -127,7 +127,7 @@ async def create_prep_session(
         event_service.publish_sync(f"prep_sessions_global", {
             'type': 'PREP_SESSION_CREATED',
             'prepSessionId': prep_session.id,
-            'deckId': prep_session.document_id,
+            'documentId': prep_session.document_id,
             'status': prep_session.status,
             'title': prep_session.title
         })
@@ -238,7 +238,7 @@ async def update_prep_session(
 @router.post("/fix-stuck-sessions")
 async def fix_stuck_prep_sessions(db: Session = Depends(get_db)):
     """
-    Fix prep sessions that are stuck in 'preparing' status when their deck is already 'analyzed'.
+    Fix prep sessions that are stuck in 'preparing' status when their document is already 'analyzed'.
 
     This endpoint automatically detects and fixes prep sessions that failed to update
     due to worker restart, errors, or missing update code in older versions.
@@ -277,8 +277,8 @@ async def fix_stuck_prep_sessions(db: Session = Depends(get_db)):
         ).count()
 
         logger.info(
-            f"Fixing PrepSession {prep_session.id}: deck={deck.id}, "
-            f"cards={card_count}, deck_status={deck.status}"
+            f"Fixing PrepSession {prep_session.id}: document={deck.id}, "
+            f"cards={card_count}, document_status={deck.status}"
         )
 
         prep_session.status = "ready"
@@ -290,7 +290,7 @@ async def fix_stuck_prep_sessions(db: Session = Depends(get_db)):
                 'type': 'PREP_STATUS_CHANGED',
                 'prepSessionId': prep_session.id,
                 'status': 'ready',
-                'deckId': deck.id
+                'documentId': deck.id
             })
             logger.info(f"Published PREP_STATUS_CHANGED event for {prep_session.id}")
         except Exception as e:
@@ -312,8 +312,8 @@ async def delete_all_prep_sessions(db: Session = Depends(get_db)):
 
     WARNING: This is a destructive operation that will delete:
     - All prep sessions
-    - All presentation sessions
-    - All presentation card states
+    - All interview sessions
+    - All interview card states
     - All utterances
 
     Use with caution!
@@ -330,15 +330,15 @@ async def delete_all_prep_sessions(db: Session = Depends(get_db)):
 @router.delete("/{prep_session_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_prep_session(prep_session_id: str, db: Session = Depends(get_db)):
     """
-    Delete a prep session and the associated deck.
+    Delete a prep session and the associated document.
 
     ⚠️ WARNING: This is a destructive operation that will delete:
     - The prep session
-    - All presentation sessions (cascade)
-    - The associated deck
-    - All slides (cascade from deck)
-    - All topic cards (cascade from deck)
-    - S3 files (PPTX, PDF, slide images)
+    - All interview sessions (cascade)
+    - The associated document
+    - All sections (cascade from document)
+    - All topic cards (cascade from document)
+    - S3 files
 
     This action cannot be undone.
     """
@@ -358,47 +358,47 @@ async def delete_prep_session(prep_session_id: str, db: Session = Depends(get_db
     return None
 
 
-@router.get("/{prep_session_id}/presentation-sessions", response_model=List[InterviewSessionSchema])
-async def get_prep_session_presentation_sessions(
+@router.get("/{prep_session_id}/interview-sessions", response_model=List[InterviewSessionSchema])
+async def get_prep_session_interview_sessions(
     prep_session_id: str,
     db: Session = Depends(get_db)
 ):
-    """Get all presentation sessions for a prep session."""
-    logger.info(f"Retrieving presentation sessions for prep session {prep_session_id}")
-    sessions = prep_session_service.get_prep_session_presentation_sessions(db, prep_session_id)
-    return [convert_presentation_session_to_schema(s, db) for s in sessions]
+    """Get all interview sessions for a prep session."""
+    logger.info(f"Retrieving interview sessions for prep session {prep_session_id}")
+    sessions = prep_session_service.get_prep_session_interview_sessions(db, prep_session_id)
+    return [convert_interview_session_to_schema(s, db) for s in sessions]
 
 
 @router.post(
-    "/{prep_session_id}/presentation-sessions",
+    "/{prep_session_id}/interview-sessions",
     status_code=status.HTTP_201_CREATED,
     response_model=InterviewSessionSchema
 )
-async def create_presentation_session_for_prep(
+async def create_interview_session_for_prep(
     prep_session_id: str,
     db: Session = Depends(get_db)
 ):
     """
-    Create a new presentation session under a prep session.
+    Create a new interview session under a prep session.
 
-    This initializes a presentation session and creates initial card states for all topic cards.
+    This initializes an interview session and creates initial card states for all topic cards.
     """
-    logger.info(f"Creating presentation session for prep session {prep_session_id}")
+    logger.info(f"Creating interview session for prep session {prep_session_id}")
 
     # For MVP, use default user
     user_id = "user_default"
 
-    # Get prep session to get deck_id
+    # Get prep session to get document_id
     prep_session = prep_session_service.get_prep_session(db, prep_session_id)
 
     # Create session data
     session_data = InterviewSessionCreate(
         prepSessionId=prep_session_id,
-        deckId=prep_session.document_id
+        documentId=prep_session.document_id
     )
 
     session = interview_service.create_session(db, user_id, session_data)
-    return convert_presentation_session_to_schema(session, db)
+    return convert_interview_session_to_schema(session, db)
 
 
 @router.get("/{prep_session_id}/events")

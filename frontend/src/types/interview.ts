@@ -1,5 +1,5 @@
 /**
- * Presentation session TypeScript types
+ * Interview session TypeScript types
  */
 
 import { QuestionCard } from './questionCard'
@@ -10,7 +10,7 @@ export type SessionStatus =
   | 'ready'
   | 'interviewing'
   | 'paused'
-  | 'slide_transitioning'
+  | 'transitioning'
   | 'recovering'
   | 'ended'
   | 'failed'
@@ -26,7 +26,7 @@ export type PrepSessionStatus = 'preparing' | 'ready' | 'archived'
 
 export interface PrepSession {
   id: string
-  deckId: string
+  documentId: string
   userId: string
   title?: string
   status: PrepSessionStatus
@@ -34,7 +34,7 @@ export interface PrepSession {
   updatedAt: string
 }
 
-export interface PresentationSession {
+export interface InterviewSession {
   id: string
   prepSessionId: string
   documentId: string
@@ -50,9 +50,9 @@ export interface PresentationSession {
   createdAt: string
 }
 
-export interface Slide {
+export interface DocumentSection {
   id: string
-  deckId: string
+  documentId: string
   pageNumber: number
   title?: string | null
   imageUrl?: string | null
@@ -63,7 +63,7 @@ export interface Slide {
   createdAt?: string
 }
 
-export interface PresentationCardState {
+export interface InterviewCardState {
   id: string
   sessionId: string
   topicCardId: string
@@ -76,28 +76,28 @@ export interface PresentationCardState {
   updatedAt: string
 }
 
-export interface CardState extends PresentationCardState {
+export interface CardState extends InterviewCardState {
   questionCard: QuestionCard
 }
 
 export interface Utterance {
   id: string
-  slideId: string
+  sectionId: string
   transcript: string
   startedAt: string
   endedAt: string
 }
 
-export interface PresentationRuntimeState {
+export interface InterviewRuntimeState {
   sessionId: string
-  deckId: string
+  documentId: string
   status: SessionStatus
-  currentSlideId: string
-  currentSlidePageNumber: number
-  slideStartedAt: string | null
-  elapsedSecondsOnSlide: number
-  estimatedSecondsOnSlide: number
-  cardsBySlideId: Record<string, QuestionCard[]>
+  currentSectionId: string
+  currentSectionPageNumber: number
+  sectionStartedAt: string | null
+  elapsedSecondsOnSection: number
+  estimatedSecondsOnSection: number
+  cardsBySectionId: Record<string, QuestionCard[]>
   realtime: {
     connectionStatus: RealtimeConnectionStatus
     lastEventAt: string | null
@@ -106,15 +106,23 @@ export interface PresentationRuntimeState {
   utterances: Utterance[]
 }
 
-export interface PresentationEvent {
+export interface InterviewEvent {
   type:
     | 'UTTERANCE_COMPLETED'
     | 'CARD_COVERED'
     | 'CARD_AT_RISK'
     | 'CARD_SKIPPED'
-    | 'SLIDE_CHANGED'
+    | 'SECTION_CHANGED'
   sessionId: string
-  slideId: string
+  sectionId: string
   data: Record<string, unknown>
   occurredAt: string
 }
+
+// Re-export old names for gradual migration
+/** @deprecated Use InterviewSession */
+export type PresentationSession = InterviewSession
+/** @deprecated Use DocumentSection */
+export type Slide = DocumentSection
+/** @deprecated Use InterviewCardState */
+export type PresentationCardState = InterviewCardState

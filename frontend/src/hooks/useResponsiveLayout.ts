@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react'
 
 export type LayoutMode = 'compact' | 'standard' | 'wide' | 'ultrawide'
-export type SlideOrientation = 'landscape' | 'portrait' | 'unknown'
+export type ContentOrientation = 'landscape' | 'portrait' | 'unknown'
 
 export interface LayoutConfig {
   // 投影片區域
-  slideArea: {
+  contentArea: {
     width: string // Tailwind 類或百分比
     minWidth?: string
   }
@@ -34,9 +34,9 @@ export interface LayoutConfig {
  * 動態響應式佈局 Hook
  * 根據視窗寬度、投影片方向自動調整佈局
  */
-export function useResponsiveLayout(slideOrientation: SlideOrientation) {
+export function useResponsiveLayout(contentOrientation: ContentOrientation) {
   const [layoutMode, setLayoutMode] = useState<LayoutMode>('standard')
-  const [layoutConfig, setLayoutConfig] = useState<LayoutConfig>(getLayoutConfig('standard', slideOrientation))
+  const [layoutConfig, setLayoutConfig] = useState<LayoutConfig>(getLayoutConfig('standard', contentOrientation))
 
   // 監聽視窗大小變化
   useEffect(() => {
@@ -62,8 +62,8 @@ export function useResponsiveLayout(slideOrientation: SlideOrientation) {
 
   // 當佈局模式或投影片方向改變時更新配置
   useEffect(() => {
-    setLayoutConfig(getLayoutConfig(layoutMode, slideOrientation))
-  }, [layoutMode, slideOrientation])
+    setLayoutConfig(getLayoutConfig(layoutMode, contentOrientation))
+  }, [layoutMode, contentOrientation])
 
   return {
     layoutMode,
@@ -76,7 +76,7 @@ export function useResponsiveLayout(slideOrientation: SlideOrientation) {
 /**
  * 根據佈局模式和投影片方向獲取配置
  */
-function getLayoutConfig(mode: LayoutMode, orientation: SlideOrientation): LayoutConfig {
+function getLayoutConfig(mode: LayoutMode, orientation: ContentOrientation): LayoutConfig {
   // 直立投影片的特殊處理
   if (orientation === 'portrait') {
     return getPortraitConfig(mode)
@@ -86,7 +86,7 @@ function getLayoutConfig(mode: LayoutMode, orientation: SlideOrientation): Layou
   switch (mode) {
     case 'compact':
       return {
-        slideArea: {
+        contentArea: {
           width: 'flex-1',
           minWidth: '640px',
         },
@@ -108,7 +108,7 @@ function getLayoutConfig(mode: LayoutMode, orientation: SlideOrientation): Layou
 
     case 'standard':
       return {
-        slideArea: {
+        contentArea: {
           width: 'flex-1',
         },
         cardsArea: {
@@ -129,7 +129,7 @@ function getLayoutConfig(mode: LayoutMode, orientation: SlideOrientation): Layou
 
     case 'wide':
       return {
-        slideArea: {
+        contentArea: {
           width: 'flex-[0_0_60%]',  // 60%
         },
         cardsArea: {
@@ -150,7 +150,7 @@ function getLayoutConfig(mode: LayoutMode, orientation: SlideOrientation): Layou
 
     case 'ultrawide':
       return {
-        slideArea: {
+        contentArea: {
           width: 'flex-[0_0_55%]',  // 55%
         },
         cardsArea: {
@@ -178,7 +178,7 @@ function getPortraitConfig(mode: LayoutMode): LayoutConfig {
   switch (mode) {
     case 'compact':
       return {
-        slideArea: {
+        contentArea: {
           width: 'flex-[0_0_45%]',  // 45%
         },
         cardsArea: {
@@ -200,7 +200,7 @@ function getPortraitConfig(mode: LayoutMode): LayoutConfig {
 
     case 'standard':
       return {
-        slideArea: {
+        contentArea: {
           width: 'flex-[0_0_50%]',
         },
         cardsArea: {
@@ -222,7 +222,7 @@ function getPortraitConfig(mode: LayoutMode): LayoutConfig {
 
     case 'wide':
       return {
-        slideArea: {
+        contentArea: {
           width: 'flex-[0_0_50%]',
         },
         cardsArea: {
@@ -244,7 +244,7 @@ function getPortraitConfig(mode: LayoutMode): LayoutConfig {
 
     case 'ultrawide':
       return {
-        slideArea: {
+        contentArea: {
           width: 'flex-[0_0_45%]',
         },
         cardsArea: {

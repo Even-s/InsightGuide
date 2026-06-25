@@ -1,4 +1,4 @@
-"""OpenAI API integration service for slide analysis and topic card generation."""
+"""OpenAI API integration service for document analysis and topic card generation."""
 
 import json
 import logging
@@ -35,7 +35,7 @@ class OpenAIService:
                 "messages": [
                     {
                         "role": "system",
-                        "content": "You are an expert at analyzing presentation content and generating structured metadata for topic cards. Always respond with valid JSON."
+                        "content": "You are an expert at analyzing interview content and generating structured metadata for topic cards. Always respond with valid JSON."
                     },
                     {
                         "role": "user",
@@ -150,7 +150,7 @@ class OpenAIService:
         document_title: str,
         full_text: str,
         sections: list,
-        deck_id: Optional[str] = None,
+        document_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Phase 1: Analyze full BRD document and generate interview themes.
@@ -235,7 +235,7 @@ class OpenAIService:
             )
 
             billing_service.record_deck_chat_completion(
-                deck_id=deck_id,
+                document_id=document_id,
                 operation="generate_interview_themes",
                 model=model,
                 response=response,
@@ -259,7 +259,7 @@ class OpenAIService:
         theme_rationale: str,
         theme_brd_mapping: list,
         source_sections_text: str,
-        deck_id: Optional[str] = None,
+        document_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Phase 2: Generate question cards for a single interview theme.
@@ -382,7 +382,7 @@ class OpenAIService:
             )
 
             billing_service.record_deck_chat_completion(
-                deck_id=deck_id,
+                document_id=document_id,
                 operation="generate_theme_question_cards",
                 model=model,
                 response=response,

@@ -95,7 +95,7 @@ def analyze_document(self, document_id: str):
             document_title=document.title,
             full_text=full_text,
             sections=sections,
-            deck_id=document_id,
+            document_id=document_id,
         )
 
         # Save interview metadata to document
@@ -185,7 +185,7 @@ def analyze_document(self, document_id: str):
                     theme_rationale=theme.rationale,
                     theme_brd_mapping=theme.brd_mapping or [],
                     source_sections_text=source_sections_text,
-                    deck_id=document_id,
+                    document_id=document_id,
                 )
 
                 # Create QuestionCard records

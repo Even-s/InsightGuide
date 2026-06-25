@@ -23,10 +23,10 @@ function App() {
           <Route path="/projects/:projectId/evidence-matrix" element={<EvidenceMatrixPage />} />
           <Route path="/projects/:projectId/readiness" element={<BRDReadinessPage />} />
           <Route path="/prep-sessions" element={<PrepSessionListPage />} />
-          <Route path="/editor/:deckId" element={<EditorPage />} />
-          <Route path="/interview/:deckId" element={<PresenterPage />} />
+          <Route path="/editor/:documentId" element={<EditorPage />} />
+          <Route path="/interview/:documentId" element={<PresenterPage />} />
           <Route path="/interview/session/:sessionId" element={<PresenterPage />} />
-          <Route path="/interview/:deckId/report/:sessionId" element={<InterviewReportPage />} />
+          <Route path="/interview/:documentId/report/:sessionId" element={<InterviewReportPage />} />
           <Route path="/interview/:sessionId/brd" element={<BRDGenerationPage />} />
           <Route path="/sessions/:sessionId/insight-memo" element={<InsightMemoPage />} />
           <Route path="/sessions/:sessionId/log" element={<SessionLogPage />} />

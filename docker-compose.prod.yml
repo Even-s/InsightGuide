@@ -1,3 +1,6 @@
+# Full deployment: all services containerized (including backend + Celery worker).
+# Use for CI, staging, or production-like environments.
+# Usage: docker compose -f docker-compose.prod.yml up -d
 services:
   postgres:
     image: pgvector/pgvector:pg16

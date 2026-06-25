@@ -36,10 +36,10 @@ class EventService:
 
     async def subscribe(self, session_id: str) -> asyncio.Queue:
         """
-        Subscribe to events for a presentation session.
+        Subscribe to events for an interview session.
 
         Args:
-            session_id: Presentation session ID
+            session_id: Interview session ID
 
         Returns:
             Queue that will receive events
@@ -65,7 +65,7 @@ class EventService:
         Unsubscribe from events.
 
         Args:
-            session_id: Presentation session ID
+            session_id: Interview session ID
             queue: The queue to remove
         """
         if session_id in self._connections:
@@ -86,7 +86,7 @@ class EventService:
         Publish an event to all subscribers of a session.
 
         Args:
-            session_id: Presentation session ID
+            session_id: Interview session ID
             event: Event data dict
 
         Example:
@@ -137,7 +137,7 @@ class EventService:
         Synchronous version of publish for non-async contexts.
 
         Args:
-            session_id: Presentation session ID
+            session_id: Interview session ID
             event: Event data dict
         """
         if 'timestamp' not in event:

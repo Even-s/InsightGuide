@@ -45,7 +45,7 @@ class DocumentAnalysisResponse(BaseModel):
 
     document_id: str
     status: str
-    slides: List[dict] = Field(default_factory=list)
+    sections: List[dict] = Field(default_factory=list)
     topic_cards_count: int = 0
     created_at: datetime
     updated_at: datetime

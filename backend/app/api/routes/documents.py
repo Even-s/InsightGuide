@@ -20,7 +20,6 @@ router = APIRouter()
 
 def convert_document_to_response(document, db: Session) -> DocumentResponse:
     """Convert document model to API response with document-level AI usage."""
-    # TODO: Implement billing service for documents
     usage = {"inputTokens": 0, "outputTokens": 0, "totalTokens": 0, "totalCostUsd": 0}
     return DocumentResponse(
         id=document.id,
@@ -118,7 +117,6 @@ async def get_document(document_id: str, db: Session = Depends(get_db)):
 async def get_document_status(document_id: str, db: Session = Depends(get_db)):
     """Get document processing status."""
     document = document_service.get_document(db, document_id)
-    # TODO: Implement billing service for documents
     usage = {"inputTokens": 0, "outputTokens": 0, "totalTokens": 0, "totalCostUsd": 0}
 
     status_messages = {
@@ -165,17 +163,15 @@ async def get_document_analysis(document_id: str, db: Session = Depends(get_db))
 
     # Load all question cards for the document
     all_question_cards = question_card_service.get_question_cards_by_document(db, document_id)
-    # TODO: Implement billing service for documents
     usage = {"inputTokens": 0, "outputTokens": 0, "totalTokens": 0, "totalCostUsd": 0}
 
-    # Build slides (sections) with question card counts
-    slides_data = []
+    sections_data = []
     for section in sections:
         section_cards = [c for c in all_question_cards if c.section_id == section.id]
 
-        slides_data.append({
+        sections_data.append({
             "id": section.id,
-            "deck_id": section.document_id,
+            "document_id": section.document_id,
             "page_number": section.section_number,
             "title": section.title,
             "extracted_text": section.extracted_text,
@@ -186,7 +182,7 @@ async def get_document_analysis(document_id: str, db: Session = Depends(get_db))
     return DocumentAnalysisResponse(
         document_id=document.id,
         status=document.status,
-        slides=slides_data,
+        sections=sections_data,
         topic_cards_count=len(all_question_cards),
         created_at=document.created_at,
         updated_at=document.updated_at,
@@ -282,8 +278,6 @@ async def get_document_sections(document_id: str, db: Session = Depends(get_db))
     """Get all sections for a document."""
     document = document_service.get_document(db, document_id)
 
-    # TODO: Query sections from database
-    # For now, return empty list
     return {
         "document_id": document.id,
         "sections": []

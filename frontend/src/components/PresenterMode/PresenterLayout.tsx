@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { presentationAPI } from '@/api/presentation'
+import { interviewAPI } from '@/api/interview'
 import { apiClient } from '@/api/client'
-import { usePresentationSession } from '@/hooks/usePresentationSession'
+import { useInterviewSession } from '@/hooks/usePresentationSession'
 import { useRealtimeTranscription } from '@/hooks/useRealtimeTranscription'
 import { useMediaRecorder } from '@/hooks/useMediaRecorder'
 import { useSSEEvents } from '@/hooks/useSSEEvents'
 import { useResponsiveLayout } from '@/hooks/useResponsiveLayout'
-import type { CardState } from '@/types/presentation'
+import type { CardState } from '@/types/interview'
 import type { CardStatus } from '@/types/questionCard'
 import LoadingSpinner from '@/components/common/LoadingSpinner'
 import SessionHeader from './SessionHeader'
@@ -16,10 +16,10 @@ import { formatFocusText, formatQuestionText, formatThemeTitle } from '@/utils/i
 
 interface PresenterLayoutProps {
   sessionId: string
-  deckId: string
+  documentId: string
 }
 
-export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutProps) {
+export default function PresenterLayout({ sessionId, documentId }: PresenterLayoutProps) {
   const [cardStates, setCardStates] = useState<CardState[]>([])
   const [, setCardsLoading] = useState(true)
   const [transcriptHistory, setTranscriptHistory] = useState<string[]>([]) // 保留最近 3 句
@@ -40,17 +40,17 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
     themes,
     currentTheme,
     currentThemeIndex,
-    currentSlide,
-    slides,
+    currentSection,
+    sections,
     isLoading,
     themePreparing,
     error,
     startPresenting,
     pausePresenting,
-    nextSlide,
-    previousSlide,
+    nextTheme,
+    previousTheme,
     endSession,
-  } = usePresentationSession(sessionId)
+  } = useInterviewSession(sessionId)
 
   const { start: startRecording, stop: stopRecording } = useMediaRecorder()
   const [isDiarizing, setIsDiarizing] = useState(false)
@@ -60,7 +60,7 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
   const recordingStartedAtRef = useRef<string | null>(null)
   const finalRecordingBlobRef = useRef<Blob | null>(null)
 
-  const currentSlideRef = useRef(currentSlide)
+  const currentSectionRef = useRef(currentSection)
   const currentThemeRef = useRef(currentTheme)
   const cardStatesRef = useRef<CardState[]>([])
   const isPresentingRef = useRef(false)
@@ -72,9 +72,9 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
   const lastPartialMatchTextRef = useRef('')
 
   useEffect(() => {
-    currentSlideRef.current = currentSlide
+    currentSectionRef.current = currentSection
     currentThemeRef.current = currentTheme
-  }, [currentSlide, currentTheme])
+  }, [currentSection, currentTheme])
 
   useEffect(() => {
     isPresentingRef.current = session?.status === 'interviewing'
@@ -95,12 +95,12 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
   const loadCardStates = useCallback(async () => {
     try {
       setCardsLoading(true)
-      const states = await presentationAPI.getSessionCards(sessionId, deckId)
+      const states = await interviewAPI.getSessionCards(sessionId, documentId)
       setCardStates(states)
     } finally {
       setCardsLoading(false)
     }
-  }, [deckId, sessionId])
+  }, [documentId, sessionId])
 
   useEffect(() => {
     loadCardStates()
@@ -142,7 +142,7 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
   }) => {
     let text = payload.transcript.trim()
     const activeTheme = currentThemeRef.current
-    const activeSlide = currentSlideRef.current
+    const activeSlide = currentSectionRef.current
     const activeId = activeTheme?.id ?? activeSlide?.id
 
     partialTranscriptRef.current = ''
@@ -170,7 +170,7 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
     // Detect if this utterance is asking a specific card (for question routing)
     const askedCard = findAskedCard(text, cardStatesRef.current, activeId)
 
-    presentationAPI.createUtterance(
+    interviewAPI.createUtterance(
       sessionId,
       text,
       activeId,
@@ -193,7 +193,7 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
 
   const sendPartialTranscriptMatch = useCallback((text: string, itemId?: string) => {
     const activeTheme = currentThemeRef.current
-    const activeSlide = currentSlideRef.current
+    const activeSlide = currentSectionRef.current
     const activeId = activeTheme?.id ?? activeSlide?.id
     const trimmed = text.trim()
     const activeCardId = getActiveCardId(cardStatesRef.current, activeId)
@@ -210,7 +210,7 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
     partialMatchInFlightRef.current = true
     lastPartialMatchTextRef.current = trimmed
 
-    presentationAPI.matchPartialTranscript(sessionId, trimmed, activeId, activeCardId, itemId)
+    interviewAPI.matchPartialTranscript(sessionId, trimmed, activeId, activeCardId, itemId)
       .catch((err) => {
         console.warn('[PresenterLayout] Partial transcript matching failed:', err)
       })
@@ -292,7 +292,7 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
 
   useEffect(() => {
     if (hasRequestedInitialPreparationRef.current) return
-    if (!session || !currentSlide) return
+    if (!session || !currentSection) return
 
     if (session.status === 'idle' || session.status === 'ready') {
       hasRequestedInitialPreparationRef.current = true
@@ -300,7 +300,7 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
     }
 
     setIsPreparingToPresent(false)
-  }, [currentSlide, session])
+  }, [currentSection, session])
 
 
   useEffect(() => {
@@ -360,7 +360,7 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
 
   // Followup queue: add new listening/probably_sufficient cards that have followups
   useEffect(() => {
-    const activeSectionId = currentTheme?.id ?? currentSlide?.id
+    const activeSectionId = currentTheme?.id ?? currentSection?.id
     if (!activeSectionId) return
 
     const cardsWithFollowup = cardStates.filter((cs) => {
@@ -379,7 +379,7 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
       if (newIds.length === 0) return prev
       return [...prev, ...newIds]
     })
-  }, [cardStates, currentTheme?.id, currentSlide?.id, skippedCards])
+  }, [cardStates, currentTheme?.id, currentSection?.id, skippedCards])
 
   // Current followup: first in queue that still needs followup
   const currentFollowupCard = followupQueue
@@ -388,7 +388,7 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
     .find((cs) => cs && (cs.status === 'listening' || cs.status === 'probably_sufficient'))
 
   const followupPrompt = currentFollowupCard
-    ? buildFollowupPrompt([currentFollowupCard], currentTheme?.id ?? currentSlide?.id)
+    ? buildFollowupPrompt([currentFollowupCard], currentTheme?.id ?? currentSection?.id)
     : null
 
   const followupQueueLength = followupQueue.filter((id) => !skippedCards.has(id)).length
@@ -424,12 +424,12 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
     <div className="flex h-screen flex-col bg-cream-100 text-natural-800">
       <SessionHeader
         session={session}
-        deckId={deckId}
+        documentId={documentId}
         isRecording={isRecording}
         isPreparingToPresent={isStartControlPreparing}
-        currentThemeTitle={currentTheme ? `${currentTheme.themeNumber}. ${formatThemeTitle(currentTheme.title)}` : `段落 ${currentSlide?.pageNumber ?? ''}`}
+        currentThemeTitle={currentTheme ? `${currentTheme.themeNumber}. ${formatThemeTitle(currentTheme.title)}` : `段落 ${currentSection?.pageNumber ?? ''}`}
         currentThemeIndex={currentThemeIndex}
-        totalThemes={themes.length || slides.length}
+        totalThemes={themes.length || sections.length}
         onStart={handleStartRequested}
         onPause={pausePresenting}
         onEnd={async () => {
@@ -488,7 +488,7 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
             {/* Left arrow: previous theme */}
             <button
               type="button"
-              onClick={previousSlide}
+              onClick={previousTheme}
               disabled={currentThemeIndex === 0}
               className="absolute left-[2%] top-1/2 -translate-y-1/2 z-10 flex h-11 w-11 items-center justify-center rounded-full border border-cream-300 bg-white shadow-natural text-natural-400 hover:text-natural-600 hover:border-cream-400 transition-all disabled:opacity-0 disabled:pointer-events-none"
             >
@@ -500,8 +500,8 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
             {/* Right arrow: next theme */}
             <button
               type="button"
-              onClick={nextSlide}
-              disabled={currentThemeIndex >= (themes.length || slides.length) - 1}
+              onClick={nextTheme}
+              disabled={currentThemeIndex >= (themes.length || sections.length) - 1}
               className="absolute right-[2%] top-1/2 -translate-y-1/2 z-10 flex h-11 w-11 items-center justify-center rounded-full border border-cream-300 bg-white shadow-natural text-natural-400 hover:text-natural-600 hover:border-cream-400 transition-all disabled:opacity-0 disabled:pointer-events-none"
             >
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -521,7 +521,7 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
                       <button
                         key={c.cardId}
                         onClick={() => {
-                          presentationAPI.confirmActiveCard(sessionId, c.cardId)
+                          interviewAPI.confirmActiveCard(sessionId, c.cardId)
                           setActiveCardId(c.cardId)
                           setCandidateCards([])
                           setBufferedAnswerCount(0)
@@ -662,7 +662,7 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
                                           <button
                                             onClick={(e) => {
                                               e.stopPropagation()
-                                              presentationAPI.manualCompleteCard(sessionId, card.id)
+                                              interviewAPI.manualCompleteCard(sessionId, card.id)
                                               updateCardFromEvent(card.id, 'sufficient', 1.0, undefined, undefined)
                                             }}
                                             className="px-2.5 py-1 text-xs bg-sage-50 text-sage-500 border border-sage-200 rounded-xl hover:bg-sage-100 transition-colors"
@@ -673,7 +673,7 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
                                             <button
                                               onClick={(e) => {
                                                 e.stopPropagation()
-                                                presentationAPI.clearActiveCard(sessionId)
+                                                interviewAPI.clearActiveCard(sessionId)
                                                 setActiveCardId(null)
                                               }}
                                               className="px-2.5 py-1 text-xs bg-wood-100 text-wood-500 border border-wood-200 rounded-xl hover:bg-wood-200 transition-colors"
@@ -684,7 +684,7 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
                                             <button
                                               onClick={(e) => {
                                                 e.stopPropagation()
-                                                presentationAPI.confirmActiveCard(sessionId, card.id)
+                                                interviewAPI.confirmActiveCard(sessionId, card.id)
                                                 setActiveCardId(card.id)
                                               }}
                                               className="px-2.5 py-1 text-xs bg-wood-50 text-wood-500 border border-wood-200 rounded-xl hover:bg-wood-100 transition-colors"
@@ -699,7 +699,7 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
                                           <button
                                             onClick={(e) => {
                                               e.stopPropagation()
-                                              presentationAPI.undoCompleteCard(sessionId, card.id)
+                                              interviewAPI.undoCompleteCard(sessionId, card.id)
                                               updateCardFromEvent(card.id, 'listening', 0, undefined, undefined)
                                             }}
                                             className="px-2.5 py-1 text-xs bg-cream-100 text-natural-400 border border-cream-300 rounded-xl hover:bg-cream-200 transition-colors"
@@ -720,9 +720,9 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
                   {/* 底部留白，避免被懸浮追問提示擋住 */}
                   <div className="h-28" />
                 </div>
-              ) : currentSlide ? (
+              ) : currentSection ? (
                 <div className="mx-auto max-w-3xl">
-                  <p className="text-base text-natural-600 whitespace-pre-wrap">{currentSlide.extractedText}</p>
+                  <p className="text-base text-natural-600 whitespace-pre-wrap">{currentSection.extractedText}</p>
                 </div>
               ) : null}
             </div>
@@ -755,26 +755,7 @@ export default function PresenterLayout({ sessionId, deckId }: PresenterLayoutPr
     evidence?: unknown,
     evidenceTranscriptFromEvent?: string,
   ) {
-    console.log('📋 updateCardFromEvent called:', {
-      cardId,
-      status,
-      confidence,
-      hasEvidence: !!evidence,
-      totalCards: cardStates.length
-    })
-
-    if (!cardId) {
-      console.warn('❌ No card_id provided in event')
-      return
-    }
-
-    const matchingCard = cardStates.find(c => c.questionCard.id === cardId)
-    console.log('🔍 Card lookup result:', {
-      found: !!matchingCard,
-      cardTitle: matchingCard?.questionCard.questionText,
-      oldStatus: matchingCard?.status,
-      newStatus: status
-    })
+    if (!cardId) return
 
     const evidenceTranscript =
       evidenceTranscriptFromEvent

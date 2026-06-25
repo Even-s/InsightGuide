@@ -706,10 +706,8 @@ async def get_interview_events(session_id: str, db: Session = Depends(get_db)):
 
     Events: CARD_STATE_UPDATED, CARD_SUFFICIENT, CARD_AT_RISK, etc.
     """
-    # TODO: Implement SSE or WebSocket event stream
-    # For now, return placeholder
     return {
-        "message": "Event stream endpoint - to be implemented",
+        "message": "Use /api/events/sessions/{sessionId}/stream for SSE event stream",
         "sessionId": session_id,
     }
 

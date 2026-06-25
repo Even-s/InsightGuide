@@ -95,7 +95,6 @@ class QuestionCardSchema(BaseModel):
 class QuestionCardCreate(BaseModel):
     """Schema for creating a question card (simplified - user provides question and importance)."""
     sectionId: Optional[str] = Field(None, alias="sectionId")
-    slideId: Optional[str] = Field(None)
     questionText: Optional[str] = Field(None, min_length=1, max_length=200)
     title: Optional[str] = Field(None, min_length=1, max_length=200)
     suggestedFollowup: Optional[str] = Field(None, min_length=1, max_length=2000)
@@ -114,7 +113,7 @@ class QuestionCardCreate(BaseModel):
 
     @property
     def resolved_section_id(self) -> str:
-        return self.sectionId or self.slideId or ""
+        return self.sectionId or ""
 
     @property
     def resolved_question_text(self) -> str:

@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 @celery_app.task(name="generate_session_report")
 def generate_session_report(session_id: str):
     """
-    Generate comprehensive report for completed presentation session.
+    Generate comprehensive report for completed interview session.
 
     This worker implements Milestone 7 functionality:
     1. Calculate coverage statistics

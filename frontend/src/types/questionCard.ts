@@ -96,18 +96,9 @@ export interface QuestionCard {
   createdBy: 'ai' | 'user' | 'system'
   createdAt: string
   updatedAt: string
-  // Aliases returned by API for backward compatibility
-  deckId?: string
-  slideId?: string
-  slidePageNumber?: number
   title?: string
   description?: string
   topicType?: QuestionType
   suggestedScript?: string
   shortPrompt?: string
 }
-
-/**
- * @deprecated Use QuestionCard directly. TopicCard is kept as an alias during migration.
- */
-export type TopicCard = QuestionCard
