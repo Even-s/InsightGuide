@@ -798,22 +798,26 @@ class AnswerEvaluationEngine:
     ) -> str:
         """Build structured context for LLM evaluation.
 
-        Includes ALL utterances for the current theme/section so GPT can judge
+        Includes recent utterances for the current theme/section so GPT can judge
         cumulative sufficiency (not just the latest sentence in isolation).
+        Limited to last 10 utterances to avoid unbounded scans as interviews grow long.
         Capped at ~2000 chars to stay within reasonable prompt size.
 
         Note: LiveUtterance model does not have theme_id or section_id fields,
         so we currently fetch all utterances for the session. Future enhancement
         could add theme_id filtering if the model is updated.
         """
-        all_utterances = (
+        # Fetch last 10 utterances ordered by sequence_index descending, then reverse for chronological
+        recent_utterances = (
             db.query(LiveUtterance)
             .filter(
                 LiveUtterance.session_id == session_id,
             )
-            .order_by(LiveUtterance.created_at.asc())
+            .order_by(LiveUtterance.sequence_index.desc())
+            .limit(10)
             .all()
         )
+        all_utterances = list(reversed(recent_utterances))
 
         lines = []
         for utt in all_utterances:
@@ -976,6 +980,9 @@ class AnswerEvaluationEngine:
 
         try:
             # Phase 3: Use model parameter from argument (nano for live, mini for final)
+            import time
+
+            llm_start = time.perf_counter()
             response = openai_service.client.chat.completions.create(
                 model=model,
                 messages=[
@@ -985,9 +992,13 @@ class AnswerEvaluationEngine:
                 temperature=0,
                 response_format={"type": "json_object"},
             )
+            llm_elapsed_ms = (time.perf_counter() - llm_start) * 1000
 
             content = response.choices[0].message.content
             result = json.loads(content)
+            logger.info(
+                f"[PERF] LLM judge: {llm_elapsed_ms:.0f}ms, {len(candidate_cards)} cards, model={model}"
+            )
             logger.info(f"Batch judgment raw response: {content[:300]}")
 
             # Phase 3: Parse result — try "evaluations" key FIRST, then fallback to other formats

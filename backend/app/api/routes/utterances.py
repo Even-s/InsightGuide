@@ -93,7 +93,9 @@ def process_utterance_evaluation_background(
     from app.services.answer_evaluation_engine import answer_evaluation_engine
     from app.services.event_service import event_service
 
+    perf_start = time.perf_counter()
     time.sleep(_EVALUATION_DEBOUNCE_SECONDS)
+    debounce_elapsed = (time.perf_counter() - perf_start) * 1000
 
     db = SessionLocal()
     try:
@@ -139,6 +141,7 @@ def process_utterance_evaluation_background(
                 return
 
         # Process utterance and get card state updates
+        eval_start = time.perf_counter()
         updates = answer_evaluation_engine.process_utterance(
             db=db,
             session_id=session_id,
@@ -148,6 +151,7 @@ def process_utterance_evaluation_background(
             speaker=speaker,
             asked_card_id=asked_card_id,
         )
+        eval_elapsed = (time.perf_counter() - eval_start) * 1000
 
         # If question was detected and no card was auto-activated, emit candidates
         if (
@@ -169,6 +173,7 @@ def process_utterance_evaluation_background(
                 )
 
         # Emit events based on activation/completion separation
+        sse_start = time.perf_counter()
         for update in updates:
             new_status = update["new_status"]
             old_status = update["old_status"]
@@ -224,6 +229,21 @@ def process_utterance_evaluation_background(
                             "evaluationSeq": update.get("evaluation_seq"),
                         },
                     )
+        sse_elapsed = (time.perf_counter() - sse_start) * 1000
+
+        # Log performance metrics
+        total_elapsed = (time.perf_counter() - perf_start) * 1000
+        logger.info(
+            f"[PERF] Utterance evaluation: debounce={debounce_elapsed:.0f}ms "
+            f"eval={eval_elapsed:.0f}ms sse={sse_elapsed:.0f}ms "
+            f"total={total_elapsed:.0f}ms cards_updated={len(updates)}"
+        )
+
+        # Warn on slow evaluations
+        if total_elapsed > 8000:
+            logger.warning(
+                f"[PERF] Slow evaluation: {total_elapsed:.0f}ms for session {session_id}"
+            )
 
     except Exception as e:
         logger.error(f"Error processing utterance evaluation: {str(e)}", exc_info=True)
