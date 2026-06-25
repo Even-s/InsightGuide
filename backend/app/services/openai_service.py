@@ -588,8 +588,6 @@ Focus on questions that will help write a comprehensive BRD (Business Requiremen
 
 Return your analysis in JSON format as specified in the system prompt."""
 
-
-
     def audio_transcription(
         self,
         audio_bytes: bytes,
@@ -617,6 +615,7 @@ Return your analysis in JSON format as specified in the system prompt."""
             Transcription response object with segments
         """
         import io
+
         start_time = time.time()
 
         # Build request parameters
@@ -698,5 +697,6 @@ Return your analysis in JSON format as specified in the system prompt."""
         except Exception as e:
             logger.error(f"Error in audio transcription: {e}")
             raise
+
 
 openai_service = OpenAIService()
