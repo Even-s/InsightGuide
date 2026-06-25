@@ -314,20 +314,13 @@ function CardItem({
                 </Badge>
               </div>
               {card.coverageRule?.criteria && card.coverageRule.criteria.length > 0 && (
-                <div className="mt-2 flex flex-wrap gap-1.5">
+                <ul className="mt-1.5 space-y-0.5">
                   {card.coverageRule.criteria.map((c) => (
-                    <span
-                      key={c.id}
-                      className={`inline-flex items-center rounded px-1.5 py-0.5 text-[11px] leading-tight ${
-                        c.critical
-                          ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                          : 'bg-cream-100 text-natural-500 border border-cream-200'
-                      }`}
-                    >
-                      {c.description}
-                    </span>
+                    <li key={c.id} className="text-xs text-natural-400 leading-relaxed">
+                      <span className="mr-1">-</span>{c.description}
+                    </li>
                   ))}
-                </div>
+                </ul>
               )}
             </div>
           </div>
