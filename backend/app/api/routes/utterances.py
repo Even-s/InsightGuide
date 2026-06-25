@@ -184,7 +184,7 @@ def process_utterance_evaluation_background(
             if new_status == "sufficient":
                 event_type = "CARD_COVERED"
             elif new_status == "probably_sufficient":
-                event_type = "CARD_PROGRESS_CHANGED"
+                event_type = "CARD_PROBABLY_COVERED"
             elif new_status == "listening" and old_status == "pending":
                 event_type = "CARD_TOPIC_DETECTED"
             elif new_status == "listening":

@@ -147,7 +147,11 @@ async def set_active_card(session_id: str, body: dict, db: Session = Depends(get
             for update in updates:
                 new_status = update["new_status"]
                 event_type = (
-                    "CARD_COVERED" if new_status == "sufficient" else "CARD_PROGRESS_CHANGED"
+                    "CARD_COVERED"
+                    if new_status == "sufficient"
+                    else "CARD_PROBABLY_COVERED"
+                    if new_status == "probably_sufficient"
+                    else "CARD_LISTENING"
                 )
                 event_service.publish_sync(
                     session_id,
