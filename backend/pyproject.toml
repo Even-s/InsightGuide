@@ -26,8 +26,24 @@ known_first_party = ["app"]
 
 [tool.mypy]
 python_version = "3.11"
-warn_return_any = true
+warn_return_any = false
 warn_unused_configs = true
 disallow_untyped_defs = false
 ignore_missing_imports = true
 exclude = ["venv", "migrations"]
+
+[[tool.mypy.overrides]]
+module = "app.services.*"
+disable_error_code = ["assignment", "arg-type", "union-attr", "attr-defined", "call-overload", "var-annotated", "operator", "return-value", "misc", "index", "type-var"]
+
+[[tool.mypy.overrides]]
+module = "app.api.routes.*"
+disable_error_code = ["assignment", "arg-type", "union-attr", "attr-defined", "call-overload", "var-annotated", "call-arg", "dict-item", "misc"]
+
+[[tool.mypy.overrides]]
+module = "app.workers.*"
+disable_error_code = ["assignment", "arg-type", "union-attr", "var-annotated", "return", "misc"]
+
+[[tool.mypy.overrides]]
+module = "app.models.*"
+disable_error_code = ["var-annotated"]

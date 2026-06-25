@@ -129,7 +129,6 @@ class StakeholderPlanService:
                 temperature=0.4,
                 max_tokens=2500,
                 response_format={"type": "json_object"},
-                db=db,
                 purpose="stakeholder_plan_generation",
             )
 
