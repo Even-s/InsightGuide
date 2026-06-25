@@ -263,7 +263,7 @@ class QuestionCardService:
         """Clear stale rubric and recompile from elements after question_text change."""
         from app.services.question_rubric_service import question_rubric_service
 
-        coverage_rule = card.coverage_rule or {}
+        coverage_rule = dict(card.coverage_rule or {})
         coverage_rule.pop("rubricVersion", None)
         coverage_rule.pop("answerTarget", None)
         coverage_rule.pop("criteria", None)

@@ -425,15 +425,12 @@ class QuestionRubricService:
             rubric: Rubric dictionary to save
         """
         try:
-            # Get existing coverage_rule or create new one
-            coverage_rule = card.coverage_rule or {}
+            coverage_rule = dict(card.coverage_rule or {})
 
-            # Add rubric fields alongside existing fields
             coverage_rule["rubricVersion"] = rubric["rubricVersion"]
             coverage_rule["answerTarget"] = rubric["answerTarget"]
             coverage_rule["criteria"] = rubric["criteria"]
 
-            # Update the card (flush only — let caller commit)
             card.coverage_rule = coverage_rule
 
             db.flush()
