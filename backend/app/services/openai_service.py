@@ -66,7 +66,10 @@ class OpenAIService:
             request_params["response_format"] = response_format
 
         if max_tokens is not None:
-            request_params["max_tokens"] = max_tokens
+            if self._requires_max_completion_tokens(model):
+                request_params["max_completion_tokens"] = max_tokens
+            else:
+                request_params["max_tokens"] = max_tokens
 
         # Call OpenAI API
         response = self.client.chat.completions.create(**request_params)
@@ -182,6 +185,10 @@ class OpenAIService:
         except Exception as e:
             logger.error(f"Failed to generate card metadata: {e}")
             raise
+
+    def _requires_max_completion_tokens(self, model: str) -> bool:
+        """Return True for models that use max_completion_tokens instead of max_tokens."""
+        return model.startswith("gpt-5") or model.startswith("o")
 
     def _uses_default_temperature_only(self, model: str) -> bool:
         """Return True for models that reject custom temperature values."""

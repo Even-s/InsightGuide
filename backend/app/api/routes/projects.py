@@ -130,6 +130,8 @@ async def voice_to_project_fields(audio: UploadFile = File(...)):
         raise HTTPException(status_code=400, detail="無法辨識語音內容")
 
     # Step 2: GPT parse transcript into project fields
+    from app.core.config import settings
+
     try:
         ai_result = openai_service.chat_completion(
             messages=[
@@ -157,14 +159,13 @@ async def voice_to_project_fields(audio: UploadFile = File(...)):
                     ),
                 },
             ],
-            model="gpt-5.4-mini",
+            model=settings.SEMANTIC_UNDERSTANDING_MODEL,
             temperature=0.2,
             max_tokens=500,
             response_format={"type": "json_object"},
             purpose="project_voice_parse",
         )
 
-        # The wrapper already parses JSON, but handle markdown code blocks if present
         if isinstance(ai_result, str):
             content = ai_result.strip()
             if content.startswith("```"):
@@ -174,13 +175,10 @@ async def voice_to_project_fields(audio: UploadFile = File(...)):
             parsed = ai_result
     except Exception as e:
         logger.error(f"GPT parsing failed: {e}")
-        # Return raw transcript so user can still see what was said
-        parsed = {
-            "title": None,
-            "description": None,
-            "business_domain": None,
-            "key_objectives": None,
-        }
+        raise HTTPException(
+            status_code=502,
+            detail=f"AI 分析失敗：{type(e).__name__}: {e}",
+        )
 
     return {
         "transcript": transcript,

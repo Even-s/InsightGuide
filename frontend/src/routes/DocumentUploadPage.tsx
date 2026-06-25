@@ -60,7 +60,9 @@ export default function DocumentUploadPage() {
             setDescription(result.transcript)
           }
         } catch (error: unknown) {
-          const msg = error instanceof Error ? error.message : '語音辨識失敗'
+          const axiosErr = error as { response?: { data?: { detail?: string } } }
+          const msg = axiosErr?.response?.data?.detail
+            || (error instanceof Error ? error.message : '語音辨識失敗')
           setLocalError(msg)
         } finally {
           setIsProcessingVoice(false)
