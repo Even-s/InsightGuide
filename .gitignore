@@ -25,6 +25,7 @@ wheels/
 *.egg
 
 # IDE
+.codex/
 .claude/
 .vscode/
 .idea/
