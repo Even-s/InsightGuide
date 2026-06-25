@@ -43,6 +43,15 @@ export interface ScoringWeights {
   elementCoverage: number
 }
 
+export interface RubricCriterion {
+  id: string
+  description: string
+  type: string
+  required: boolean
+  critical: boolean
+  weight: number
+}
+
 export interface CoverageRule {
   semanticAnchors: string[]
   expectedKeywords: string[]
@@ -50,6 +59,9 @@ export interface CoverageRule {
   negativeSignals: string[]
   thresholds: SufficiencyThresholds
   scoringWeights: ScoringWeights
+  rubricVersion?: string
+  answerTarget?: string
+  criteria?: RubricCriterion[]
 }
 
 export interface SufficiencyEvidence {
