@@ -470,6 +470,28 @@ class QuestionRubricService:
 
         return None
 
+    def compile_and_save_rubric(self, db: Session, card: QuestionCard) -> None:
+        """Compile rubric immediately after card creation (local, no LLM).
+
+        No-op if rubric already exists. Safe to call on any card.
+        """
+        coverage_rule = card.coverage_rule or {}
+        if coverage_rule.get("rubricVersion") and coverage_rule.get("criteria"):
+            return
+
+        must_mention = (
+            coverage_rule.get("mustMentionElements")
+            or coverage_rule.get("must_mention_elements")
+            or []
+        )
+        semantic_anchors = (
+            coverage_rule.get("semanticAnchors") or coverage_rule.get("semantic_anchors") or []
+        )
+
+        if must_mention or semantic_anchors:
+            rubric = self.compile_rubric_from_elements(card)
+            self._save_rubric_to_card(db, card, rubric)
+
     def pre_warm_rubrics(self, db: Session, cards: List[QuestionCard]) -> None:
         """Pre-compile rubrics for all cards that don't have one yet.
 

@@ -152,6 +152,15 @@ class StakeholderCardGenerator:
                 db.add(card)
                 all_cards.append(card)
 
+        # Compile rubrics immediately (local, fast — no LLM)
+        from app.services.question_rubric_service import question_rubric_service
+
+        for card in all_cards:
+            try:
+                question_rubric_service.compile_and_save_rubric(db, card)
+            except Exception as e:
+                logger.warning(f"Failed to compile rubric for card {card.id}: {e}")
+
         # Always mark as ready, even if some themes had fallback cards
         prep_session.status = "ready"
         document.status = "analyzed"

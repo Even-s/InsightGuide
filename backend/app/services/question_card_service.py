@@ -221,26 +221,59 @@ class QuestionCardService:
         logger.info(f"Created question card {card_id} for section {section_id}")
         return card
 
+    _FIELD_MAP = {
+        "questionText": "question_text",
+        "suggestedFollowup": "suggested_followup",
+        "questionType": "question_type",
+        "coverageRule": "coverage_rule",
+        "expectedAnswerElements": "expected_answer_elements",
+        "estimatedSeconds": "estimated_seconds",
+        "orderIndex": "order_index",
+    }
+
     def update_question_card(
         self, db: Session, card_id: str, card_update: QuestionCardUpdate
     ) -> QuestionCard:
         """Update a question card."""
         card = self.get_question_card(db, card_id)
 
-        # Update fields
         update_data = card_update.model_dump(exclude_unset=True)
+        question_text_changed = False
+
         for field, value in update_data.items():
-            if field == "coverageRule" and value:
+            model_field = self._FIELD_MAP.get(field, field)
+            if model_field == "coverage_rule" and value:
                 value = self.normalize_coverage_rule_for_important_elements(value)
-            setattr(card, field, value)
+            if model_field == "question_text" and value != card.question_text:
+                question_text_changed = True
+            setattr(card, model_field, value)
 
         card.updated_at = datetime.utcnow()
+
+        if question_text_changed:
+            self._regenerate_rubric(db, card)
 
         db.commit()
         db.refresh(card)
 
         logger.info(f"Updated question card {card_id}")
         return card
+
+    def _regenerate_rubric(self, db: Session, card: QuestionCard) -> None:
+        """Clear stale rubric and recompile from elements after question_text change."""
+        from app.services.question_rubric_service import question_rubric_service
+
+        coverage_rule = card.coverage_rule or {}
+        coverage_rule.pop("rubricVersion", None)
+        coverage_rule.pop("answerTarget", None)
+        coverage_rule.pop("criteria", None)
+        card.coverage_rule = coverage_rule
+        db.flush()
+
+        try:
+            question_rubric_service.compile_and_save_rubric(db, card)
+        except Exception as e:
+            logger.warning(f"Failed to recompile rubric for card {card.id}: {e}")
 
     def delete_question_card(self, db: Session, card_id: str) -> None:
         """Delete a question card."""

@@ -205,6 +205,7 @@ def analyze_document(self, document_id: str):
                 # Create QuestionCard records
                 cards_data = cards_result.get("cards", [])
                 first_source_section_id = (theme.source_section_ids or [None])[0]
+                created_cards = []
 
                 for card_index, card_data in enumerate(cards_data):
                     try:
@@ -255,6 +256,7 @@ def analyze_document(self, document_id: str):
                             updated_at=datetime.utcnow(),
                         )
                         db.add(card)
+                        created_cards.append(card)
                         total_cards += 1
 
                     except Exception as card_err:
@@ -262,6 +264,15 @@ def analyze_document(self, document_id: str):
                             f"Failed to create card for theme {theme.id}: {card_err}", exc_info=True
                         )
                         continue
+
+                # Compile rubrics immediately (local, fast — no LLM)
+                from app.services.question_rubric_service import question_rubric_service
+
+                for card in created_cards:
+                    try:
+                        question_rubric_service.compile_and_save_rubric(db, card)
+                    except Exception as e:
+                        logger.warning(f"Failed to compile rubric for card {card.id}: {e}")
 
                 db.commit()
                 logger.info(f"Created {len(cards_data)} cards for theme {theme.title}")
