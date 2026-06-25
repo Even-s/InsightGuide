@@ -16,7 +16,8 @@ import {
   type StakeholderProfile,
   type InterviewGuide,
 } from '@/api/projects'
-import { apiClient } from '@/api/client'
+import { interviewAPI } from '@/api/interview'
+import type { InterviewSession } from '@/types/interview'
 
 interface SessionInfo {
   id: string
@@ -102,19 +103,16 @@ export default function PrepSessionListPage() {
 
                 let sessions: SessionInfo[] = []
                 try {
-                  const res = await apiClient.get('/api/interview-sessions/', {
-                    params: { projectId: project.id, limit: 50 }
-                  })
-                  // Filter sessions for this stakeholder (include unlinked ones under same project)
-                  sessions = (res.data.sessions || [])
-                    .filter((s: Record<string, unknown>) => s.stakeholderProfileId === profile.id || !s.stakeholderProfileId)
-                    .map((s: Record<string, unknown>) => ({
+                  const res = await interviewAPI.listSessions({ projectId: project.id, limit: 50 })
+                  sessions = res.sessions
+                    .filter((s: InterviewSession) => s.stakeholderProfileId === profile.id || !s.stakeholderProfileId)
+                    .map((s: InterviewSession) => ({
                       id: s.id,
                       status: s.status,
                       startedAt: s.startedAt,
                       endedAt: s.endedAt,
                       createdAt: s.createdAt,
-                      costUsd: s.costUsd || 0,
+                      costUsd: 0,
                       documentId: s.documentId,
                       projectId: s.projectId,
                       stakeholderProfileId: s.stakeholderProfileId,
@@ -136,17 +134,16 @@ export default function PrepSessionListPage() {
 
       // Load unlinked sessions (no projectId)
       try {
-        const allRes = await apiClient.get('/api/interview-sessions/', { params: { limit: 50 } })
-        const allSessions = allRes.data.sessions || []
-        const unlinked = allSessions
-          .filter((s: Record<string, unknown>) => !s.projectId)
-          .map((s: Record<string, unknown>) => ({
+        const res = await interviewAPI.listSessions({ limit: 50 })
+        const unlinked = res.sessions
+          .filter((s: InterviewSession) => !s.projectId)
+          .map((s: InterviewSession) => ({
             id: s.id,
             status: s.status,
             startedAt: s.startedAt,
             endedAt: s.endedAt,
             createdAt: s.createdAt,
-            costUsd: s.costUsd || 0,
+            costUsd: 0,
             documentId: s.documentId,
             projectId: s.projectId,
             stakeholderProfileId: s.stakeholderProfileId,
@@ -183,7 +180,7 @@ export default function PrepSessionListPage() {
   const handleDeleteSession = async (sessionId: string) => {
     if (!confirm('確定要刪除此訪談 session？')) return
     try {
-      await apiClient.delete(`/api/interview-sessions/${sessionId}`)
+      await interviewAPI.deleteSession(sessionId)
       loadData()
     } catch (err) {
       console.error('Failed to delete:', err)
@@ -194,7 +191,7 @@ export default function PrepSessionListPage() {
   const handleForceEndSession = async (sessionId: string) => {
     if (!confirm('強制結束此 session？狀態將變為 ended。')) return
     try {
-      await apiClient.patch(`/api/interview-sessions/${sessionId}`, { status: 'ended' })
+      await interviewAPI.forceEndSession(sessionId)
       loadData()
     } catch (err) {
       console.error('Failed to force end session:', err)

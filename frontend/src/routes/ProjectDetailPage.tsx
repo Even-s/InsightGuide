@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { apiClient } from '@/api/client'
+import { interviewAPI } from '@/api/interview'
 import {
   getProjectDashboard,
   getStakeholderPlan,
@@ -637,10 +637,9 @@ export default function ProjectDetailPage() {
                                     <button
                                       onClick={() => {
                                         // Find the latest session for this profile and navigate to its memo
-                                        apiClient.get('/api/interview-sessions/', { params: { projectId, limit: 50 } })
+                                        interviewAPI.listSessions({ projectId, limit: 50 })
                                           .then(res => {
-                                            const sessions = res.data.sessions || []
-                                            const profileSession = sessions.find((s: Record<string, unknown>) => s.stakeholderProfileId === profile.id)
+                                            const profileSession = res.sessions.find(s => s.stakeholderProfileId === profile.id)
                                             if (profileSession) navigate(`/sessions/${profileSession.id}/insight-memo`)
                                           })
                                       }}

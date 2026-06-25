@@ -221,7 +221,32 @@ export const interviewAPI = {
   }> {
     const response = await apiClient.post(`/api/interview-sessions/${sessionId}/outputs/generate`);
     return response.data;
-  }
+  },
+
+  async listSessions(params: {
+    projectId?: string;
+    stakeholderProfileId?: string;
+    limit?: number;
+    offset?: number;
+  } = {}): Promise<{ sessions: InterviewSession[]; total: number }> {
+    const response = await apiClient.get('/api/interview-sessions/', { params });
+    return {
+      sessions: response.data.sessions ?? [],
+      total: response.data.total ?? 0,
+    };
+  },
+
+  async deleteSession(sessionId: string): Promise<void> {
+    await apiClient.delete(`/api/interview-sessions/${sessionId}`);
+  },
+
+  async forceEndSession(sessionId: string): Promise<InterviewSession> {
+    const response = await apiClient.patch(
+      `/api/interview-sessions/${sessionId}`,
+      { status: 'ended' }
+    );
+    return response.data;
+  },
 };
 
 // Backward-compatible export
