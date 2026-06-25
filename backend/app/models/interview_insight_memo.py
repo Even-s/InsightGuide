@@ -1,7 +1,8 @@
 """Interview Insight Memo model."""
 
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, ForeignKey, Text, JSON, Integer, Float
+
+from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base
@@ -18,9 +19,13 @@ class InterviewInsightMemo(Base):
     __tablename__ = "interview_insight_memos"
 
     id = Column(String, primary_key=True)
-    session_id = Column(String, ForeignKey("interview_sessions.id"), nullable=False, unique=True, index=True)
+    session_id = Column(
+        String, ForeignKey("interview_sessions.id"), nullable=False, unique=True, index=True
+    )
     project_id = Column(String, ForeignKey("projects.id"), nullable=True, index=True)
-    stakeholder_profile_id = Column(String, ForeignKey("stakeholder_profiles.id"), nullable=True, index=True)
+    stakeholder_profile_id = Column(
+        String, ForeignKey("stakeholder_profiles.id"), nullable=True, index=True
+    )
 
     # Section 1: Basic info
     interview_date = Column(DateTime, nullable=True)

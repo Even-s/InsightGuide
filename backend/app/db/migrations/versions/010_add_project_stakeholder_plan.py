@@ -12,9 +12,8 @@ Phase 0: Project + Stakeholder Plan + Stakeholder Profile
 - Adds project_id to documents
 """
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = '010_add_project_stakeholder_plan'
 down_revision = '009_add_alignment'

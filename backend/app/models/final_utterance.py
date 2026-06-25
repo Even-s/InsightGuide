@@ -1,7 +1,8 @@
 """Final Utterance model - formal diarized transcripts."""
 
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, ForeignKey, Text, Integer, Float
+
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base
@@ -21,7 +22,9 @@ class FinalUtterance(Base):
 
     id = Column(String, primary_key=True)
     session_id = Column(String, ForeignKey("interview_sessions.id"), nullable=False, index=True)
-    transcript_revision_id = Column(String, ForeignKey("transcript_revisions.id"), nullable=False, index=True)
+    transcript_revision_id = Column(
+        String, ForeignKey("transcript_revisions.id"), nullable=False, index=True
+    )
 
     speaker_label = Column(String, nullable=False)
     # speaker_0 | speaker_1 | speaker_2 (original diarize labels)

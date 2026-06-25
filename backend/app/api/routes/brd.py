@@ -2,18 +2,19 @@
 
 import logging
 from typing import List
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, get_current_user
-from app.models.user import User
+from app.api.deps import get_current_user, get_db
 from app.models.brd import BRDDraft, Requirement
+from app.models.user import User
 from app.schemas.brd import (
     BRDDraftResponse,
-    BRDGenerationRequest,
-    BRDGenerationResponse,
     BRDExportRequest,
     BRDExportResponse,
+    BRDGenerationRequest,
+    BRDGenerationResponse,
     RequirementResponse,
     RequirementUpdate,
 )
@@ -28,6 +29,7 @@ router = APIRouter()
 # ============================================================================
 # BRD Draft Endpoints
 # ============================================================================
+
 
 @router.post("/generate", response_model=BRDGenerationResponse)
 def generate_brd(
@@ -58,7 +60,7 @@ def generate_brd(
         return BRDGenerationResponse(
             brd_id=brd_id,
             status="generating",
-            message="BRD generation started. Use GET /api/brd/{brd_id} to check status."
+            message="BRD generation started. Use GET /api/brd/{brd_id} to check status.",
         )
 
     except Exception as e:
@@ -77,10 +79,11 @@ def get_brd(
 
     Returns the complete BRD with all requirements.
     """
-    brd = db.query(BRDDraft).filter(
-        BRDDraft.id == brd_id,
-        BRDDraft.user_id == current_user.id
-    ).first()
+    brd = (
+        db.query(BRDDraft)
+        .filter(BRDDraft.id == brd_id, BRDDraft.user_id == current_user.id)
+        .first()
+    )
 
     if not brd:
         raise HTTPException(status_code=404, detail="BRD not found")
@@ -99,10 +102,11 @@ def get_brd_by_session(
 
     Returns the BRD associated with the given interview session.
     """
-    brd = db.query(BRDDraft).filter(
-        BRDDraft.interview_session_id == session_id,
-        BRDDraft.user_id == current_user.id
-    ).first()
+    brd = (
+        db.query(BRDDraft)
+        .filter(BRDDraft.interview_session_id == session_id, BRDDraft.user_id == current_user.id)
+        .first()
+    )
 
     if not brd:
         raise HTTPException(status_code=404, detail="BRD not found for this session")
@@ -122,10 +126,11 @@ def export_brd(
 
     Supported formats: markdown, pdf, docx
     """
-    brd = db.query(BRDDraft).filter(
-        BRDDraft.id == brd_id,
-        BRDDraft.user_id == current_user.id
-    ).first()
+    brd = (
+        db.query(BRDDraft)
+        .filter(BRDDraft.id == brd_id, BRDDraft.user_id == current_user.id)
+        .first()
+    )
 
     if not brd:
         raise HTTPException(status_code=404, detail="BRD not found")
@@ -142,9 +147,13 @@ def export_brd(
         elif request.format == "pdf":
             download_url = f"/api/brd/{brd_id}/download/pdf"
         elif request.format == "docx":
-            raise HTTPException(status_code=501, detail="DOCX export is not yet available. Use PDF or Markdown.")
+            raise HTTPException(
+                status_code=501, detail="DOCX export is not yet available. Use PDF or Markdown."
+            )
         else:
-            raise HTTPException(status_code=400, detail=f"Unsupported export format: {request.format}")
+            raise HTTPException(
+                status_code=400, detail=f"Unsupported export format: {request.format}"
+            )
 
         brd.last_exported_at = datetime.utcnow()
         db.commit()
@@ -153,7 +162,7 @@ def export_brd(
             brd_id=brd_id,
             format=request.format,
             download_url=download_url,
-            exported_at=datetime.utcnow()
+            exported_at=datetime.utcnow(),
         )
 
     except HTTPException:
@@ -174,10 +183,11 @@ def download_brd_markdown(
     """
     from fastapi.responses import PlainTextResponse
 
-    brd = db.query(BRDDraft).filter(
-        BRDDraft.id == brd_id,
-        BRDDraft.user_id == current_user.id
-    ).first()
+    brd = (
+        db.query(BRDDraft)
+        .filter(BRDDraft.id == brd_id, BRDDraft.user_id == current_user.id)
+        .first()
+    )
 
     if not brd:
         raise HTTPException(status_code=404, detail="BRD not found")
@@ -190,9 +200,7 @@ def download_brd_markdown(
     return PlainTextResponse(
         content=brd.markdown_content,
         media_type="text/markdown",
-        headers={
-            "Content-Disposition": f'attachment; filename="{filename}"'
-        }
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
@@ -207,10 +215,11 @@ def download_brd_pdf(
     """
     from fastapi.responses import StreamingResponse
 
-    brd = db.query(BRDDraft).filter(
-        BRDDraft.id == brd_id,
-        BRDDraft.user_id == current_user.id
-    ).first()
+    brd = (
+        db.query(BRDDraft)
+        .filter(BRDDraft.id == brd_id, BRDDraft.user_id == current_user.id)
+        .first()
+    )
 
     if not brd:
         raise HTTPException(status_code=404, detail="BRD not found")
@@ -227,9 +236,7 @@ def download_brd_pdf(
         return StreamingResponse(
             pdf_buffer,
             media_type="application/pdf",
-            headers={
-                "Content-Disposition": f'attachment; filename="{filename}"'
-            }
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
         )
 
     except Exception as e:
@@ -241,6 +248,7 @@ def download_brd_pdf(
 # Requirements Endpoints
 # ============================================================================
 
+
 @router.get("/{brd_id}/requirements", response_model=List[RequirementResponse])
 def get_requirements(
     brd_id: str,
@@ -251,17 +259,16 @@ def get_requirements(
     Get all requirements for a BRD.
     """
     # Verify BRD ownership
-    brd = db.query(BRDDraft).filter(
-        BRDDraft.id == brd_id,
-        BRDDraft.user_id == current_user.id
-    ).first()
+    brd = (
+        db.query(BRDDraft)
+        .filter(BRDDraft.id == brd_id, BRDDraft.user_id == current_user.id)
+        .first()
+    )
 
     if not brd:
         raise HTTPException(status_code=404, detail="BRD not found")
 
-    requirements = db.query(Requirement).filter(
-        Requirement.brd_draft_id == brd_id
-    ).all()
+    requirements = db.query(Requirement).filter(Requirement.brd_draft_id == brd_id).all()
 
     return requirements
 
@@ -280,19 +287,21 @@ def update_requirement(
     Allows manual editing of generated requirements.
     """
     # Verify BRD ownership
-    brd = db.query(BRDDraft).filter(
-        BRDDraft.id == brd_id,
-        BRDDraft.user_id == current_user.id
-    ).first()
+    brd = (
+        db.query(BRDDraft)
+        .filter(BRDDraft.id == brd_id, BRDDraft.user_id == current_user.id)
+        .first()
+    )
 
     if not brd:
         raise HTTPException(status_code=404, detail="BRD not found")
 
     # Get requirement
-    requirement = db.query(Requirement).filter(
-        Requirement.id == requirement_id,
-        Requirement.brd_draft_id == brd_id
-    ).first()
+    requirement = (
+        db.query(Requirement)
+        .filter(Requirement.id == requirement_id, Requirement.brd_draft_id == brd_id)
+        .first()
+    )
 
     if not requirement:
         raise HTTPException(status_code=404, detail="Requirement not found")
@@ -319,19 +328,21 @@ def delete_requirement(
     Delete a specific requirement.
     """
     # Verify BRD ownership
-    brd = db.query(BRDDraft).filter(
-        BRDDraft.id == brd_id,
-        BRDDraft.user_id == current_user.id
-    ).first()
+    brd = (
+        db.query(BRDDraft)
+        .filter(BRDDraft.id == brd_id, BRDDraft.user_id == current_user.id)
+        .first()
+    )
 
     if not brd:
         raise HTTPException(status_code=404, detail="BRD not found")
 
     # Get requirement
-    requirement = db.query(Requirement).filter(
-        Requirement.id == requirement_id,
-        Requirement.brd_draft_id == brd_id
-    ).first()
+    requirement = (
+        db.query(Requirement)
+        .filter(Requirement.id == requirement_id, Requirement.brd_draft_id == brd_id)
+        .first()
+    )
 
     if not requirement:
         raise HTTPException(status_code=404, detail="Requirement not found")

@@ -1,7 +1,8 @@
 """Interview Brief model."""
 
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, ForeignKey, Text, JSON, Integer
+
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base
@@ -18,7 +19,9 @@ class InterviewBrief(Base):
     __tablename__ = "interview_briefs"
 
     id = Column(String, primary_key=True)
-    session_id = Column(String, ForeignKey("interview_sessions.id"), nullable=False, unique=True, index=True)
+    session_id = Column(
+        String, ForeignKey("interview_sessions.id"), nullable=False, unique=True, index=True
+    )
     stakeholder_profile_id = Column(String, ForeignKey("stakeholder_profiles.id"), nullable=False)
     project_id = Column(String, ForeignKey("projects.id"), nullable=False, index=True)
 

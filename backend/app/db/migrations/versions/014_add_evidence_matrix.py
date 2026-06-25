@@ -9,9 +9,8 @@ Phase 4: Requirement Evidence Matrix
 - Creates evidence_matrix_entries table (individual candidate requirements)
 """
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = '014_add_evidence_matrix'
 down_revision = '013_add_insight_memos'

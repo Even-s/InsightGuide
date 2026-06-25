@@ -3,11 +3,12 @@ Unit tests for Question Rubric Service.
 Tests rubric compilation from existing elements and LLM generation.
 """
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import MagicMock, Mock, patch
 
-from app.services.question_rubric_service import QuestionRubricService
+import pytest
+
 from app.models.question_card import QuestionCard
+from app.services.question_rubric_service import QuestionRubricService
 
 
 class TestCompileRubricFromElements:
@@ -41,10 +42,12 @@ class TestCompileRubricFromElements:
         assert abs(total_weight - 1.0) < 0.01
 
     def test_multiple_elements_distribute_weight(self):
-        card = self._make_card(elements=[
-            {"text": "步驟名稱"},
-            {"text": "耗時原因"},
-        ])
+        card = self._make_card(
+            elements=[
+                {"text": "步驟名稱"},
+                {"text": "耗時原因"},
+            ]
+        )
         rubric = self.service.compile_rubric_from_elements(card)
 
         assert len(rubric["criteria"]) == 2
@@ -68,17 +71,14 @@ class TestCompileRubricFromElements:
 
     def test_answer_target_from_question_text(self):
         card = self._make_card(
-            elements=[{"text": "步驟"}],
-            question_text="目前最花時間的環節是什麼？"
+            elements=[{"text": "步驟"}], question_text="目前最花時間的環節是什麼？"
         )
         rubric = self.service.compile_rubric_from_elements(card)
 
         assert rubric["answerTarget"] == "目前最花時間的環節是什麼？"
 
     def test_criterion_ids_sequential(self):
-        card = self._make_card(elements=[
-            {"text": "a"}, {"text": "b"}, {"text": "c"}
-        ])
+        card = self._make_card(elements=[{"text": "a"}, {"text": "b"}, {"text": "c"}])
         rubric = self.service.compile_rubric_from_elements(card)
 
         assert rubric["criteria"][0]["id"] == "criterion_0"
@@ -87,9 +87,7 @@ class TestCompileRubricFromElements:
 
     def test_element_with_aliases_still_expands(self):
         """Single element with aliases still expands for granularity."""
-        card = self._make_card(elements=[
-            {"text": "最花時間的步驟", "aliases": ["瓶頸", "耗時"]}
-        ])
+        card = self._make_card(elements=[{"text": "最花時間的步驟", "aliases": ["瓶頸", "耗時"]}])
         rubric = self.service.compile_rubric_from_elements(card)
 
         assert len(rubric["criteria"]) >= 2
@@ -153,7 +151,9 @@ class TestGetOrCompileRubric:
 
         mock_response = Mock()
         mock_response.choices = [Mock()]
-        mock_response.choices[0].message.content = '{"answerTarget": "找出專案挑戰", "criteria": [{"id": "criterion_0", "description": "主要挑戰", "type": "value_slot", "required": true, "critical": true, "weight": 1.0}]}'
+        mock_response.choices[0].message.content = (
+            '{"answerTarget": "找出專案挑戰", "criteria": [{"id": "criterion_0", "description": "主要挑戰", "type": "value_slot", "required": true, "critical": true, "weight": 1.0}]}'
+        )
         mock_openai.client.chat.completions.create.return_value = mock_response
 
         rubric = self.service.get_or_compile_rubric(db, card)

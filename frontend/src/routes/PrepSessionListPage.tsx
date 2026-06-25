@@ -107,8 +107,8 @@ export default function PrepSessionListPage() {
                   })
                   // Filter sessions for this stakeholder (include unlinked ones under same project)
                   sessions = (res.data.sessions || [])
-                    .filter((s: any) => s.stakeholderProfileId === profile.id || !s.stakeholderProfileId)
-                    .map((s: any) => ({
+                    .filter((s: Record<string, unknown>) => s.stakeholderProfileId === profile.id || !s.stakeholderProfileId)
+                    .map((s: Record<string, unknown>) => ({
                       id: s.id,
                       status: s.status,
                       startedAt: s.startedAt,
@@ -139,8 +139,8 @@ export default function PrepSessionListPage() {
         const allRes = await apiClient.get('/api/interview-sessions/', { params: { limit: 50 } })
         const allSessions = allRes.data.sessions || []
         const unlinked = allSessions
-          .filter((s: any) => !s.projectId)
-          .map((s: any) => ({
+          .filter((s: Record<string, unknown>) => !s.projectId)
+          .map((s: Record<string, unknown>) => ({
             id: s.id,
             status: s.status,
             startedAt: s.startedAt,
@@ -187,7 +187,7 @@ export default function PrepSessionListPage() {
       loadData()
     } catch (err) {
       console.error('Failed to delete:', err)
-      alert('刪除失敗：' + (err as any).message)
+      alert('刪除失敗：' + (err instanceof Error ? err.message : 'Unknown error'))
     }
   }
 
@@ -198,7 +198,7 @@ export default function PrepSessionListPage() {
       loadData()
     } catch (err) {
       console.error('Failed to force end session:', err)
-      alert('操作失敗：' + (err as any).message)
+      alert('操作失敗：' + (err instanceof Error ? err.message : 'Unknown error'))
     }
   }
 
@@ -209,7 +209,7 @@ export default function PrepSessionListPage() {
       loadData()
     } catch (err) {
       console.error('Failed to delete project:', err)
-      alert('刪除專案失敗：' + (err as any).message)
+      alert('刪除專案失敗：' + (err instanceof Error ? err.message : 'Unknown error'))
     }
   }
 

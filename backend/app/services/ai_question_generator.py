@@ -1,7 +1,8 @@
 """AI service for generating question card role targeting."""
 
 import logging
-from typing import Dict, Any
+from typing import Any, Dict
+
 from app.services.openai_service import openai_service
 
 logger = logging.getLogger(__name__)

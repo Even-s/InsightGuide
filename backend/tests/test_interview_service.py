@@ -3,18 +3,23 @@ Unit tests for Interview Service
 Tests interview session management, card states, and utterance handling.
 """
 
-import pytest
-from unittest.mock import Mock, MagicMock, patch
 from datetime import datetime, timedelta
+from unittest.mock import MagicMock, Mock, patch
+
+import pytest
 from fastapi import HTTPException
 
-from app.services.interview_service import interview_service, InterviewService
-from app.models.interview_session import InterviewSession, InterviewCardState
-from app.models.utterance import Utterance
 from app.models.document import Document
+from app.models.interview_session import InterviewCardState, InterviewSession
 from app.models.prep_session import PrepSession
 from app.models.question_card import QuestionCard
-from app.schemas.interview import InterviewSessionCreate, InterviewSessionUpdate, InterviewCardStateUpdate
+from app.models.utterance import Utterance
+from app.schemas.interview import (
+    InterviewCardStateUpdate,
+    InterviewSessionCreate,
+    InterviewSessionUpdate,
+)
+from app.services.interview_service import InterviewService, interview_service
 
 
 class TestInterviewService:
@@ -39,7 +44,7 @@ class TestInterviewService:
             user_id="user-123",
             title="Test Document",
             status="analyzed",
-            created_at=datetime.utcnow()
+            created_at=datetime.utcnow(),
         )
 
     @pytest.fixture
@@ -51,7 +56,7 @@ class TestInterviewService:
             user_id="user-123",
             title="Test Prep Session",
             status="ready",
-            created_at=datetime.utcnow()
+            created_at=datetime.utcnow(),
         )
 
     @pytest.fixture
@@ -63,7 +68,7 @@ class TestInterviewService:
             document_id="doc-123",
             user_id="user-123",
             status="idle",
-            created_at=datetime.utcnow()
+            created_at=datetime.utcnow(),
         )
 
     @pytest.fixture
@@ -75,15 +80,15 @@ class TestInterviewService:
                 document_id="doc-123",
                 section_id="section-1",
                 question_text="What are the objectives?",
-                importance="must"
+                importance="must",
             ),
             QuestionCard(
                 id="card-2",
                 document_id="doc-123",
                 section_id="section-1",
                 question_text="Who are the stakeholders?",
-                importance="should"
-            )
+                importance="should",
+            ),
         ]
 
     @pytest.fixture
@@ -95,7 +100,7 @@ class TestInterviewService:
             question_card_id="card-1",
             status="pending",
             created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            updated_at=datetime.utcnow(),
         )
 
     def test_service_initialization(self):
@@ -170,14 +175,9 @@ class TestInterviewService:
         assert sample_interview_session.paused_duration_seconds == pytest.approx(600, abs=2)
         assert sample_interview_session.paused_at is None
 
-    @patch('app.services.interview_service.uuid')
+    @patch("app.services.interview_service.uuid")
     def test_create_session_success(
-        self,
-        mock_uuid,
-        mock_db,
-        sample_document,
-        sample_prep_session,
-        sample_question_cards
+        self, mock_uuid, mock_db, sample_document, sample_prep_session, sample_question_cards
     ):
         """Test successful interview session creation."""
         mock_uuid.uuid4().hex = "abc123"
@@ -185,25 +185,20 @@ class TestInterviewService:
         # Setup mocks
         mock_db.query().filter().first.side_effect = [
             sample_prep_session,  # First call for prep session
-            sample_document,      # Second call for document
-            None                  # Third call for recent session check
+            sample_document,  # Second call for document
+            None,  # Third call for recent session check
         ]
         mock_db.query().filter().with_for_update().first.return_value = sample_prep_session
         mock_db.query().filter().order_by().first.return_value = None  # No recent session
         mock_db.query().filter().all.side_effect = [
             [],  # No active sessions to end
-            sample_question_cards  # Question cards for initialization
+            sample_question_cards,  # Question cards for initialization
         ]
 
-        session_data = InterviewSessionCreate(
-            prepSessionId="prep-123",
-            documentId="doc-123"
-        )
+        session_data = InterviewSessionCreate(prepSessionId="prep-123", documentId="doc-123")
 
         session = interview_service.create_session(
-            db=mock_db,
-            user_id="user-123",
-            session_data=session_data
+            db=mock_db, user_id="user-123", session_data=session_data
         )
 
         # Verify session was added
@@ -214,16 +209,11 @@ class TestInterviewService:
         """Test create session fails when prep session not found."""
         mock_db.query().filter().first.return_value = None
 
-        session_data = InterviewSessionCreate(
-            prepSessionId="nonexistent",
-            documentId="doc-123"
-        )
+        session_data = InterviewSessionCreate(prepSessionId="nonexistent", documentId="doc-123")
 
         with pytest.raises(HTTPException) as exc_info:
             interview_service.create_session(
-                db=mock_db,
-                user_id="user-123",
-                session_data=session_data
+                db=mock_db, user_id="user-123", session_data=session_data
             )
 
         assert exc_info.value.status_code == 404
@@ -233,16 +223,11 @@ class TestInterviewService:
         """Test create session fails for wrong user."""
         mock_db.query().filter().first.return_value = sample_prep_session
 
-        session_data = InterviewSessionCreate(
-            prepSessionId="prep-123",
-            documentId="doc-123"
-        )
+        session_data = InterviewSessionCreate(prepSessionId="prep-123", documentId="doc-123")
 
         with pytest.raises(HTTPException) as exc_info:
             interview_service.create_session(
-                db=mock_db,
-                user_id="different-user",
-                session_data=session_data
+                db=mock_db, user_id="different-user", session_data=session_data
             )
 
         assert exc_info.value.status_code == 403
@@ -253,41 +238,28 @@ class TestInterviewService:
         sample_prep_session.status = "preparing"
         mock_db.query().filter().first.return_value = sample_prep_session
 
-        session_data = InterviewSessionCreate(
-            prepSessionId="prep-123",
-            documentId="doc-123"
-        )
+        session_data = InterviewSessionCreate(prepSessionId="prep-123", documentId="doc-123")
 
         with pytest.raises(HTTPException) as exc_info:
             interview_service.create_session(
-                db=mock_db,
-                user_id="user-123",
-                session_data=session_data
+                db=mock_db, user_id="user-123", session_data=session_data
             )
 
         assert exc_info.value.status_code == 400
         assert "ready" in str(exc_info.value.detail).lower()
 
     def test_create_session_document_not_analyzed(
-        self,
-        mock_db,
-        sample_prep_session,
-        sample_document
+        self, mock_db, sample_prep_session, sample_document
     ):
         """Test create session fails when document not analyzed."""
         sample_document.status = "analyzing"
         mock_db.query().filter().first.side_effect = [sample_prep_session, sample_document]
 
-        session_data = InterviewSessionCreate(
-            prepSessionId="prep-123",
-            documentId="doc-123"
-        )
+        session_data = InterviewSessionCreate(prepSessionId="prep-123", documentId="doc-123")
 
         with pytest.raises(HTTPException) as exc_info:
             interview_service.create_session(
-                db=mock_db,
-                user_id="user-123",
-                session_data=session_data
+                db=mock_db, user_id="user-123", session_data=session_data
             )
 
         assert exc_info.value.status_code == 400
@@ -317,9 +289,7 @@ class TestInterviewService:
         update_data = InterviewSessionUpdate(status="interviewing")
 
         session = interview_service.update_session(
-            db=mock_db,
-            session_id="session-123",
-            update_data=update_data
+            db=mock_db, session_id="session-123", update_data=update_data
         )
 
         assert session.status == "interviewing"
@@ -336,9 +306,7 @@ class TestInterviewService:
         update_data = InterviewSessionUpdate(status="paused")
 
         session = interview_service.update_session(
-            db=mock_db,
-            session_id="session-123",
-            update_data=update_data
+            db=mock_db, session_id="session-123", update_data=update_data
         )
 
         assert session.status == "paused"
@@ -354,9 +322,7 @@ class TestInterviewService:
         update_data = InterviewSessionUpdate(status="ended")
 
         session = interview_service.update_session(
-            db=mock_db,
-            session_id="session-123",
-            update_data=update_data
+            db=mock_db, session_id="session-123", update_data=update_data
         )
 
         assert session.status == "ended"
@@ -374,9 +340,7 @@ class TestInterviewService:
         update_data = InterviewSessionUpdate(status="interviewing")
 
         session = interview_service.update_session(
-            db=mock_db,
-            session_id="session-123",
-            update_data=update_data
+            db=mock_db, session_id="session-123", update_data=update_data
         )
 
         assert session.status == "interviewing"
@@ -392,35 +356,28 @@ class TestInterviewService:
         update_data = InterviewSessionUpdate(currentSectionId="section-2")
 
         session = interview_service.update_session(
-            db=mock_db,
-            session_id="session-123",
-            update_data=update_data
+            db=mock_db, session_id="session-123", update_data=update_data
         )
 
         assert session.current_section_id == "section-2"
 
     def test_mark_missed_must_cards_at_risk(
-        self,
-        mock_db,
-        sample_question_cards,
-        sample_card_state
+        self, mock_db, sample_question_cards, sample_card_state
     ):
         """Test marking must-ask cards as at_risk when leaving section."""
         # First call returns question_cards, second returns card_states
         sample_card_state.status = "pending"
         mock_db.query.return_value.filter.return_value.filter.return_value.all.side_effect = [
             [sample_question_cards[0]],  # QuestionCard query
-            [sample_card_state]           # InterviewCardState query
+            [sample_card_state],  # InterviewCardState query
         ]
         mock_db.query.return_value.filter.return_value.all.side_effect = [
             [sample_question_cards[0]],
-            [sample_card_state]
+            [sample_card_state],
         ]
 
         interview_service._mark_missed_must_cards_at_risk(
-            db=mock_db,
-            session_id="session-123",
-            section_id="section-1"
+            db=mock_db, session_id="session-123", section_id="section-1"
         )
 
         # Card state should be updated
@@ -435,14 +392,11 @@ class TestInterviewService:
             status="sufficient",
             confidence=0.9,
             evidenceTranscript="Complete answer provided",
-            evidence={"judgment": {"score": 0.9}}
+            evidence={"judgment": {"score": 0.9}},
         )
 
         card_state = interview_service.update_card_state(
-            db=mock_db,
-            session_id="session-123",
-            card_state_id="state-123",
-            update_data=update_data
+            db=mock_db, session_id="session-123", card_state_id="state-123", update_data=update_data
         )
 
         assert card_state.status == "sufficient"
@@ -454,17 +408,14 @@ class TestInterviewService:
         """Test update card state fails when not found."""
         mock_db.query().filter().first.side_effect = [sample_interview_session, None]
 
-        update_data = InterviewCardStateUpdate(
-            status="sufficient",
-            confidence=0.9
-        )
+        update_data = InterviewCardStateUpdate(status="sufficient", confidence=0.9)
 
         with pytest.raises(HTTPException) as exc_info:
             interview_service.update_card_state(
                 db=mock_db,
                 session_id="session-123",
                 card_state_id="nonexistent",
-                update_data=update_data
+                update_data=update_data,
             )
 
         assert exc_info.value.status_code == 404
@@ -472,8 +423,15 @@ class TestInterviewService:
     def test_get_all_card_states(self, mock_db, sample_interview_session):
         """Test getting all card states for a session."""
         card_states = [
-            InterviewCardState(id="state-1", session_id="session-123", question_card_id="card-1", status="pending"),
-            InterviewCardState(id="state-2", session_id="session-123", question_card_id="card-2", status="sufficient")
+            InterviewCardState(
+                id="state-1", session_id="session-123", question_card_id="card-1", status="pending"
+            ),
+            InterviewCardState(
+                id="state-2",
+                session_id="session-123",
+                question_card_id="card-2",
+                status="sufficient",
+            ),
         ]
 
         mock_db.query().filter().first.return_value = sample_interview_session
@@ -483,7 +441,7 @@ class TestInterviewService:
 
         assert len(result) == 2
 
-    @patch('app.services.interview_service.uuid')
+    @patch("app.services.interview_service.uuid")
     def test_create_utterance_success(self, mock_uuid, mock_db, sample_interview_session):
         """Test creating an utterance."""
         mock_uuid.uuid4().hex = "utt123"
@@ -496,13 +454,11 @@ class TestInterviewService:
             speaker="interviewee",
             transcript="This is my answer",
             startedAt=datetime.utcnow(),
-            endedAt=datetime.utcnow()
+            endedAt=datetime.utcnow(),
         )
 
         utterance = interview_service.create_utterance(
-            db=mock_db,
-            session_id="session-123",
-            utterance_data=utterance_data
+            db=mock_db, session_id="session-123", utterance_data=utterance_data
         )
 
         mock_db.add.assert_called()
@@ -511,8 +467,12 @@ class TestInterviewService:
     def test_get_utterances_all(self, mock_db, sample_interview_session):
         """Test getting all utterances for a session."""
         utterances = [
-            Utterance(id="utt-1", session_id="session-123", speaker="interviewer", transcript="Question?"),
-            Utterance(id="utt-2", session_id="session-123", speaker="interviewee", transcript="Answer")
+            Utterance(
+                id="utt-1", session_id="session-123", speaker="interviewer", transcript="Question?"
+            ),
+            Utterance(
+                id="utt-2", session_id="session-123", speaker="interviewee", transcript="Answer"
+            ),
         ]
 
         mock_db.query().filter().first.return_value = sample_interview_session
@@ -521,7 +481,6 @@ class TestInterviewService:
         result = interview_service.get_utterances(mock_db, "session-123")
 
         assert len(result) == 2
-
 
     def test_list_sessions(self, mock_db):
         """Test listing interview sessions for a user."""
@@ -534,24 +493,19 @@ class TestInterviewService:
                     user_id="user-123",
                     status="ended",
                     started_at=datetime.utcnow(),
-                    created_at=datetime.utcnow()
+                    created_at=datetime.utcnow(),
                 ),
-                "Document Title 1"
+                "Document Title 1",
             )
         ]
 
         mock_db.query().join().filter().count.return_value = 1
         mock_db.query().join().filter().order_by().limit().offset().all.return_value = sessions
 
-        with patch('app.services.interview_service.billing_service') as mock_billing:
-            mock_billing.summarize_sessions.return_value = {
-                "session-1": {"totalCostUsd": 0.5}
-            }
+        with patch("app.services.interview_service.billing_service") as mock_billing:
+            mock_billing.summarize_sessions.return_value = {"session-1": {"totalCostUsd": 0.5}}
             result = interview_service.list_sessions(
-                db=mock_db,
-                user_id="user-123",
-                limit=50,
-                offset=0
+                db=mock_db, user_id="user-123", limit=50, offset=0
             )
 
         assert result.total == 1

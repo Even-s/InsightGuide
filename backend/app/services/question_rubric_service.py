@@ -2,12 +2,13 @@
 
 import json
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
+
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.models.question_card import QuestionCard
 from app.services.openai_service import openai_service
-from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +35,7 @@ class QuestionRubricService:
             return {
                 "rubricVersion": coverage_rule["rubricVersion"],
                 "answerTarget": coverage_rule.get("answerTarget", ""),
-                "criteria": coverage_rule["criteria"]
+                "criteria": coverage_rule["criteria"],
             }
 
         # Check if card has mustMentionElements to convert
@@ -54,54 +55,120 @@ class QuestionRubricService:
         return rubric
 
     # Question-type patterns for local criterion expansion
-    _SITUATION_PATTERNS = ('情境', '場景', '情況', '案例', '例子', 'scenario')
-    _PROCESS_PATTERNS = ('流程', '步驟', '做法', '方式', '怎麼做', 'process')
-    _REASON_PATTERNS = ('為什麼', '原因', '動機', '理由', 'why')
-    _FREQUENCY_PATTERNS = ('多常', '頻率', '多久', '幾次', '多少次')
+    _SITUATION_PATTERNS = ("情境", "場景", "情況", "案例", "例子", "scenario")
+    _PROCESS_PATTERNS = ("流程", "步驟", "做法", "方式", "怎麼做", "process")
+    _REASON_PATTERNS = ("為什麼", "原因", "動機", "理由", "why")
+    _FREQUENCY_PATTERNS = ("多常", "頻率", "多久", "幾次", "多少次")
 
     def _expand_single_element(self, element_text: str, card: QuestionCard) -> List[Dict[str, Any]]:
         """Expand a single broad element into 2-3 concrete criteria based on question type."""
-        question_text = (card.question_text or '').lower()
-        focus_text = (card.focus_text or '').lower()
+        question_text = (card.question_text or "").lower()
+        focus_text = (card.focus_text or "").lower()
         combined = question_text + focus_text + element_text.lower()
 
         # Detect question pattern and generate appropriate sub-criteria
         if any(p in combined for p in self._SITUATION_PATTERNS):
             return [
-                {"id": "criterion_0", "description": f"提到至少一個具體的{element_text}",
-                 "type": "value_slot", "required": True, "critical": True, "weight": 0.5},
-                {"id": "criterion_1", "description": "說明為什麼需要幫忙或問題發生的原因",
-                 "type": "value_slot", "required": True, "critical": False, "weight": 0.3},
-                {"id": "criterion_2", "description": "提及頻率、影響程度或具體例子細節",
-                 "type": "value_slot", "required": False, "critical": False, "weight": 0.2},
+                {
+                    "id": "criterion_0",
+                    "description": f"提到至少一個具體的{element_text}",
+                    "type": "value_slot",
+                    "required": True,
+                    "critical": True,
+                    "weight": 0.5,
+                },
+                {
+                    "id": "criterion_1",
+                    "description": "說明為什麼需要幫忙或問題發生的原因",
+                    "type": "value_slot",
+                    "required": True,
+                    "critical": False,
+                    "weight": 0.3,
+                },
+                {
+                    "id": "criterion_2",
+                    "description": "提及頻率、影響程度或具體例子細節",
+                    "type": "value_slot",
+                    "required": False,
+                    "critical": False,
+                    "weight": 0.2,
+                },
             ]
 
         if any(p in combined for p in self._PROCESS_PATTERNS):
             return [
-                {"id": "criterion_0", "description": f"描述{element_text}的具體步驟或做法",
-                 "type": "value_slot", "required": True, "critical": True, "weight": 0.5},
-                {"id": "criterion_1", "description": "說明誰參與或負責哪個環節",
-                 "type": "value_slot", "required": True, "critical": False, "weight": 0.3},
-                {"id": "criterion_2", "description": "提及遇到的困難或目前的限制",
-                 "type": "value_slot", "required": False, "critical": False, "weight": 0.2},
+                {
+                    "id": "criterion_0",
+                    "description": f"描述{element_text}的具體步驟或做法",
+                    "type": "value_slot",
+                    "required": True,
+                    "critical": True,
+                    "weight": 0.5,
+                },
+                {
+                    "id": "criterion_1",
+                    "description": "說明誰參與或負責哪個環節",
+                    "type": "value_slot",
+                    "required": True,
+                    "critical": False,
+                    "weight": 0.3,
+                },
+                {
+                    "id": "criterion_2",
+                    "description": "提及遇到的困難或目前的限制",
+                    "type": "value_slot",
+                    "required": False,
+                    "critical": False,
+                    "weight": 0.2,
+                },
             ]
 
         if any(p in combined for p in self._REASON_PATTERNS):
             return [
-                {"id": "criterion_0", "description": f"說明{element_text}的具體原因",
-                 "type": "value_slot", "required": True, "critical": True, "weight": 0.5},
-                {"id": "criterion_1", "description": "提供支持原因的具體事實或例子",
-                 "type": "value_slot", "required": True, "critical": False, "weight": 0.3},
-                {"id": "criterion_2", "description": "描述影響或後果",
-                 "type": "value_slot", "required": False, "critical": False, "weight": 0.2},
+                {
+                    "id": "criterion_0",
+                    "description": f"說明{element_text}的具體原因",
+                    "type": "value_slot",
+                    "required": True,
+                    "critical": True,
+                    "weight": 0.5,
+                },
+                {
+                    "id": "criterion_1",
+                    "description": "提供支持原因的具體事實或例子",
+                    "type": "value_slot",
+                    "required": True,
+                    "critical": False,
+                    "weight": 0.3,
+                },
+                {
+                    "id": "criterion_2",
+                    "description": "描述影響或後果",
+                    "type": "value_slot",
+                    "required": False,
+                    "critical": False,
+                    "weight": 0.2,
+                },
             ]
 
         # Default expansion: core fact + supporting detail
         return [
-            {"id": "criterion_0", "description": f"提到{element_text}的具體內容或例子",
-             "type": "value_slot", "required": True, "critical": True, "weight": 0.6},
-            {"id": "criterion_1", "description": "補充說明原因、影響或相關細節",
-             "type": "value_slot", "required": True, "critical": False, "weight": 0.4},
+            {
+                "id": "criterion_0",
+                "description": f"提到{element_text}的具體內容或例子",
+                "type": "value_slot",
+                "required": True,
+                "critical": True,
+                "weight": 0.6,
+            },
+            {
+                "id": "criterion_1",
+                "description": "補充說明原因、影響或相關細節",
+                "type": "value_slot",
+                "required": True,
+                "critical": False,
+                "weight": 0.4,
+            },
         ]
 
     def compile_rubric_from_elements(self, card: QuestionCard) -> Dict[str, Any]:
@@ -117,9 +184,7 @@ class QuestionRubricService:
             or []
         )
         semantic_anchors = (
-            coverage_rule.get("semanticAnchors")
-            or coverage_rule.get("semantic_anchors")
-            or []
+            coverage_rule.get("semanticAnchors") or coverage_rule.get("semantic_anchors") or []
         )
 
         criteria = []
@@ -143,16 +208,18 @@ class QuestionRubricService:
                 # Multiple elements: use them directly as criteria
                 for idx, (text, element) in enumerate(valid_elements):
                     required = element.get("required", True) if isinstance(element, dict) else True
-                    is_critical = (idx == 0)
+                    is_critical = idx == 0
                     weight = round(1.0 / len(valid_elements), 2)
-                    criteria.append({
-                        "id": f"criterion_{idx}",
-                        "description": text,
-                        "type": "value_slot",
-                        "required": required,
-                        "critical": is_critical,
-                        "weight": weight,
-                    })
+                    criteria.append(
+                        {
+                            "id": f"criterion_{idx}",
+                            "description": text,
+                            "type": "value_slot",
+                            "required": required,
+                            "critical": is_critical,
+                            "weight": weight,
+                        }
+                    )
 
         elif semantic_anchors:
             valid_anchors = [a for a in semantic_anchors if a]
@@ -161,16 +228,18 @@ class QuestionRubricService:
                 criteria = self._expand_single_element(valid_anchors[0], card)
             else:
                 for idx, anchor in enumerate(valid_anchors):
-                    is_critical = (idx == 0)
+                    is_critical = idx == 0
                     weight = round(1.0 / len(valid_anchors), 2)
-                    criteria.append({
-                        "id": f"criterion_{idx}",
-                        "description": anchor,
-                        "type": "value_slot",
-                        "required": True,
-                        "critical": is_critical,
-                        "weight": weight,
-                    })
+                    criteria.append(
+                        {
+                            "id": f"criterion_{idx}",
+                            "description": anchor,
+                            "type": "value_slot",
+                            "required": True,
+                            "critical": is_critical,
+                            "weight": weight,
+                        }
+                    )
 
         answer_target = self._derive_answer_target(card.question_text)
 
@@ -252,10 +321,10 @@ class QuestionRubricService:
                 model=settings.SEMANTIC_UNDERSTANDING_MODEL,
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
+                    {"role": "user", "content": user_prompt},
                 ],
                 temperature=0.3,
-                response_format={"type": "json_object"}
+                response_format={"type": "json_object"},
             )
 
             content = response.choices[0].message.content
@@ -263,7 +332,9 @@ class QuestionRubricService:
                 raise ValueError("Empty response from OpenAI")
 
             rubric = json.loads(content)
-            logger.info(f"Generated rubric with {len(rubric.get('criteria', []))} criteria for card {card.id}")
+            logger.info(
+                f"Generated rubric with {len(rubric.get('criteria', []))} criteria for card {card.id}"
+            )
 
             # Validate and normalize the response
             if not rubric.get("criteria"):
@@ -299,18 +370,18 @@ class QuestionRubricService:
 
         # Common question patterns in Chinese
         patterns = [
-            r'請.*?說明(.{5,30})',
-            r'請.*?描述(.{5,30})',
-            r'請.*?確認(.{5,30})',
-            r'如何(.{5,30})',
-            r'什麼(.{5,30})',
-            r'哪些(.{5,30})',
+            r"請.*?說明(.{5,30})",
+            r"請.*?描述(.{5,30})",
+            r"請.*?確認(.{5,30})",
+            r"如何(.{5,30})",
+            r"什麼(.{5,30})",
+            r"哪些(.{5,30})",
         ]
 
         for pattern in patterns:
             match = re.search(pattern, question_text)
             if match:
-                return match.group(1).strip('，。、；：')
+                return match.group(1).strip("，。、；：")
 
         # Fallback: return first 40 characters
         return question_text[:40] + "..." if len(question_text) > 40 else question_text
@@ -331,7 +402,7 @@ class QuestionRubricService:
                     "type": "value_slot",
                     "required": True,
                     "critical": True,
-                    "weight": 0.6
+                    "weight": 0.6,
                 },
                 {
                     "id": "criterion_1",
@@ -339,9 +410,9 @@ class QuestionRubricService:
                     "type": "value_slot",
                     "required": True,
                     "critical": False,
-                    "weight": 0.4
+                    "weight": 0.4,
                 },
-            ]
+            ],
         }
 
     def _save_rubric_to_card(self, db: Session, card: QuestionCard, rubric: Dict[str, Any]) -> None:
@@ -375,7 +446,6 @@ class QuestionRubricService:
             db.rollback()
             raise
 
-
     def get_rubric_if_cached(self, card: QuestionCard) -> Optional[Dict[str, Any]]:
         """Return rubric without LLM. Uses compiled cache, or compiles locally from elements."""
         coverage_rule = card.coverage_rule or {}
@@ -394,9 +464,7 @@ class QuestionRubricService:
             or []
         )
         semantic_anchors = (
-            coverage_rule.get("semanticAnchors")
-            or coverage_rule.get("semantic_anchors")
-            or []
+            coverage_rule.get("semanticAnchors") or coverage_rule.get("semantic_anchors") or []
         )
         if must_mention or semantic_anchors:
             return self.compile_rubric_from_elements(card)

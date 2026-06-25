@@ -1,7 +1,8 @@
 """Section model."""
 
 from datetime import datetime
-from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Text
+
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base
@@ -22,5 +23,7 @@ class Section(Base):
 
     # Relationships
     document = relationship("Document", back_populates="sections")
-    question_cards = relationship("QuestionCard", back_populates="section", cascade="all, delete-orphan")
+    question_cards = relationship(
+        "QuestionCard", back_populates="section", cascade="all, delete-orphan"
+    )
     utterances = relationship("Utterance", back_populates="section")

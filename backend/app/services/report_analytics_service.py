@@ -2,14 +2,15 @@
 
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
-from sqlalchemy.orm import Session
-from sqlalchemy import func
+from typing import Any, Dict, List, Optional
 
-from app.models.interview_session import InterviewSession, InterviewCardState
-from app.models.utterance import Utterance
+from sqlalchemy import func
+from sqlalchemy.orm import Session
+
+from app.models.interview_session import InterviewCardState, InterviewSession
 from app.models.question_card import QuestionCard
 from app.models.section import Section
+from app.models.utterance import Utterance
 from app.services.interview_service import interview_service
 
 logger = logging.getLogger(__name__)
@@ -18,9 +19,7 @@ logger = logging.getLogger(__name__)
 class ReportAnalyticsService:
     """Service for generating comprehensive session analytics."""
 
-    def generate_comprehensive_report(
-        self, db: Session, session_id: str
-    ) -> Dict[str, Any]:
+    def generate_comprehensive_report(self, db: Session, session_id: str) -> Dict[str, Any]:
         """
         Generate comprehensive analytics report for an interview session.
 
@@ -34,9 +33,7 @@ class ReportAnalyticsService:
         logger.info(f"Generating comprehensive report for session {session_id}")
 
         # Load session data
-        session = db.query(InterviewSession).filter(
-            InterviewSession.id == session_id
-        ).first()
+        session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
 
         if not session:
             raise ValueError(f"Session {session_id} not found")
@@ -89,9 +86,9 @@ class ReportAnalyticsService:
         logger.debug(f"Calculating coverage stats for session {session_id}")
 
         # Get all card states
-        card_states = db.query(InterviewCardState).filter(
-            InterviewCardState.session_id == session_id
-        ).all()
+        card_states = (
+            db.query(InterviewCardState).filter(InterviewCardState.session_id == session_id).all()
+        )
 
         # Count by status
         status_counts = {
@@ -121,14 +118,8 @@ class ReportAnalyticsService:
             elif card.importance == "should":
                 should_cards.append(state)
 
-        must_covered = sum(
-            1 for s in must_cards
-            if self._is_acceptably_covered(s.status)
-        )
-        should_covered = sum(
-            1 for s in should_cards
-            if self._is_acceptably_covered(s.status)
-        )
+        must_covered = sum(1 for s in must_cards if self._is_acceptably_covered(s.status))
+        should_covered = sum(1 for s in should_cards if self._is_acceptably_covered(s.status))
 
         stats = {
             "total_cards": total_cards,
@@ -137,13 +128,19 @@ class ReportAnalyticsService:
             "at_risk": status_counts["at_risk"],
             "skipped": status_counts["skipped"],
             "pending": status_counts["pending"],
-            "coverage_percentage": round((covered_cards / total_cards * 100) if total_cards > 0 else 0, 2),
+            "coverage_percentage": round(
+                (covered_cards / total_cards * 100) if total_cards > 0 else 0, 2
+            ),
             "must_cards": len(must_cards),
             "must_covered": must_covered,
-            "must_coverage_percentage": round((must_covered / len(must_cards) * 100) if len(must_cards) > 0 else 0, 2),
+            "must_coverage_percentage": round(
+                (must_covered / len(must_cards) * 100) if len(must_cards) > 0 else 0, 2
+            ),
             "should_cards": len(should_cards),
             "should_covered": should_covered,
-            "should_coverage_percentage": round((should_covered / len(should_cards) * 100) if len(should_cards) > 0 else 0, 2),
+            "should_coverage_percentage": round(
+                (should_covered / len(should_cards) * 100) if len(should_cards) > 0 else 0, 2
+            ),
         }
 
         logger.debug(f"Coverage stats: {stats}")
@@ -160,54 +157,68 @@ class ReportAnalyticsService:
         timeline = []
 
         # Get session start/end
-        session = db.query(InterviewSession).filter(
-            InterviewSession.id == session_id
-        ).first()
+        session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
 
         if session.started_at:
-            timeline.append({
-                "timestamp": session.started_at.isoformat() + "Z",
-                "type": "session_start",
-                "description": "Presentation started",
-            })
+            timeline.append(
+                {
+                    "timestamp": session.started_at.isoformat() + "Z",
+                    "type": "session_start",
+                    "description": "Presentation started",
+                }
+            )
 
         # Get all utterances
-        utterances = db.query(Utterance).filter(
-            Utterance.session_id == session_id
-        ).order_by(Utterance.created_at).all()
+        utterances = (
+            db.query(Utterance)
+            .filter(Utterance.session_id == session_id)
+            .order_by(Utterance.created_at)
+            .all()
+        )
 
         for utterance in utterances:
-            timeline.append({
-                "timestamp": utterance.created_at.isoformat() + "Z",
-                "type": "utterance",
-                "description": f"Spoke: {utterance.transcript[:50]}...",
-                "transcript": utterance.transcript,
-                "section_id": utterance.section_id,
-            })
+            timeline.append(
+                {
+                    "timestamp": utterance.created_at.isoformat() + "Z",
+                    "type": "utterance",
+                    "description": f"Spoke: {utterance.transcript[:50]}...",
+                    "transcript": utterance.transcript,
+                    "section_id": utterance.section_id,
+                }
+            )
 
         # Get card state changes
-        card_states = db.query(InterviewCardState).filter(
-            InterviewCardState.session_id == session_id,
-            InterviewCardState.answered_at.isnot(None)
-        ).order_by(InterviewCardState.answered_at).all()
+        card_states = (
+            db.query(InterviewCardState)
+            .filter(
+                InterviewCardState.session_id == session_id,
+                InterviewCardState.answered_at.isnot(None),
+            )
+            .order_by(InterviewCardState.answered_at)
+            .all()
+        )
 
         for state in card_states:
-            timeline.append({
-                "timestamp": state.answered_at.isoformat() + "Z",
-                "type": "card_covered",
-                "description": f"Topic covered: {state.question_card.question_text}",
-                "card_id": state.question_card_id,
-                "card_title": state.question_card.question_text,
-                "status": state.status,
-                "confidence": float(state.confidence) if state.confidence else None,
-            })
+            timeline.append(
+                {
+                    "timestamp": state.answered_at.isoformat() + "Z",
+                    "type": "card_covered",
+                    "description": f"Topic covered: {state.question_card.question_text}",
+                    "card_id": state.question_card_id,
+                    "card_title": state.question_card.question_text,
+                    "status": state.status,
+                    "confidence": float(state.confidence) if state.confidence else None,
+                }
+            )
 
         if session.ended_at:
-            timeline.append({
-                "timestamp": session.ended_at.isoformat() + "Z",
-                "type": "session_end",
-                "description": "Presentation ended",
-            })
+            timeline.append(
+                {
+                    "timestamp": session.ended_at.isoformat() + "Z",
+                    "type": "session_end",
+                    "description": "Presentation ended",
+                }
+            )
 
         # Sort by timestamp
         timeline.sort(key=lambda x: x["timestamp"])
@@ -215,9 +226,7 @@ class ReportAnalyticsService:
         logger.debug(f"Generated {len(timeline)} timeline events")
         return timeline
 
-    def analyze_topic_performance(
-        self, db: Session, session_id: str
-    ) -> List[Dict[str, Any]]:
+    def analyze_topic_performance(self, db: Session, session_id: str) -> List[Dict[str, Any]]:
         """
         Analyze performance for each topic card.
 
@@ -225,9 +234,9 @@ class ReportAnalyticsService:
         """
         logger.debug(f"Analyzing topic performance for session {session_id}")
 
-        card_states = db.query(InterviewCardState).filter(
-            InterviewCardState.session_id == session_id
-        ).all()
+        card_states = (
+            db.query(InterviewCardState).filter(InterviewCardState.session_id == session_id).all()
+        )
 
         topic_analysis = []
 
@@ -277,14 +286,10 @@ class ReportAnalyticsService:
         duration = self._calculate_duration(session)
 
         # Get utterances
-        utterances = db.query(Utterance).filter(
-            Utterance.session_id == session.id
-        ).all()
+        utterances = db.query(Utterance).filter(Utterance.session_id == session.id).all()
 
         total_characters = sum(self._count_chinese_characters(u.transcript) for u in utterances)
-        avg_utterance_characters = (
-            total_characters / len(utterances) if len(utterances) > 0 else 0
-        )
+        avg_utterance_characters = total_characters / len(utterances) if len(utterances) > 0 else 0
 
         # Calculate Chinese characters per minute.
         characters_per_minute = 0
@@ -295,10 +300,12 @@ class ReportAnalyticsService:
             )
 
         # Count unique sections visited. The report keeps the legacy field name.
-        slides_visited = db.query(func.count(func.distinct(Utterance.section_id))).filter(
-            Utterance.session_id == session.id,
-            Utterance.section_id.isnot(None)
-        ).scalar() or 0
+        slides_visited = (
+            db.query(func.count(func.distinct(Utterance.section_id)))
+            .filter(Utterance.session_id == session.id, Utterance.section_id.isnot(None))
+            .scalar()
+            or 0
+        )
 
         metrics = {
             "total_duration_seconds": duration or 0,
@@ -316,9 +323,7 @@ class ReportAnalyticsService:
         logger.debug(f"Performance metrics: {metrics}")
         return metrics
 
-    def calculate_time_per_slide(
-        self, db: Session, session_id: str
-    ) -> List[Dict[str, Any]]:
+    def calculate_time_per_slide(self, db: Session, session_id: str) -> List[Dict[str, Any]]:
         """
         Calculate time spent on each slide.
 
@@ -326,10 +331,12 @@ class ReportAnalyticsService:
         """
         logger.debug(f"Calculating slide timing for session {session_id}")
 
-        utterances = db.query(Utterance).filter(
-            Utterance.session_id == session_id,
-            Utterance.section_id.isnot(None)
-        ).order_by(Utterance.created_at).all()
+        utterances = (
+            db.query(Utterance)
+            .filter(Utterance.session_id == session_id, Utterance.section_id.isnot(None))
+            .order_by(Utterance.created_at)
+            .all()
+        )
 
         section_times = {}
 
@@ -348,21 +355,21 @@ class ReportAnalyticsService:
         section_timing = []
 
         for section_id, times in section_times.items():
-            duration = (
-                times["last_utterance"] - times["first_utterance"]
-            ).total_seconds()
+            duration = (times["last_utterance"] - times["first_utterance"]).total_seconds()
 
             section = db.query(Section).filter(Section.id == section_id).first()
 
-            section_timing.append({
-                "section_id": section_id,
-                "section_page": section.page_number if section else None,
-                "section_title": section.title if section else None,
-                "duration_seconds": round(duration, 2),
-                "utterance_count": times["utterance_count"],
-                "first_utterance": times["first_utterance"].isoformat() + "Z",
-                "last_utterance": times["last_utterance"].isoformat() + "Z",
-            })
+            section_timing.append(
+                {
+                    "section_id": section_id,
+                    "section_page": section.page_number if section else None,
+                    "section_title": section.title if section else None,
+                    "duration_seconds": round(duration, 2),
+                    "utterance_count": times["utterance_count"],
+                    "first_utterance": times["first_utterance"].isoformat() + "Z",
+                    "last_utterance": times["last_utterance"].isoformat() + "Z",
+                }
+            )
 
         section_timing.sort(key=lambda x: x["section_page"] or 0)
 
@@ -391,86 +398,116 @@ class ReportAnalyticsService:
         # Analyze coverage
         coverage_pct = coverage_stats["coverage_percentage"]
         if coverage_pct >= 90:
-            insights["strengths"].append({
-                "category": "coverage",
-                "description": f"Excellent coverage at {coverage_pct}% - all key topics addressed",
-            })
+            insights["strengths"].append(
+                {
+                    "category": "coverage",
+                    "description": f"Excellent coverage at {coverage_pct}% - all key topics addressed",
+                }
+            )
         elif coverage_pct >= 70:
-            insights["strengths"].append({
-                "category": "coverage",
-                "description": f"Good coverage at {coverage_pct}% - most topics covered",
-            })
+            insights["strengths"].append(
+                {
+                    "category": "coverage",
+                    "description": f"Good coverage at {coverage_pct}% - most topics covered",
+                }
+            )
         else:
-            insights["areas_for_improvement"].append({
-                "category": "coverage",
-                "description": f"Coverage at {coverage_pct}% - several topics not addressed",
-            })
-            insights["recommendations"].append({
-                "category": "coverage",
-                "priority": "high",
-                "recommendation": "Review uncovered topics and ensure all 'must' items are included in next interview",
-            })
+            insights["areas_for_improvement"].append(
+                {
+                    "category": "coverage",
+                    "description": f"Coverage at {coverage_pct}% - several topics not addressed",
+                }
+            )
+            insights["recommendations"].append(
+                {
+                    "category": "coverage",
+                    "priority": "high",
+                    "recommendation": "Review uncovered topics and ensure all 'must' items are included in next interview",
+                }
+            )
 
         # Analyze must-have topics
         must_coverage = coverage_stats["must_coverage_percentage"]
         if must_coverage < 100:
-            insights["areas_for_improvement"].append({
-                "category": "critical_topics",
-                "description": f"Only {must_coverage}% of critical 'must' topics were covered",
-            })
-            insights["recommendations"].append({
-                "category": "critical_topics",
-                "priority": "high",
-                "recommendation": "Focus on covering all 'must' topics - they are essential to your interview",
-            })
+            insights["areas_for_improvement"].append(
+                {
+                    "category": "critical_topics",
+                    "description": f"Only {must_coverage}% of critical 'must' topics were covered",
+                }
+            )
+            insights["recommendations"].append(
+                {
+                    "category": "critical_topics",
+                    "priority": "high",
+                    "recommendation": "Focus on covering all 'must' topics - they are essential to your interview",
+                }
+            )
         else:
-            insights["strengths"].append({
-                "category": "critical_topics",
-                "description": "All critical 'must' topics were successfully covered",
-            })
+            insights["strengths"].append(
+                {
+                    "category": "critical_topics",
+                    "description": "All critical 'must' topics were successfully covered",
+                }
+            )
 
         # Analyze speaking pace by Chinese characters per minute.
         cpm = performance_metrics["characters_per_minute"]
         if 220 <= cpm <= 320:
-            insights["strengths"].append({
-                "category": "pacing",
-                "description": f"Good speaking pace at {cpm} Chinese chars/min - clear and understandable",
-            })
+            insights["strengths"].append(
+                {
+                    "category": "pacing",
+                    "description": f"Good speaking pace at {cpm} Chinese chars/min - clear and understandable",
+                }
+            )
         elif cpm > 320:
-            insights["areas_for_improvement"].append({
-                "category": "pacing",
-                "description": f"Speaking pace at {cpm} Chinese chars/min is fast - audience may struggle to follow",
-            })
-            insights["recommendations"].append({
-                "category": "pacing",
-                "priority": "medium",
-                "recommendation": "Try slowing down to 220-320 Chinese chars/min for better audience comprehension",
-            })
+            insights["areas_for_improvement"].append(
+                {
+                    "category": "pacing",
+                    "description": f"Speaking pace at {cpm} Chinese chars/min is fast - audience may struggle to follow",
+                }
+            )
+            insights["recommendations"].append(
+                {
+                    "category": "pacing",
+                    "priority": "medium",
+                    "recommendation": "Try slowing down to 220-320 Chinese chars/min for better audience comprehension",
+                }
+            )
         elif cpm < 220 and cpm > 0:
-            insights["areas_for_improvement"].append({
-                "category": "pacing",
-                "description": f"Speaking pace at {cpm} Chinese chars/min is slow - may lose audience engagement",
-            })
-            insights["recommendations"].append({
-                "category": "pacing",
-                "priority": "low",
-                "recommendation": "Consider picking up the pace slightly to maintain audience interest",
-            })
+            insights["areas_for_improvement"].append(
+                {
+                    "category": "pacing",
+                    "description": f"Speaking pace at {cpm} Chinese chars/min is slow - may lose audience engagement",
+                }
+            )
+            insights["recommendations"].append(
+                {
+                    "category": "pacing",
+                    "priority": "low",
+                    "recommendation": "Consider picking up the pace slightly to maintain audience interest",
+                }
+            )
 
         # Analyze at-risk topics
         at_risk_count = coverage_stats["at_risk"]
         if at_risk_count > 0:
-            insights["areas_for_improvement"].append({
-                "category": "timing",
-                "description": f"{at_risk_count} important topics were flagged as 'at risk' due to timing",
-            })
-            insights["recommendations"].append({
-                "category": "timing",
-                "priority": "medium",
-                "recommendation": "Practice time management to ensure all important topics get adequate coverage",
-            })
+            insights["areas_for_improvement"].append(
+                {
+                    "category": "timing",
+                    "description": f"{at_risk_count} important topics were flagged as 'at risk' due to timing",
+                }
+            )
+            insights["recommendations"].append(
+                {
+                    "category": "timing",
+                    "priority": "medium",
+                    "recommendation": "Practice time management to ensure all important topics get adequate coverage",
+                }
+            )
 
-        logger.debug(f"Generated {len(insights['strengths'])} strengths and {len(insights['recommendations'])} recommendations")
+        logger.debug(
+            f"Generated {len(insights['strengths'])} strengths and {len(insights['recommendations'])} recommendations"
+        )
         return insights
 
     def _count_chinese_characters(self, text: str | None) -> int:

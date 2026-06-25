@@ -1,22 +1,23 @@
 """Question card management routes."""
 
-from fastapi import APIRouter, Depends, HTTPException, status, Body
-from sqlalchemy.orm import Session
-from typing import List
 import logging
+from typing import List
+
+from fastapi import APIRouter, Body, Depends, HTTPException, status
+from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.services.question_card_service import question_card_service
 from app.schemas.question_card import (
-    QuestionCardSchema,
+    CardUI,
+    CoverageRule,
     QuestionCardCreate,
-    QuestionCardUpdate,
     QuestionCardFollowupCleanupRequest,
     QuestionCardFollowupCleanupResponse,
-    CoverageRule,
+    QuestionCardSchema,
+    QuestionCardUpdate,
     SufficiencyEvidence,
-    CardUI
 )
+from app.services.question_card_service import question_card_service
 from app.services.semantic_judge_service import semantic_judge_service
 
 logger = logging.getLogger(__name__)
@@ -34,7 +35,7 @@ def convert_card_to_schema(card) -> QuestionCardSchema:
 
     # Parse evidence if exists
     evidence = None
-    if hasattr(card, 'evidence') and card.evidence:
+    if hasattr(card, "evidence") and card.evidence:
         evidence = SufficiencyEvidence(**card.evidence)
 
     # Parse UI settings
@@ -67,21 +68,19 @@ def convert_card_to_schema(card) -> QuestionCardSchema:
         questionIntent=card.question_intent,
         createdBy=card.created_by,
         createdAt=card.created_at,
-        updatedAt=card.updated_at
+        updatedAt=card.updated_at,
     )
 
 
 @router.post("/", status_code=status.HTTP_201_CREATED, response_model=QuestionCardSchema)
-async def create_question_card(
-    question_card: QuestionCardCreate,
-    db: Session = Depends(get_db)
-):
+async def create_question_card(question_card: QuestionCardCreate, db: Session = Depends(get_db)):
     """Create a new question card (user-created)."""
     section_id = question_card.resolved_section_id
     logger.info(f"Creating question card for section {section_id}")
 
     # For user-created cards, we need to get the document_id from the section
     from app.services.section_service import section_service
+
     section = section_service.get_section(db, section_id)
 
     card = question_card_service.create_question_card(
@@ -89,7 +88,7 @@ async def create_question_card(
         document_id=section.document_id,
         section_id=section_id,
         section_number=section.section_number,
-        card_data=question_card
+        card_data=question_card,
     )
 
     return convert_card_to_schema(card)
@@ -114,9 +113,7 @@ async def get_question_card(question_card_id: str, db: Session = Depends(get_db)
 
 @router.patch("/{question_card_id}", response_model=QuestionCardSchema)
 async def update_question_card(
-    question_card_id: str,
-    update_data: QuestionCardUpdate,
-    db: Session = Depends(get_db)
+    question_card_id: str, update_data: QuestionCardUpdate, db: Session = Depends(get_db)
 ):
     """Update question card. This is used in Editor Mode for customization."""
     logger.info(f"Updating question card {question_card_id}")
@@ -125,10 +122,7 @@ async def update_question_card(
 
 
 @router.post("/{question_card_id}/followup/regenerate", response_model=QuestionCardSchema)
-async def regenerate_question_card_followup(
-    question_card_id: str,
-    db: Session = Depends(get_db)
-):
+async def regenerate_question_card_followup(question_card_id: str, db: Session = Depends(get_db)):
     """Regenerate the suggested followup for a single question card."""
     logger.info(f"Regenerating suggested followup for question card {question_card_id}")
     card = question_card_service.regenerate_question_card_followup(db, question_card_id)
@@ -155,7 +149,7 @@ async def get_document_question_cards(document_id: str, db: Session = Depends(ge
 async def reorder_question_cards(
     section_id: str,
     card_order: List[str] = Body(..., description="Ordered list of question card IDs"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """Reorder question cards for a section."""
     logger.info(f"Reordering {len(card_order)} question cards for section {section_id}")
@@ -194,10 +188,14 @@ async def generate_all_role_targeting(document_id: str, db: Session = Depends(ge
     from app.models.question_card import QuestionCard
     from app.services.ai_question_generator import ai_question_generator
 
-    cards = db.query(QuestionCard).filter(
-        QuestionCard.document_id == document_id,
-        QuestionCard.target_roles == None,
-    ).all()
+    cards = (
+        db.query(QuestionCard)
+        .filter(
+            QuestionCard.document_id == document_id,
+            QuestionCard.target_roles == None,
+        )
+        .all()
+    )
 
     results = []
     for card in cards:

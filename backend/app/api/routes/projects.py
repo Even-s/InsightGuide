@@ -1,29 +1,30 @@
 """Project, Stakeholder Plan, and Stakeholder Profile routes."""
 
-import logging
 import json
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
-from sqlalchemy.orm import Session
-from typing import Optional, List
+import logging
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.services.project_service import project_service
-from app.services.stakeholder_plan_service import stakeholder_plan_service
 from app.schemas.project import (
     ProjectCreate,
-    ProjectUpdate,
-    ProjectSchema,
-    ProjectListResponse,
     ProjectDashboardResponse,
-    StakeholderSlotCreate,
-    StakeholderSlotUpdate,
-    StakeholderSlotSchema,
-    StakeholderProfileCreate,
-    StakeholderProfileUpdate,
-    StakeholderProfileSchema,
+    ProjectListResponse,
+    ProjectSchema,
+    ProjectUpdate,
     StakeholderPlanResponse,
+    StakeholderProfileCreate,
+    StakeholderProfileSchema,
+    StakeholderProfileUpdate,
+    StakeholderSlotCreate,
+    StakeholderSlotSchema,
+    StakeholderSlotUpdate,
 )
+from app.services.project_service import project_service
+from app.services.stakeholder_plan_service import stakeholder_plan_service
 
 logger = logging.getLogger(__name__)
 
@@ -47,9 +48,8 @@ def _project_to_schema(project) -> ProjectSchema:
 
 def _slot_to_schema(slot, db: Session) -> StakeholderSlotSchema:
     from app.models.stakeholder_profile import StakeholderProfile
-    profiles = db.query(StakeholderProfile).filter(
-        StakeholderProfile.slot_id == slot.id
-    ).all()
+
+    profiles = db.query(StakeholderProfile).filter(StakeholderProfile.slot_id == slot.id).all()
     interviews_done = sum(p.interview_count for p in profiles)
 
     return StakeholderSlotSchema(
@@ -97,6 +97,7 @@ def _profile_to_schema(profile) -> StakeholderProfileSchema:
 
 # --- Voice Input ---
 
+
 @router.post("/voice-to-project-fields")
 async def voice_to_project_fields(audio: UploadFile = File(...)):
     """Transcribe audio and parse into project creation fields using GPT.
@@ -113,6 +114,7 @@ async def voice_to_project_fields(audio: UploadFile = File(...)):
     # Step 1: Transcribe with Whisper
     try:
         import io
+
         filename = audio.filename or "audio.webm"
         transcript_response = openai_service.client.audio.transcriptions.create(
             model="whisper-1",
@@ -168,7 +170,12 @@ async def voice_to_project_fields(audio: UploadFile = File(...)):
     except Exception as e:
         logger.error(f"GPT parsing failed: {e}")
         # Return raw transcript so user can still see what was said
-        parsed = {"title": None, "description": None, "business_domain": None, "key_objectives": None}
+        parsed = {
+            "title": None,
+            "description": None,
+            "business_domain": None,
+            "key_objectives": None,
+        }
 
     return {
         "transcript": transcript,
@@ -183,6 +190,7 @@ async def voice_to_project_fields(audio: UploadFile = File(...)):
 
 
 # --- Project CRUD ---
+
 
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_project(data: ProjectCreate, db: Session = Depends(get_db)):
@@ -251,6 +259,7 @@ def delete_project(project_id: str, db: Session = Depends(get_db)):
 
 # --- Stakeholder Plan (Slots) ---
 
+
 @router.get("/{project_id}/stakeholder-plan")
 def get_stakeholder_plan(project_id: str, db: Session = Depends(get_db)):
     """Get the full stakeholder plan (slots + profiles + summary)."""
@@ -258,16 +267,22 @@ def get_stakeholder_plan(project_id: str, db: Session = Depends(get_db)):
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    from app.models.stakeholder_slot import StakeholderSlot
     from app.models.stakeholder_profile import StakeholderProfile
+    from app.models.stakeholder_slot import StakeholderSlot
 
-    slots = db.query(StakeholderSlot).filter(
-        StakeholderSlot.project_id == project_id
-    ).order_by(StakeholderSlot.order_index).all()
+    slots = (
+        db.query(StakeholderSlot)
+        .filter(StakeholderSlot.project_id == project_id)
+        .order_by(StakeholderSlot.order_index)
+        .all()
+    )
 
-    profiles = db.query(StakeholderProfile).filter(
-        StakeholderProfile.project_id == project_id
-    ).order_by(StakeholderProfile.created_at).all()
+    profiles = (
+        db.query(StakeholderProfile)
+        .filter(StakeholderProfile.project_id == project_id)
+        .order_by(StakeholderProfile.created_at)
+        .all()
+    )
 
     summary = stakeholder_plan_service.get_plan_status(db, project_id)
 
@@ -286,6 +301,7 @@ def regenerate_stakeholder_plan(project_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Project not found")
 
     from app.models.stakeholder_slot import StakeholderSlot
+
     # Only delete AI-suggested slots, keep user-created ones
     db.query(StakeholderSlot).filter(
         StakeholderSlot.project_id == project_id,
@@ -298,7 +314,9 @@ def regenerate_stakeholder_plan(project_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{project_id}/stakeholder-slots", status_code=status.HTTP_201_CREATED)
-def create_stakeholder_slot(project_id: str, data: StakeholderSlotCreate, db: Session = Depends(get_db)):
+def create_stakeholder_slot(
+    project_id: str, data: StakeholderSlotCreate, db: Session = Depends(get_db)
+):
     """Manually add a stakeholder slot."""
     project = project_service.get_project(db, project_id)
     if not project:
@@ -319,7 +337,9 @@ def reorder_stakeholder_slots(body: dict, db: Session = Depends(get_db)):
 
 
 @router.put("/stakeholder-slots/{slot_id}")
-def update_stakeholder_slot(slot_id: str, data: StakeholderSlotUpdate, db: Session = Depends(get_db)):
+def update_stakeholder_slot(
+    slot_id: str, data: StakeholderSlotUpdate, db: Session = Depends(get_db)
+):
     """Update a stakeholder slot."""
     update_data = data.model_dump(exclude_none=True)
     slot = stakeholder_plan_service.update_slot(db, slot_id, update_data)
@@ -355,8 +375,11 @@ def delete_stakeholder_slot(slot_id: str, db: Session = Depends(get_db)):
 
 # --- Stakeholder Profiles ---
 
+
 @router.post("/{project_id}/stakeholders", status_code=status.HTTP_201_CREATED)
-def create_stakeholder(project_id: str, data: StakeholderProfileCreate, db: Session = Depends(get_db)):
+def create_stakeholder(
+    project_id: str, data: StakeholderProfileCreate, db: Session = Depends(get_db)
+):
     """Add a stakeholder profile to the project."""
     project = project_service.get_project(db, project_id)
     if not project:
@@ -370,14 +393,20 @@ def create_stakeholder(project_id: str, data: StakeholderProfileCreate, db: Sess
 def list_stakeholders(project_id: str, db: Session = Depends(get_db)):
     """List all stakeholder profiles for a project."""
     from app.models.stakeholder_profile import StakeholderProfile
-    profiles = db.query(StakeholderProfile).filter(
-        StakeholderProfile.project_id == project_id
-    ).order_by(StakeholderProfile.created_at).all()
+
+    profiles = (
+        db.query(StakeholderProfile)
+        .filter(StakeholderProfile.project_id == project_id)
+        .order_by(StakeholderProfile.created_at)
+        .all()
+    )
     return [_profile_to_schema(p) for p in profiles]
 
 
 @router.put("/stakeholders/{profile_id}")
-def update_stakeholder(profile_id: str, data: StakeholderProfileUpdate, db: Session = Depends(get_db)):
+def update_stakeholder(
+    profile_id: str, data: StakeholderProfileUpdate, db: Session = Depends(get_db)
+):
     """Update a stakeholder profile."""
     update_data = data.model_dump(exclude_none=True)
     profile = stakeholder_plan_service.update_profile(db, profile_id, update_data)
@@ -404,6 +433,7 @@ def delete_stakeholder(profile_id: str, db: Session = Depends(get_db)):
 
 # --- BRD Readiness ---
 
+
 @router.post("/{project_id}/readiness-check")
 def generate_readiness_report(project_id: str, db: Session = Depends(get_db)):
     """Generate a BRD Readiness Report for the project."""
@@ -428,7 +458,9 @@ def get_readiness_report(project_id: str, db: Session = Depends(get_db)):
 
     report = brd_readiness_service.get_latest_report(db, project_id)
     if not report:
-        raise HTTPException(status_code=404, detail="No readiness report found. Run a readiness check first.")
+        raise HTTPException(
+            status_code=404, detail="No readiness report found. Run a readiness check first."
+        )
 
     return _readiness_to_response(report)
 
@@ -439,8 +471,8 @@ def generate_project_brd(project_id: str, db: Session = Depends(get_db)):
 
     Returns the BRD if ready, or the readiness report with suggestions if not.
     """
-    from app.services.brd_readiness_service import brd_readiness_service
     from app.services.brd_generation_service import brd_generation_service
+    from app.services.brd_readiness_service import brd_readiness_service
 
     project = project_service.get_project(db, project_id)
     if not project:
@@ -496,8 +528,10 @@ def _readiness_to_response(report) -> dict:
 
 # --- Stakeholder Interview Guide Generation ---
 
+
 class InterviewGuideOptions(BaseModel):
     """Options for interview guide generation."""
+
     duration_minutes: int = 30
     interview_purpose: Optional[str] = None
     focus_topics: Optional[str] = None
@@ -549,14 +583,11 @@ def get_interview_guide(project_id: str, profile_id: str, db: Session = Depends(
     """
     from app.services.stakeholder_card_generator import stakeholder_card_generator
 
-    result = stakeholder_card_generator.get_interview_guide_status(
-        db, project_id, profile_id
-    )
+    result = stakeholder_card_generator.get_interview_guide_status(db, project_id, profile_id)
 
     if not result:
         raise HTTPException(
-            status_code=404,
-            detail="Interview guide not yet generated for this stakeholder"
+            status_code=404, detail="Interview guide not yet generated for this stakeholder"
         )
 
     return result

@@ -6,7 +6,7 @@ import logging
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Dict, Iterable, Optional
 
 from sqlalchemy import func
@@ -241,22 +241,27 @@ class BillingService:
         finally:
             db.close()
 
-    def summarize_sessions(self, db: Session, session_ids: Iterable[str]) -> Dict[str, Dict[str, Any]]:
+    def summarize_sessions(
+        self, db: Session, session_ids: Iterable[str]
+    ) -> Dict[str, Dict[str, Any]]:
         ids = [session_id for session_id in session_ids if session_id]
         if not ids:
             return {}
 
-        rows = db.query(
-            AIUsageEvent.interview_session_id,
-            func.coalesce(func.sum(AIUsageEvent.input_tokens), 0),
-            func.coalesce(func.sum(AIUsageEvent.cached_input_tokens), 0),
-            func.coalesce(func.sum(AIUsageEvent.output_tokens), 0),
-            func.coalesce(func.sum(AIUsageEvent.total_tokens), 0),
-            func.coalesce(func.sum(AIUsageEvent.audio_seconds), 0),
-            func.coalesce(func.sum(AIUsageEvent.cost_usd), 0),
-        ).filter(
-            AIUsageEvent.interview_session_id.in_(ids)
-        ).group_by(AIUsageEvent.interview_session_id).all()
+        rows = (
+            db.query(
+                AIUsageEvent.interview_session_id,
+                func.coalesce(func.sum(AIUsageEvent.input_tokens), 0),
+                func.coalesce(func.sum(AIUsageEvent.cached_input_tokens), 0),
+                func.coalesce(func.sum(AIUsageEvent.output_tokens), 0),
+                func.coalesce(func.sum(AIUsageEvent.total_tokens), 0),
+                func.coalesce(func.sum(AIUsageEvent.audio_seconds), 0),
+                func.coalesce(func.sum(AIUsageEvent.cost_usd), 0),
+            )
+            .filter(AIUsageEvent.interview_session_id.in_(ids))
+            .group_by(AIUsageEvent.interview_session_id)
+            .all()
+        )
 
         return {
             row[0]: self._summary_dict(
@@ -270,22 +275,27 @@ class BillingService:
             for row in rows
         }
 
-    def summarize_documents(self, db: Session, document_ids: Iterable[str]) -> Dict[str, Dict[str, Any]]:
+    def summarize_documents(
+        self, db: Session, document_ids: Iterable[str]
+    ) -> Dict[str, Dict[str, Any]]:
         ids = [doc_id for doc_id in document_ids if doc_id]
         if not ids:
             return {}
 
-        rows = db.query(
-            AIUsageEvent.document_id,
-            func.coalesce(func.sum(AIUsageEvent.input_tokens), 0),
-            func.coalesce(func.sum(AIUsageEvent.cached_input_tokens), 0),
-            func.coalesce(func.sum(AIUsageEvent.output_tokens), 0),
-            func.coalesce(func.sum(AIUsageEvent.total_tokens), 0),
-            func.coalesce(func.sum(AIUsageEvent.audio_seconds), 0),
-            func.coalesce(func.sum(AIUsageEvent.cost_usd), 0),
-        ).filter(
-            AIUsageEvent.document_id.in_(ids)
-        ).group_by(AIUsageEvent.document_id).all()
+        rows = (
+            db.query(
+                AIUsageEvent.document_id,
+                func.coalesce(func.sum(AIUsageEvent.input_tokens), 0),
+                func.coalesce(func.sum(AIUsageEvent.cached_input_tokens), 0),
+                func.coalesce(func.sum(AIUsageEvent.output_tokens), 0),
+                func.coalesce(func.sum(AIUsageEvent.total_tokens), 0),
+                func.coalesce(func.sum(AIUsageEvent.audio_seconds), 0),
+                func.coalesce(func.sum(AIUsageEvent.cost_usd), 0),
+            )
+            .filter(AIUsageEvent.document_id.in_(ids))
+            .group_by(AIUsageEvent.document_id)
+            .all()
+        )
 
         return {
             row[0]: self._summary_dict(

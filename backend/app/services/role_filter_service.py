@@ -2,11 +2,12 @@
 
 import logging
 from typing import Dict, List
+
 from sqlalchemy.orm import Session
 
+from app.models.interview_session import InterviewCardState, InterviewSession
 from app.models.question_card import QuestionCard
 from app.models.stakeholder_profile import StakeholderProfile
-from app.models.interview_session import InterviewSession, InterviewCardState
 
 logger = logging.getLogger(__name__)
 
@@ -92,25 +93,25 @@ class RoleFilterService:
 
         Returns count of cards in each category.
         """
-        session = db.query(InterviewSession).filter(
-            InterviewSession.id == session_id
-        ).first()
+        session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
         if not session or not session.stakeholder_profile_id:
             return {"applicable": 0, "not_applicable": 0, "uncertain": 0, "skipped": True}
 
-        stakeholder = db.query(StakeholderProfile).filter(
-            StakeholderProfile.id == session.stakeholder_profile_id
-        ).first()
+        stakeholder = (
+            db.query(StakeholderProfile)
+            .filter(StakeholderProfile.id == session.stakeholder_profile_id)
+            .first()
+        )
         if not stakeholder:
             return {"applicable": 0, "not_applicable": 0, "uncertain": 0, "skipped": True}
 
         # Load all cards for this document
-        cards = db.query(QuestionCard).filter(
-            QuestionCard.document_id == session.document_id
-        ).all()
+        cards = db.query(QuestionCard).filter(QuestionCard.document_id == session.document_id).all()
 
         # Auto-infer role targeting for cards that lack it (heuristic, no AI)
-        cards_needing_targeting = [c for c in cards if not c.target_roles and not c.not_recommended_roles]
+        cards_needing_targeting = [
+            c for c in cards if not c.target_roles and not c.not_recommended_roles
+        ]
         if cards_needing_targeting:
             self._infer_role_targeting_heuristic(cards_needing_targeting)
             db.flush()
@@ -122,11 +123,15 @@ class RoleFilterService:
         not_applicable_ids = {c.id for c in categorized["not_applicable"]}
 
         if not_applicable_ids:
-            card_states = db.query(InterviewCardState).filter(
-                InterviewCardState.session_id == session_id,
-                InterviewCardState.question_card_id.in_(not_applicable_ids),
-                InterviewCardState.status.in_(["pending"]),
-            ).all()
+            card_states = (
+                db.query(InterviewCardState)
+                .filter(
+                    InterviewCardState.session_id == session_id,
+                    InterviewCardState.question_card_id.in_(not_applicable_ids),
+                    InterviewCardState.status.in_(["pending"]),
+                )
+                .all()
+            )
 
             for state in card_states:
                 state.status = "not_applicable_for_role"
@@ -146,7 +151,19 @@ class RoleFilterService:
         Uses keyword matching — no AI call. Sets target_roles and
         not_recommended_roles based on common patterns.
         """
-        tech_keywords = {"api", "系統", "架構", "資料庫", "部署", "整合", "串接", "伺服器", "效能", "schema", "技術"}
+        tech_keywords = {
+            "api",
+            "系統",
+            "架構",
+            "資料庫",
+            "部署",
+            "整合",
+            "串接",
+            "伺服器",
+            "效能",
+            "schema",
+            "技術",
+        }
         biz_keywords = {"客戶", "業務", "銷售", "流程", "痛點", "需求", "成交", "報價", "訂單"}
         mgmt_keywords = {"預算", "kpi", "決策", "目標", "時程", "roi", "策略", "優先"}
 

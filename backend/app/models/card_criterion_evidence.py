@@ -1,7 +1,8 @@
 """Card Criterion Evidence - append-only evidence ledger for card coverage."""
 
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, ForeignKey, Integer, Numeric, Text, Index
+
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, Numeric, String, Text
 
 from app.db.session import Base
 
@@ -20,10 +21,16 @@ class CardCriterionEvidence(Base):
     )
 
     id = Column(String, primary_key=True)
-    session_id = Column(String, ForeignKey("interview_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
-    card_id = Column(String, ForeignKey("question_cards.id", ondelete="CASCADE"), nullable=False, index=True)
+    session_id = Column(
+        String, ForeignKey("interview_sessions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    card_id = Column(
+        String, ForeignKey("question_cards.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     criterion_id = Column(String, nullable=False, index=True)
-    utterance_id = Column(String, ForeignKey("live_utterances.id", ondelete="SET NULL"), nullable=True)
+    utterance_id = Column(
+        String, ForeignKey("live_utterances.id", ondelete="SET NULL"), nullable=True
+    )
     evaluation_turn_text = Column(Text, nullable=True)
     status = Column(String, nullable=False)
     evidence_quote = Column(Text, nullable=True)

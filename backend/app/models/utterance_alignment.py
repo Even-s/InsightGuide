@@ -4,7 +4,9 @@ Maps live_utterances (Realtime API) to final_utterances (diarized) for traceabil
 """
 
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, Float, ForeignKey
+
+from sqlalchemy import Column, DateTime, Float, ForeignKey, String
+
 from app.db.session import Base
 
 

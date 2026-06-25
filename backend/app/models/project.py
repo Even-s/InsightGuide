@@ -1,7 +1,8 @@
 """Project model."""
 
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, ForeignKey, Text, JSON
+
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base
@@ -27,9 +28,30 @@ class Project(Base):
 
     # Relationships
     user = relationship("User", back_populates="projects")
-    stakeholder_slots = relationship("StakeholderSlot", back_populates="project", cascade="all, delete-orphan")
-    stakeholder_profiles = relationship("StakeholderProfile", back_populates="project", cascade="all, delete-orphan")
-    documents = relationship("Document", back_populates="project", foreign_keys="[Document.project_id]", cascade="all, delete-orphan")
-    interview_sessions = relationship("InterviewSession", back_populates="project", foreign_keys="[InterviewSession.project_id]", cascade="all, delete-orphan")
-    insight_memos = relationship("InterviewInsightMemo", back_populates="project", cascade="all, delete-orphan")
-    evidence_matrix = relationship("RequirementEvidenceMatrix", back_populates="project", uselist=False, cascade="all, delete-orphan")
+    stakeholder_slots = relationship(
+        "StakeholderSlot", back_populates="project", cascade="all, delete-orphan"
+    )
+    stakeholder_profiles = relationship(
+        "StakeholderProfile", back_populates="project", cascade="all, delete-orphan"
+    )
+    documents = relationship(
+        "Document",
+        back_populates="project",
+        foreign_keys="[Document.project_id]",
+        cascade="all, delete-orphan",
+    )
+    interview_sessions = relationship(
+        "InterviewSession",
+        back_populates="project",
+        foreign_keys="[InterviewSession.project_id]",
+        cascade="all, delete-orphan",
+    )
+    insight_memos = relationship(
+        "InterviewInsightMemo", back_populates="project", cascade="all, delete-orphan"
+    )
+    evidence_matrix = relationship(
+        "RequirementEvidenceMatrix",
+        back_populates="project",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )

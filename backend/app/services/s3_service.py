@@ -1,12 +1,12 @@
 """S3 storage service for file operations."""
 
 import logging
-from typing import BinaryIO, Optional
 from io import BytesIO
+from typing import BinaryIO, Optional
 
 import boto3
-from botocore.exceptions import ClientError
 from botocore.client import Config
+from botocore.exceptions import ClientError
 
 from app.core.config import settings
 
@@ -50,7 +50,9 @@ class S3Service:
                     self.client.create_bucket(Bucket=self.bucket_name)
                     logger.info(f"Created bucket {self.bucket_name}")
                 except ClientError as create_error:
-                    logger.warning(f"Failed to create bucket (MinIO may be unavailable): {create_error}")
+                    logger.warning(
+                        f"Failed to create bucket (MinIO may be unavailable): {create_error}"
+                    )
                     # Don't raise - allow app to start even if MinIO is down
             else:
                 logger.warning(f"Error checking bucket (MinIO may be unavailable): {e}")
@@ -132,11 +134,7 @@ class S3Service:
             logger.error(f"Failed to delete file {object_key}: {e}")
             raise
 
-    def generate_presigned_url(
-        self,
-        file_url: str,
-        expiration: int = 3600
-    ) -> str:
+    def generate_presigned_url(self, file_url: str, expiration: int = 3600) -> str:
         """
         Generate a presigned URL for temporary access to a file.
 
@@ -153,11 +151,8 @@ class S3Service:
 
             presigned_url = self.presign_client.generate_presigned_url(
                 "get_object",
-                Params={
-                    "Bucket": self.bucket_name,
-                    "Key": object_key
-                },
-                ExpiresIn=expiration
+                Params={"Bucket": self.bucket_name, "Key": object_key},
+                ExpiresIn=expiration,
             )
 
             logger.info(f"Generated presigned URL for {object_key}")

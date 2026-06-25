@@ -1,6 +1,7 @@
 """Application configuration management."""
 
 from typing import List
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -8,10 +9,7 @@ class Settings(BaseSettings):
     """Application settings."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=True,
-        extra="ignore"
+        env_file=".env", env_file_encoding="utf-8", case_sensitive=True, extra="ignore"
     )
 
     # Application
@@ -27,7 +25,9 @@ class Settings(BaseSettings):
     ]
 
     # Database
-    DATABASE_URL: str = "postgresql://insightguide:insightguide_password@localhost:5432/insightguide"
+    DATABASE_URL: str = (
+        "postgresql://insightguide:insightguide_password@localhost:5432/insightguide"
+    )
 
     # Redis
     REDIS_URL: str = "redis://localhost:6379/0"
@@ -39,13 +39,19 @@ class Settings(BaseSettings):
     # OpenAI
     OPENAI_API_KEY: str = ""
     DOCUMENT_ANALYSIS_MODEL: str = "gpt-5.5"  # For requirements document analysis
-    REALTIME_TRANSCRIPTION_MODEL: str = "gpt-realtime-whisper"  # Realtime Whisper model for transcription
-    SEMANTIC_UNDERSTANDING_MODEL: str = "gpt-5.4-mini"  # GPT-5.4-mini - 10x faster and cheaper for answer evaluation
+    REALTIME_TRANSCRIPTION_MODEL: str = (
+        "gpt-realtime-whisper"  # Realtime Whisper model for transcription
+    )
+    SEMANTIC_UNDERSTANDING_MODEL: str = (
+        "gpt-5.4-mini"  # GPT-5.4-mini - 10x faster and cheaper for answer evaluation
+    )
     EMBEDDING_MODEL: str = "text-embedding-3-large"
 
     # S3 Storage
     S3_ENDPOINT_URL: str = "http://localhost:9000"
-    S3_PUBLIC_ENDPOINT_URL: str = ""  # Public URL for presigned URLs (e.g., https://your-domain.com:9000)
+    S3_PUBLIC_ENDPOINT_URL: str = (
+        ""  # Public URL for presigned URLs (e.g., https://your-domain.com:9000)
+    )
     S3_ACCESS_KEY_ID: str = "minioadmin"
     S3_SECRET_ACCESS_KEY: str = "minioadmin"
     S3_BUCKET_NAME: str = "insightguide-uploads"

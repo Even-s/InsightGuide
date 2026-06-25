@@ -3,15 +3,16 @@ Unit tests for Document Service
 Tests document upload, validation, and management functionality.
 """
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
-from io import BytesIO
 from datetime import datetime
-from fastapi import UploadFile, HTTPException
+from io import BytesIO
+from unittest.mock import MagicMock, Mock, patch
 
-from app.services.document_service import document_service, DocumentService
+import pytest
+from fastapi import HTTPException, UploadFile
+
 from app.models.document import Document
 from app.models.prep_session import PrepSession
+from app.services.document_service import DocumentService, document_service
 
 
 class TestDocumentService:
@@ -44,7 +45,9 @@ class TestDocumentService:
         file_content = b"PK\x03\x04 test docx content"
         file = Mock(spec=UploadFile)
         file.filename = "requirements.docx"
-        file.content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        file.content_type = (
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
         file.file = BytesIO(file_content)
         return file
 
@@ -69,7 +72,7 @@ class TestDocumentService:
             file_type="pdf",
             status="uploaded",
             created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            updated_at=datetime.utcnow(),
         )
 
     def test_service_initialization(self):
@@ -124,26 +127,19 @@ class TestDocumentService:
 
         assert exc_info.value.status_code == 400
 
-    @patch('app.services.document_service.s3_service')
-    @patch('app.services.document_service.uuid')
-    def test_create_document_success(
-        self,
-        mock_uuid,
-        mock_s3,
-        mock_db,
-        sample_pdf_file
-    ):
+    @patch("app.services.document_service.s3_service")
+    @patch("app.services.document_service.uuid")
+    def test_create_document_success(self, mock_uuid, mock_s3, mock_db, sample_pdf_file):
         """Test successful document creation."""
         # Setup mocks
         mock_uuid.uuid4().hex = "123abc456def"
-        mock_s3.upload_file.return_value = "https://s3.example.com/documents/doc_123abc456de/source/file.pdf"
+        mock_s3.upload_file.return_value = (
+            "https://s3.example.com/documents/doc_123abc456de/source/file.pdf"
+        )
 
         # Execute
         document = DocumentService.create_document(
-            db=mock_db,
-            file=sample_pdf_file,
-            title="Test Requirements",
-            user_id="user-123"
+            db=mock_db, file=sample_pdf_file, title="Test Requirements", user_id="user-123"
         )
 
         # Verify S3 upload was called
@@ -153,60 +149,41 @@ class TestDocumentService:
         mock_db.add.assert_called()
         mock_db.commit.assert_called()
 
-    @patch('app.services.document_service.s3_service')
-    @patch('app.services.document_service.uuid')
+    @patch("app.services.document_service.s3_service")
+    @patch("app.services.document_service.uuid")
     def test_create_document_uses_filename_as_title(
-        self,
-        mock_uuid,
-        mock_s3,
-        mock_db,
-        sample_pdf_file
+        self, mock_uuid, mock_s3, mock_db, sample_pdf_file
     ):
         """Test that filename is used as title when not provided."""
         mock_uuid.uuid4().hex = "123abc456def"
         mock_s3.upload_file.return_value = "https://s3.example.com/test.pdf"
 
         document = DocumentService.create_document(
-            db=mock_db,
-            file=sample_pdf_file,
-            title=None,
-            user_id="user-123"
+            db=mock_db, file=sample_pdf_file, title=None, user_id="user-123"
         )
 
         # Title should be filename without extension
         # (We can't assert the exact value since it's returned by the mock)
         mock_db.add.assert_called()
 
-    @patch('app.services.document_service.s3_service')
-    def test_create_document_s3_upload_failure(
-        self,
-        mock_s3,
-        mock_db,
-        sample_pdf_file
-    ):
+    @patch("app.services.document_service.s3_service")
+    def test_create_document_s3_upload_failure(self, mock_s3, mock_db, sample_pdf_file):
         """Test document creation when S3 upload fails."""
         mock_s3.upload_file.side_effect = Exception("S3 upload failed")
 
         with pytest.raises(HTTPException) as exc_info:
             DocumentService.create_document(
-                db=mock_db,
-                file=sample_pdf_file,
-                title="Test",
-                user_id="user-123"
+                db=mock_db, file=sample_pdf_file, title="Test", user_id="user-123"
             )
 
         assert exc_info.value.status_code == 500
         assert "Failed to upload file" in str(exc_info.value.detail)
         mock_db.add.assert_not_called()
 
-    @patch('app.services.document_service.s3_service')
-    @patch('app.services.document_service.uuid')
+    @patch("app.services.document_service.s3_service")
+    @patch("app.services.document_service.uuid")
     def test_create_document_db_failure_cleans_up_s3(
-        self,
-        mock_uuid,
-        mock_s3,
-        mock_db,
-        sample_pdf_file
+        self, mock_uuid, mock_s3, mock_db, sample_pdf_file
     ):
         """Test that S3 file is cleaned up if database operation fails."""
         mock_uuid.uuid4().hex = "123abc456def"
@@ -215,59 +192,41 @@ class TestDocumentService:
 
         with pytest.raises(HTTPException) as exc_info:
             DocumentService.create_document(
-                db=mock_db,
-                file=sample_pdf_file,
-                title="Test",
-                user_id="user-123"
+                db=mock_db, file=sample_pdf_file, title="Test", user_id="user-123"
             )
 
         assert exc_info.value.status_code == 500
         mock_db.rollback.assert_called_once()
         mock_s3.delete_file.assert_called()
 
-    @patch('app.services.document_service.s3_service')
-    @patch('app.services.document_service.uuid')
+    @patch("app.services.document_service.s3_service")
+    @patch("app.services.document_service.uuid")
     def test_create_document_auto_creates_prep_session(
-        self,
-        mock_uuid,
-        mock_s3,
-        mock_db,
-        sample_pdf_file
+        self, mock_uuid, mock_s3, mock_db, sample_pdf_file
     ):
         """Test that prep session is automatically created with document."""
         mock_uuid.uuid4().hex = "123abc456def"
         mock_s3.upload_file.return_value = "https://s3.example.com/test.pdf"
 
         DocumentService.create_document(
-            db=mock_db,
-            file=sample_pdf_file,
-            title="Test",
-            user_id="user-123"
+            db=mock_db, file=sample_pdf_file, title="Test", user_id="user-123"
         )
 
         # Should call db.add twice: once for document, once for prep session
         assert mock_db.add.call_count >= 2
 
-    @patch('app.services.document_service.s3_service')
-    @patch('app.services.document_service.uuid')
-    @patch('app.workers.document_analysis_worker.analyze_document')
+    @patch("app.services.document_service.s3_service")
+    @patch("app.services.document_service.uuid")
+    @patch("app.workers.document_analysis_worker.analyze_document")
     def test_create_document_enqueues_processing(
-        self,
-        mock_worker,
-        mock_uuid,
-        mock_s3,
-        mock_db,
-        sample_pdf_file
+        self, mock_worker, mock_uuid, mock_s3, mock_db, sample_pdf_file
     ):
         """Test that document processing job is enqueued."""
         mock_uuid.uuid4().hex = "123abc456def"
         mock_s3.upload_file.return_value = "https://s3.example.com/test.pdf"
 
         DocumentService.create_document(
-            db=mock_db,
-            file=sample_pdf_file,
-            title="Test",
-            user_id="user-123"
+            db=mock_db, file=sample_pdf_file, title="Test", user_id="user-123"
         )
 
         mock_worker.delay.assert_called()
@@ -291,15 +250,9 @@ class TestDocumentService:
         assert exc_info.value.status_code == 404
         assert "not found" in str(exc_info.value.detail).lower()
 
-    @patch('app.services.document_service.s3_service')
-    @patch('app.services.document_service.settings')
-    def test_delete_document_success(
-        self,
-        mock_settings,
-        mock_s3,
-        mock_db,
-        sample_document
-    ):
+    @patch("app.services.document_service.s3_service")
+    @patch("app.services.document_service.settings")
+    def test_delete_document_success(self, mock_settings, mock_s3, mock_db, sample_document):
         """Test successful document deletion."""
         mock_settings.S3_BUCKET_NAME = "test-bucket"
         mock_db.query().filter().first.return_value = sample_document
@@ -319,14 +272,10 @@ class TestDocumentService:
 
         assert exc_info.value.status_code == 404
 
-    @patch('app.services.document_service.s3_service')
-    @patch('app.services.document_service.settings')
+    @patch("app.services.document_service.s3_service")
+    @patch("app.services.document_service.settings")
     def test_delete_document_s3_failure_continues(
-        self,
-        mock_settings,
-        mock_s3,
-        mock_db,
-        sample_document
+        self, mock_settings, mock_s3, mock_db, sample_document
     ):
         """Test that document deletion continues even if S3 delete fails."""
         mock_settings.S3_BUCKET_NAME = "test-bucket"
@@ -340,15 +289,9 @@ class TestDocumentService:
         mock_db.delete.assert_called_once()
         mock_db.commit.assert_called_once()
 
-    @patch('app.services.document_service.s3_service')
-    @patch('app.services.document_service.settings')
-    def test_delete_document_no_commit(
-        self,
-        mock_settings,
-        mock_s3,
-        mock_db,
-        sample_document
-    ):
+    @patch("app.services.document_service.s3_service")
+    @patch("app.services.document_service.settings")
+    def test_delete_document_no_commit(self, mock_settings, mock_s3, mock_db, sample_document):
         """Test delete with commit=False for transaction composition."""
         mock_settings.S3_BUCKET_NAME = "test-bucket"
         mock_db.query().filter().first.return_value = sample_document
@@ -370,9 +313,12 @@ class TestDocumentService:
         """Test that content type is properly set for different file types."""
         test_cases = [
             ("test.pdf", "application/pdf"),
-            ("test.docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+            (
+                "test.docx",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ),
             ("test.md", "text/markdown"),
-            ("test.txt", "text/plain")
+            ("test.txt", "text/plain"),
         ]
 
         for filename, expected_content_type in test_cases:
@@ -381,16 +327,13 @@ class TestDocumentService:
             file.content_type = expected_content_type
             file.file = BytesIO(b"test content")
 
-            with patch('app.services.document_service.s3_service') as mock_s3:
-                with patch('app.services.document_service.uuid'):
+            with patch("app.services.document_service.s3_service") as mock_s3:
+                with patch("app.services.document_service.uuid"):
                     mock_s3.upload_file.return_value = "https://s3.example.com/test"
 
                     try:
                         DocumentService.create_document(
-                            db=mock_db,
-                            file=file,
-                            title="Test",
-                            user_id="user-123"
+                            db=mock_db, file=file, title="Test", user_id="user-123"
                         )
 
                         # Verify content_type was passed to S3
@@ -400,24 +343,17 @@ class TestDocumentService:
                         # Some tests may fail due to incomplete mocking
                         pass
 
-    @patch('app.services.document_service.s3_service')
-    @patch('app.services.document_service.uuid')
+    @patch("app.services.document_service.s3_service")
+    @patch("app.services.document_service.uuid")
     def test_create_document_generates_unique_id(
-        self,
-        mock_uuid,
-        mock_s3,
-        mock_db,
-        sample_pdf_file
+        self, mock_uuid, mock_s3, mock_db, sample_pdf_file
     ):
         """Test that each document gets a unique ID."""
         mock_uuid.uuid4().hex = "unique123"
         mock_s3.upload_file.return_value = "https://s3.example.com/test.pdf"
 
         DocumentService.create_document(
-            db=mock_db,
-            file=sample_pdf_file,
-            title="Test",
-            user_id="user-123"
+            db=mock_db, file=sample_pdf_file, title="Test", user_id="user-123"
         )
 
         # Verify UUID was called to generate ID
@@ -430,10 +366,7 @@ class TestDocumentService:
 
         with pytest.raises(HTTPException) as exc_info:
             DocumentService.create_document(
-                db=mock_db,
-                file=invalid_file,
-                title="Test",
-                user_id="user-123"
+                db=mock_db, file=invalid_file, title="Test", user_id="user-123"
             )
 
         assert exc_info.value.status_code == 400

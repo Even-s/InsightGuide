@@ -1,18 +1,19 @@
 """Insight Memo Service - generates structured interview insight documents."""
 
-import uuid
-import logging
 import json
+import logging
+import uuid
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
+
 from sqlalchemy.orm import Session
 
+from app.models.final_utterance import FinalUtterance
 from app.models.interview_insight_memo import InterviewInsightMemo
 from app.models.interview_session import InterviewSession
-from app.models.stakeholder_profile import StakeholderProfile
-from app.models.question_instance import QuestionInstance
 from app.models.question_answer import QuestionAnswer
-from app.models.final_utterance import FinalUtterance
+from app.models.question_instance import QuestionInstance
+from app.models.stakeholder_profile import StakeholderProfile
 
 logger = logging.getLogger(__name__)
 
@@ -21,16 +22,16 @@ class InsightMemoService:
 
     def generate_memo(self, db: Session, session_id: str) -> InterviewInsightMemo:
         """Generate an Interview Insight Memo from a completed interview session."""
-        session = db.query(InterviewSession).filter(
-            InterviewSession.id == session_id
-        ).first()
+        session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
         if not session:
             raise ValueError(f"Session {session_id} not found")
 
         # Delete existing memo if regenerating
-        existing = db.query(InterviewInsightMemo).filter(
-            InterviewInsightMemo.session_id == session_id
-        ).first()
+        existing = (
+            db.query(InterviewInsightMemo)
+            .filter(InterviewInsightMemo.session_id == session_id)
+            .first()
+        )
         if existing:
             db.delete(existing)
             db.flush()
@@ -38,9 +39,11 @@ class InsightMemoService:
         # Gather source data
         stakeholder = None
         if session.stakeholder_profile_id:
-            stakeholder = db.query(StakeholderProfile).filter(
-                StakeholderProfile.id == session.stakeholder_profile_id
-            ).first()
+            stakeholder = (
+                db.query(StakeholderProfile)
+                .filter(StakeholderProfile.id == session.stakeholder_profile_id)
+                .first()
+            )
 
         qa_records = self._load_qa_records(db, session_id)
         transcript_text = self._load_transcript_text(db, session_id)
@@ -102,62 +105,88 @@ class InsightMemoService:
         if session.project_id:
             try:
                 from app.services.stakeholder_plan_service import stakeholder_plan_service
-                stakeholder_plan_service.update_plan_after_interview(db, session.project_id, memo.id)
+
+                stakeholder_plan_service.update_plan_after_interview(
+                    db, session.project_id, memo.id
+                )
             except Exception as e:
                 logger.warning(f"Failed to update stakeholder plan: {e}")
 
         return memo
 
     def get_memo(self, db: Session, session_id: str) -> Optional[InterviewInsightMemo]:
-        return db.query(InterviewInsightMemo).filter(
-            InterviewInsightMemo.session_id == session_id
-        ).first()
+        return (
+            db.query(InterviewInsightMemo)
+            .filter(InterviewInsightMemo.session_id == session_id)
+            .first()
+        )
 
     def get_memos_for_project(self, db: Session, project_id: str) -> List[InterviewInsightMemo]:
-        return db.query(InterviewInsightMemo).filter(
-            InterviewInsightMemo.project_id == project_id,
-            InterviewInsightMemo.status == "completed",
-        ).order_by(InterviewInsightMemo.interview_date.desc()).all()
+        return (
+            db.query(InterviewInsightMemo)
+            .filter(
+                InterviewInsightMemo.project_id == project_id,
+                InterviewInsightMemo.status == "completed",
+            )
+            .order_by(InterviewInsightMemo.interview_date.desc())
+            .all()
+        )
 
     def _load_qa_records(self, db: Session, session_id: str) -> List[Dict[str, Any]]:
         """Load Q/A records from QuestionInstance + QuestionAnswer."""
-        questions = db.query(QuestionInstance).filter(
-            QuestionInstance.session_id == session_id
-        ).order_by(QuestionInstance.sequence_index).all()
+        questions = (
+            db.query(QuestionInstance)
+            .filter(QuestionInstance.session_id == session_id)
+            .order_by(QuestionInstance.sequence_index)
+            .all()
+        )
 
         records = []
         for q in questions:
-            answer = db.query(QuestionAnswer).filter(
-                QuestionAnswer.question_instance_id == q.id
-            ).first()
+            answer = (
+                db.query(QuestionAnswer).filter(QuestionAnswer.question_instance_id == q.id).first()
+            )
 
-            records.append({
-                "question": q.asked_text,
-                "question_type": q.question_type,
-                "answer_summary": answer.answer_summary if answer else None,
-                "answer_status": answer.answer_status if answer else "not_answered",
-                "evidence_quotes": answer.evidence_quotes if answer else [],
-                "confidence": answer.confidence if answer else None,
-            })
+            records.append(
+                {
+                    "question": q.asked_text,
+                    "question_type": q.question_type,
+                    "answer_summary": answer.answer_summary if answer else None,
+                    "answer_status": answer.answer_status if answer else "not_answered",
+                    "evidence_quotes": answer.evidence_quotes if answer else [],
+                    "confidence": answer.confidence if answer else None,
+                }
+            )
 
         return records
 
     def _load_transcript_text(self, db: Session, session_id: str) -> str:
         """Load transcript as plain text for AI analysis."""
-        utterances = db.query(FinalUtterance).filter(
-            FinalUtterance.session_id == session_id
-        ).order_by(FinalUtterance.sequence_index).limit(200).all()
+        utterances = (
+            db.query(FinalUtterance)
+            .filter(FinalUtterance.session_id == session_id)
+            .order_by(FinalUtterance.sequence_index)
+            .limit(200)
+            .all()
+        )
 
         if not utterances:
             from app.models.live_utterance import LiveUtterance
-            utterances = db.query(LiveUtterance).filter(
-                LiveUtterance.session_id == session_id,
-                LiveUtterance.is_partial == False,
-            ).order_by(LiveUtterance.created_at).limit(200).all()
+
+            utterances = (
+                db.query(LiveUtterance)
+                .filter(
+                    LiveUtterance.session_id == session_id,
+                    LiveUtterance.is_partial == False,
+                )
+                .order_by(LiveUtterance.created_at)
+                .limit(200)
+                .all()
+            )
 
         lines = []
         for u in utterances:
-            speaker = getattr(u, 'speaker_display_name', None) or getattr(u, 'speaker', 'unknown')
+            speaker = getattr(u, "speaker_display_name", None) or getattr(u, "speaker", "unknown")
             lines.append(f"[{speaker}] {u.transcript}")
 
         return "\n".join(lines)
@@ -183,7 +212,11 @@ class InsightMemoService:
 
             qa_text = ""
             for i, r in enumerate(qa_records[:20], 1):
-                status_label = {"answered": "已回答", "partially_answered": "部分回答", "not_answered": "未回答"}.get(r["answer_status"], r["answer_status"])
+                status_label = {
+                    "answered": "已回答",
+                    "partially_answered": "部分回答",
+                    "not_answered": "未回答",
+                }.get(r["answer_status"], r["answer_status"])
                 qa_text += f"Q{i}. {r['question']} [{status_label}]\n"
                 if r["answer_summary"]:
                     qa_text += f"   摘要：{r['answer_summary']}\n"
@@ -218,7 +251,10 @@ class InsightMemoService:
             response = openai_service.client.chat.completions.create(
                 model="gpt-5.4-mini",
                 messages=[
-                    {"role": "system", "content": "你是商業分析師。分析訪談內容，產出結構化洞察。只回傳 JSON。"},
+                    {
+                        "role": "system",
+                        "content": "你是商業分析師。分析訪談內容，產出結構化洞察。只回傳 JSON。",
+                    },
                     {"role": "user", "content": prompt},
                 ],
                 temperature=0.2,
@@ -272,11 +308,11 @@ class InsightMemoService:
             s = memo.stakeholder_summary
             lines.append(f"- 受訪者：{s.get('name', '未知')}")
             lines.append(f"- 角色：{s.get('role', '未知')}")
-            if s.get('department'):
+            if s.get("department"):
                 lines.append(f"- 部門：{s['department']}")
-            if s.get('expertise'):
+            if s.get("expertise"):
                 lines.append(f"- 熟悉領域：{', '.join(s['expertise'])}")
-            if s.get('boundaries'):
+            if s.get("boundaries"):
                 lines.append(f"- 不熟悉領域：{', '.join(s['boundaries'])}")
         if memo.interview_date:
             lines.append(f"- 訪談日期：{memo.interview_date.strftime('%Y-%m-%d')}")
@@ -293,11 +329,13 @@ class InsightMemoService:
             for i, qa in enumerate(memo.qa_summaries, 1):
                 lines.append(f"### Q{i}. {qa.get('question', '')}")
                 lines.append("")
-                if qa.get('answer_summary'):
+                if qa.get("answer_summary"):
                     lines.append(f"**回答摘要**：{qa['answer_summary']}")
                     lines.append("")
                 status_map = {"answered": "已回答", "partial": "部分回答", "unanswered": "未回答"}
-                lines.append(f"**狀態**：{status_map.get(qa.get('answer_status', ''), qa.get('answer_status', ''))}")
+                lines.append(
+                    f"**狀態**：{status_map.get(qa.get('answer_status', ''), qa.get('answer_status', ''))}"
+                )
                 lines.append("")
 
         # Section 3: Pain points
@@ -309,7 +347,9 @@ class InsightMemoService:
             for p in memo.pain_points:
                 affected = ", ".join(p.get("affected_roles", []))
                 quote = p.get("evidence_quote", "")[:40]
-                lines.append(f"| {p.get('description', '')} | {quote} | {affected} | {p.get('severity', '')} |")
+                lines.append(
+                    f"| {p.get('description', '')} | {quote} | {affected} | {p.get('severity', '')} |"
+                )
             lines.append("")
 
         # Section 4: Requirement candidates
@@ -320,7 +360,9 @@ class InsightMemoService:
             lines.append("|---------|------|------|----------|")
             for r in memo.requirement_candidates:
                 validation = ", ".join(r.get("needs_validation_from", []))
-                lines.append(f"| {r.get('description', '')} | {r.get('source', '')} | {r.get('confidence', '')} | {validation} |")
+                lines.append(
+                    f"| {r.get('description', '')} | {r.get('source', '')} | {r.get('confidence', '')} | {validation} |"
+                )
             lines.append("")
 
         # Section 5: Constraints
@@ -328,7 +370,9 @@ class InsightMemoService:
             lines.append("## 5. 限制與假設")
             lines.append("")
             for c in memo.constraints_and_assumptions:
-                type_label = {"assumption": "假設", "constraint": "限制", "limitation": "限制"}.get(c.get("type", ""), c.get("type", ""))
+                type_label = {"assumption": "假設", "constraint": "限制", "limitation": "限制"}.get(
+                    c.get("type", ""), c.get("type", "")
+                )
                 lines.append(f"- **[{type_label}]** {c.get('content', '')} ({c.get('source', '')})")
             lines.append("")
 
@@ -351,7 +395,9 @@ class InsightMemoService:
             lines.append("| 問題 | 建議訪談對象 | 優先級 |")
             lines.append("|------|------------|--------|")
             for q in memo.unresolved_questions:
-                lines.append(f"| {q.get('question', '')} | {q.get('suggested_stakeholder_type', '')} | {q.get('priority', '')} |")
+                lines.append(
+                    f"| {q.get('question', '')} | {q.get('suggested_stakeholder_type', '')} | {q.get('priority', '')} |"
+                )
             lines.append("")
 
         # Section 8: Next suggestions
@@ -369,9 +415,11 @@ class InsightMemoService:
             sd = memo.source_distinction
             lines.append("---")
             lines.append("")
-            lines.append(f"*來源統計：明確陳述 {sd.get('explicit_statements', 0)} 項 / "
-                        f"推論 {sd.get('inferences', 0)} 項 / "
-                        f"待驗證 {sd.get('unverified', 0)} 項*")
+            lines.append(
+                f"*來源統計：明確陳述 {sd.get('explicit_statements', 0)} 項 / "
+                f"推論 {sd.get('inferences', 0)} 項 / "
+                f"待驗證 {sd.get('unverified', 0)} 項*"
+            )
 
         return "\n".join(lines)
 

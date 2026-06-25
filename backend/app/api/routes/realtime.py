@@ -1,11 +1,12 @@
 """Realtime API integration routes."""
 
 import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.db.session import get_db
 from app.core.config import settings
+from app.db.session import get_db
 from app.services.realtime_service import realtime_service
 
 logger = logging.getLogger(__name__)
@@ -27,7 +28,7 @@ async def create_realtime_transcription_session(db: Session = Depends(get_db)):
     if not settings.OPENAI_API_KEY:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="OpenAI API key not configured"
+            detail="OpenAI API key not configured",
         )
 
     try:
@@ -44,5 +45,5 @@ async def create_realtime_transcription_session(db: Session = Depends(get_db)):
         logger.error(f"Error creating Realtime transcription session: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create Realtime transcription session: {str(e)}"
+            detail=f"Failed to create Realtime transcription session: {str(e)}",
         )

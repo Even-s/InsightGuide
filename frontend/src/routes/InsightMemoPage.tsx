@@ -129,8 +129,9 @@ export default function InsightMemoPage() {
       setError(null)
       const data = await generateInsightMemo(sessionId)
       setMemo(data)
-    } catch (err: any) {
-      setError(err.response?.data?.detail || '無法產生洞察紀錄')
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { detail?: string } } }
+      setError(axiosErr.response?.data?.detail || '無法產生洞察紀錄')
     } finally {
       setGenerating(false)
     }

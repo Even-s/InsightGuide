@@ -15,10 +15,11 @@ After an interview session ends, this service generates:
 Phase 1: Updated to read from final_utterances when available, with fallback to utterances.
 """
 
-from datetime import datetime, timezone, timedelta
-from typing import Dict, Any, List, Optional
-from sqlalchemy.orm import Session
 import logging
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, List, Optional
+
+from sqlalchemy.orm import Session
 
 TZ_TAIPEI = timezone(timedelta(hours=8))
 
@@ -28,13 +29,14 @@ import uuid
 logger = logging.getLogger(__name__)
 
 from app.models.brd import BRDDraft, BRDStatus
-from app.models.interview_session import InterviewSession, InterviewCardState
+from app.models.card_coverage_evaluation import CardCoverageEvaluation
+from app.models.document import Document
+from app.models.final_utterance import FinalUtterance
+from app.models.interview_session import InterviewCardState, InterviewSession
 from app.models.interview_theme import InterviewTheme
 from app.models.question_card import QuestionCard
 from app.models.utterance import Utterance
-from app.models.final_utterance import FinalUtterance
-from app.models.card_coverage_evaluation import CardCoverageEvaluation
-from app.models.document import Document
+
 
 class BRDGenerationService:
 
@@ -49,10 +51,14 @@ class BRDGenerationService:
             raise ValueError(f"Session {session_id} not found")
 
         # Check for cached BRD
-        existing_brd = db.query(BRDDraft).filter(
-            BRDDraft.interview_session_id == session_id,
-            BRDDraft.status == BRDStatus.COMPLETED,
-        ).first()
+        existing_brd = (
+            db.query(BRDDraft)
+            .filter(
+                BRDDraft.interview_session_id == session_id,
+                BRDDraft.status == BRDStatus.COMPLETED,
+            )
+            .first()
+        )
 
         if existing_brd and existing_brd.markdown_content:
             return json.loads(existing_brd.markdown_content)
@@ -60,16 +66,26 @@ class BRDGenerationService:
         document = db.query(Document).filter(Document.id == session.document_id).first()
 
         # Load themes with cards and their states
-        themes = db.query(InterviewTheme).filter(
-            InterviewTheme.document_id == session.document_id,
-            InterviewTheme.is_enabled == True,
-        ).order_by(InterviewTheme.order_index).all()
+        themes = (
+            db.query(InterviewTheme)
+            .filter(
+                InterviewTheme.document_id == session.document_id,
+                InterviewTheme.is_enabled == True,
+            )
+            .order_by(InterviewTheme.order_index)
+            .all()
+        )
 
         # Phase 2: Prefer final card coverage evaluations if available
-        final_evaluations = db.query(CardCoverageEvaluation).filter(
-            CardCoverageEvaluation.session_id == session_id,
-            CardCoverageEvaluation.basis_type == "final",
-        ).order_by(CardCoverageEvaluation.evaluation_seq.desc()).all()
+        final_evaluations = (
+            db.query(CardCoverageEvaluation)
+            .filter(
+                CardCoverageEvaluation.session_id == session_id,
+                CardCoverageEvaluation.basis_type == "final",
+            )
+            .order_by(CardCoverageEvaluation.evaluation_seq.desc())
+            .all()
+        )
 
         # Group by card_id and take the latest evaluation_seq for each card
         final_eval_by_card_id = {}
@@ -78,15 +94,18 @@ class BRDGenerationService:
                 final_eval_by_card_id[eval_rec.card_id] = eval_rec
 
         # Fallback to InterviewCardState for backwards compatibility
-        card_states = db.query(InterviewCardState).filter(
-            InterviewCardState.session_id == session_id
-        ).all()
+        card_states = (
+            db.query(InterviewCardState).filter(InterviewCardState.session_id == session_id).all()
+        )
         state_by_card_id = {cs.question_card_id: cs for cs in card_states}
 
         # Phase 1: Load utterances - prefer final_utterances if available, fallback to old utterances
-        final_utterances = db.query(FinalUtterance).filter(
-            FinalUtterance.session_id == session_id
-        ).order_by(FinalUtterance.sequence_index).all()
+        final_utterances = (
+            db.query(FinalUtterance)
+            .filter(FinalUtterance.session_id == session_id)
+            .order_by(FinalUtterance.sequence_index)
+            .all()
+        )
 
         if final_utterances:
             utterances = final_utterances
@@ -94,19 +113,32 @@ class BRDGenerationService:
         else:
             # Fallback: try live_utterances, then old utterances
             from app.models.live_utterance import LiveUtterance
-            live_utts = db.query(LiveUtterance).filter(
-                LiveUtterance.session_id == session_id,
-                LiveUtterance.is_partial == False,
-            ).order_by(LiveUtterance.created_at).all()
+
+            live_utts = (
+                db.query(LiveUtterance)
+                .filter(
+                    LiveUtterance.session_id == session_id,
+                    LiveUtterance.is_partial == False,
+                )
+                .order_by(LiveUtterance.created_at)
+                .all()
+            )
             if live_utts:
                 utterances = live_utts
-                logger.info(f"Using {len(live_utts)} live utterances for BRD generation (no final yet)")
+                logger.info(
+                    f"Using {len(live_utts)} live utterances for BRD generation (no final yet)"
+                )
             else:
-                old_utterances = db.query(Utterance).filter(
-                    Utterance.session_id == session_id
-                ).order_by(Utterance.created_at).all()
+                old_utterances = (
+                    db.query(Utterance)
+                    .filter(Utterance.session_id == session_id)
+                    .order_by(Utterance.created_at)
+                    .all()
+                )
                 utterances = old_utterances
-                logger.info(f"Using {len(old_utterances)} old utterances for BRD generation (backwards compat)")
+                logger.info(
+                    f"Using {len(old_utterances)} old utterances for BRD generation (backwards compat)"
+                )
                 if not old_utterances:
                     logger.warning(f"No utterances found for session {session_id}")
 
@@ -161,15 +193,22 @@ class BRDGenerationService:
         return result
 
     def _build_brd_sections(
-        self, themes: List[InterviewTheme], state_by_card_id: Dict, final_eval_by_card_id: Dict, db: Session
+        self,
+        themes: List[InterviewTheme],
+        state_by_card_id: Dict,
+        final_eval_by_card_id: Dict,
+        db: Session,
     ) -> List[Dict[str, Any]]:
         """Build BRD content sections from theme/card evidence."""
         brd_chapter_map: Dict[str, List[Dict]] = {}
 
         for theme in themes:
-            cards = db.query(QuestionCard).filter(
-                QuestionCard.interview_theme_id == theme.id
-            ).order_by(QuestionCard.order_index).all()
+            cards = (
+                db.query(QuestionCard)
+                .filter(QuestionCard.interview_theme_id == theme.id)
+                .order_by(QuestionCard.order_index)
+                .all()
+            )
 
             for card in cards:
                 # Phase 2: Use final evaluation if available, otherwise fall back to InterviewCardState
@@ -191,36 +230,48 @@ class BRDGenerationService:
                     # No evaluation found, skip this card
                     continue
 
-                for chapter in (card.brd_mapping or theme.brd_mapping or []):
+                for chapter in card.brd_mapping or theme.brd_mapping or []:
                     brd_chapter_map.setdefault(chapter, [])
 
-                    if status in ('sufficient', 'probably_sufficient', 'covered', 'probably_covered', 'manually_checked'):
-                        brd_chapter_map[chapter].append({
-                            "focusText": card.focus_text or card.question_text,
-                            "status": status,
-                            "evidence": evidence_text,
-                            "confidence": confidence,
-                            "themeTitle": theme.title,
-                        })
-                    elif status in ('pending', 'at_risk') and card.importance == 'must':
-                        brd_chapter_map[chapter].append({
-                            "focusText": card.focus_text or card.question_text,
-                            "status": "missing",
-                            "evidence": "",
-                            "confidence": None,
-                            "themeTitle": theme.title,
-                        })
+                    if status in (
+                        "sufficient",
+                        "probably_sufficient",
+                        "covered",
+                        "probably_covered",
+                        "manually_checked",
+                    ):
+                        brd_chapter_map[chapter].append(
+                            {
+                                "focusText": card.focus_text or card.question_text,
+                                "status": status,
+                                "evidence": evidence_text,
+                                "confidence": confidence,
+                                "themeTitle": theme.title,
+                            }
+                        )
+                    elif status in ("pending", "at_risk") and card.importance == "must":
+                        brd_chapter_map[chapter].append(
+                            {
+                                "focusText": card.focus_text or card.question_text,
+                                "status": "missing",
+                                "evidence": "",
+                                "confidence": None,
+                                "themeTitle": theme.title,
+                            }
+                        )
 
         sections = []
         for chapter, items in brd_chapter_map.items():
             confirmed = [i for i in items if i["status"] != "missing"]
             missing = [i for i in items if i["status"] == "missing"]
-            sections.append({
-                "chapter": chapter,
-                "confirmedItems": confirmed,
-                "missingItems": missing,
-                "isComplete": len(missing) == 0 and len(confirmed) > 0,
-            })
+            sections.append(
+                {
+                    "chapter": chapter,
+                    "confirmedItems": confirmed,
+                    "missingItems": missing,
+                    "isComplete": len(missing) == 0 and len(confirmed) > 0,
+                }
+            )
 
         return sections
 
@@ -235,34 +286,43 @@ class BRDGenerationService:
         issues = []
         role_deferred = []
         for theme in themes:
-            cards = db.query(QuestionCard).filter(
-                QuestionCard.interview_theme_id == theme.id,
-                QuestionCard.importance == "must",
-            ).all()
+            cards = (
+                db.query(QuestionCard)
+                .filter(
+                    QuestionCard.interview_theme_id == theme.id,
+                    QuestionCard.importance == "must",
+                )
+                .all()
+            )
 
             for card in cards:
                 state = state_by_card_id.get(card.id)
-                if state and state.status in ('not_applicable_for_role', 'needs_different_stakeholder'):
-                    role_deferred.append({
-                        "themeTitle": theme.title,
-                        "focusText": card.focus_text or card.question_text,
-                        "targetRoles": card.target_roles or [],
-                        "brdMapping": card.brd_mapping or theme.brd_mapping or [],
-                    })
+                if state and state.status in (
+                    "not_applicable_for_role",
+                    "needs_different_stakeholder",
+                ):
+                    role_deferred.append(
+                        {
+                            "themeTitle": theme.title,
+                            "focusText": card.focus_text or card.question_text,
+                            "targetRoles": card.target_roles or [],
+                            "brdMapping": card.brd_mapping or theme.brd_mapping or [],
+                        }
+                    )
                     continue
-                if not state or state.status in ('pending', 'at_risk', 'skipped'):
-                    issues.append({
-                        "themeTitle": theme.title,
-                        "focusText": card.focus_text or card.question_text,
-                        "suggestedFollowup": card.suggested_followup,
-                        "brdMapping": card.brd_mapping or theme.brd_mapping or [],
-                    })
+                if not state or state.status in ("pending", "at_risk", "skipped"):
+                    issues.append(
+                        {
+                            "themeTitle": theme.title,
+                            "focusText": card.focus_text or card.question_text,
+                            "suggestedFollowup": card.suggested_followup,
+                            "brdMapping": card.brd_mapping or theme.brd_mapping or [],
+                        }
+                    )
 
         return issues
 
-    def _build_transcript(
-        self, utterances, themes: List[InterviewTheme]
-    ) -> str:
+    def _build_transcript(self, utterances, themes: List[InterviewTheme]) -> str:
         """Build formatted transcript markdown.
 
         Handles both FinalUtterance and Utterance objects for backwards compatibility.
@@ -291,9 +351,9 @@ class BRDGenerationService:
         # For FinalUtterance, use theme_id; for Utterance, use section_id
         theme_ids = set()
         for u in utterances:
-            if hasattr(u, 'theme_id') and u.theme_id:
+            if hasattr(u, "theme_id") and u.theme_id:
                 theme_ids.add(u.theme_id)
-            elif hasattr(u, 'section_id') and u.section_id:
+            elif hasattr(u, "section_id") and u.section_id:
                 theme_ids.add(u.section_id)
         lines.append(f"| 訪談單元數 | {len(theme_ids)} |")
         lines.append("")
@@ -303,7 +363,7 @@ class BRDGenerationService:
         current_theme_title = None
         for utt in utterances:
             # Handle both FinalUtterance (theme_id) and Utterance (section_id)
-            theme_id = getattr(utt, 'theme_id', None) or getattr(utt, 'section_id', None)
+            theme_id = getattr(utt, "theme_id", None) or getattr(utt, "section_id", None)
             theme_title = theme_map.get(theme_id, "未分類")
 
             if theme_title != current_theme_title:
@@ -312,10 +372,10 @@ class BRDGenerationService:
                 lines.append("")
 
             # For FinalUtterance, prefer speaker_display_name; otherwise parse speaker
-            if hasattr(utt, 'speaker_display_name') and utt.speaker_display_name:
+            if hasattr(utt, "speaker_display_name") and utt.speaker_display_name:
                 speaker_label = utt.speaker_display_name
             else:
-                raw = getattr(utt, 'speaker_label', None) or getattr(utt, 'speaker', None) or "?"
+                raw = getattr(utt, "speaker_label", None) or getattr(utt, "speaker", None) or "?"
                 if raw.startswith("speaker_"):
                     try:
                         speaker_label = f"Speaker {int(raw.split('_')[1]) + 1}"
@@ -324,7 +384,13 @@ class BRDGenerationService:
                 else:
                     speaker_label = f"Speaker ({raw})"
 
-            time_str = utt.created_at.replace(tzinfo=timezone.utc).astimezone(TZ_TAIPEI).strftime("%H:%M:%S") if utt.created_at else ""
+            time_str = (
+                utt.created_at.replace(tzinfo=timezone.utc)
+                .astimezone(TZ_TAIPEI)
+                .strftime("%H:%M:%S")
+                if utt.created_at
+                else ""
+            )
             lines.append(f"**{speaker_label}** `{time_str}`")
             lines.append("")
             lines.append(f"> {utt.transcript}")
@@ -338,12 +404,15 @@ class BRDGenerationService:
         Returns:
             Tuple of (markdown_string, question_count)
         """
-        from app.models.question_instance import QuestionInstance
         from app.models.question_answer import QuestionAnswer
+        from app.models.question_instance import QuestionInstance
 
-        questions = db.query(QuestionInstance).filter(
-            QuestionInstance.session_id == session_id
-        ).order_by(QuestionInstance.sequence_index).all()
+        questions = (
+            db.query(QuestionInstance)
+            .filter(QuestionInstance.session_id == session_id)
+            .order_by(QuestionInstance.sequence_index)
+            .all()
+        )
 
         if not questions:
             return "## 每題回答整理\n\n（本次訪談無偵測到問答結構）\n", 0
@@ -358,16 +427,18 @@ class BRDGenerationService:
 
         for idx, question in enumerate(questions, 1):
             # Load answer
-            answer = db.query(QuestionAnswer).filter(
-                QuestionAnswer.question_instance_id == question.id
-            ).first()
+            answer = (
+                db.query(QuestionAnswer)
+                .filter(QuestionAnswer.question_instance_id == question.id)
+                .first()
+            )
 
             # Question header
             q_type_label = {
-                'main_question': '主要問題',
-                'follow_up': '追問',
-                'clarification': '釐清',
-            }.get(question.question_type, '')
+                "main_question": "主要問題",
+                "follow_up": "追問",
+                "clarification": "釐清",
+            }.get(question.question_type, "")
 
             lines.append(f"### Q{idx}. {question.asked_text}")
             if q_type_label:
@@ -392,18 +463,22 @@ class BRDGenerationService:
                 lines.append("**原文依據**")
                 lines.append("")
                 for quote_obj in answer.evidence_quotes[:3]:
-                    quote = quote_obj.get('quote', '') if isinstance(quote_obj, dict) else str(quote_obj)
+                    quote = (
+                        quote_obj.get("quote", "")
+                        if isinstance(quote_obj, dict)
+                        else str(quote_obj)
+                    )
                     if quote:
                         lines.append(f"> {quote}")
                 lines.append("")
 
             # Answer status
             status_label = {
-                'answered': '已回答',
-                'partially_answered': '部分回答',
-                'not_answered': '未回答',
-                'unclear': '不清楚',
-            }.get(answer.answer_status, '未知')
+                "answered": "已回答",
+                "partially_answered": "部分回答",
+                "not_answered": "未回答",
+                "unclear": "不清楚",
+            }.get(answer.answer_status, "未知")
 
             lines.append(f"**回答狀態**")
             lines.append(status_label)
@@ -418,6 +493,7 @@ class BRDGenerationService:
     ) -> List[Dict[str, Any]]:
         """Use GPT 5.4 mini to rewrite raw evidence into formal BRD paragraphs."""
         import json
+
         from app.services.openai_service import openai_service
 
         title = document.title if document else "需求文件"
@@ -521,16 +597,18 @@ class BRDGenerationService:
 
         return "\n".join(lines)
 
-
     def generate_project_brd(self, db: Session, project_id: str) -> Dict[str, Any]:
         """Generate BRD from project-level evidence (multi-interview).
 
         Uses Evidence Matrix validated entries + all Insight Memos
         instead of a single session's card states.
         """
-        from app.models.project import Project
-        from app.models.requirement_evidence_matrix import RequirementEvidenceMatrix, EvidenceMatrixEntry
         from app.models.interview_insight_memo import InterviewInsightMemo
+        from app.models.project import Project
+        from app.models.requirement_evidence_matrix import (
+            EvidenceMatrixEntry,
+            RequirementEvidenceMatrix,
+        )
         from app.models.stakeholder_profile import StakeholderProfile
 
         project = db.query(Project).filter(Project.id == project_id).first()
@@ -538,28 +616,43 @@ class BRDGenerationService:
             raise ValueError(f"Project {project_id} not found")
 
         # Load evidence matrix entries
-        matrix = db.query(RequirementEvidenceMatrix).filter(
-            RequirementEvidenceMatrix.project_id == project_id
-        ).first()
+        matrix = (
+            db.query(RequirementEvidenceMatrix)
+            .filter(RequirementEvidenceMatrix.project_id == project_id)
+            .first()
+        )
 
         entries = []
         if matrix:
-            entries = db.query(EvidenceMatrixEntry).filter(
-                EvidenceMatrixEntry.matrix_id == matrix.id,
-                EvidenceMatrixEntry.validation_status != "rejected",
-            ).order_by(EvidenceMatrixEntry.mention_count.desc()).all()
+            entries = (
+                db.query(EvidenceMatrixEntry)
+                .filter(
+                    EvidenceMatrixEntry.matrix_id == matrix.id,
+                    EvidenceMatrixEntry.validation_status != "rejected",
+                )
+                .order_by(EvidenceMatrixEntry.mention_count.desc())
+                .all()
+            )
 
         # Load all insight memos
-        memos = db.query(InterviewInsightMemo).filter(
-            InterviewInsightMemo.project_id == project_id,
-            InterviewInsightMemo.status == "completed",
-        ).all()
+        memos = (
+            db.query(InterviewInsightMemo)
+            .filter(
+                InterviewInsightMemo.project_id == project_id,
+                InterviewInsightMemo.status == "completed",
+            )
+            .all()
+        )
 
         # Load stakeholders
-        profiles = db.query(StakeholderProfile).filter(
-            StakeholderProfile.project_id == project_id,
-            StakeholderProfile.status == "interviewed",
-        ).all()
+        profiles = (
+            db.query(StakeholderProfile)
+            .filter(
+                StakeholderProfile.project_id == project_id,
+                StakeholderProfile.status == "interviewed",
+            )
+            .all()
+        )
 
         # Build BRD sections from evidence
         brd_sections = self._build_project_brd_sections(entries, memos, project)
@@ -570,7 +663,9 @@ class BRDGenerationService:
         brd_sections = self._rewrite_sections_with_ai(None, brd_sections)
 
         # Render markdown
-        brd_md = self._render_project_brd_markdown(project, brd_sections, stakeholders_section, open_issues)
+        brd_md = self._render_project_brd_markdown(
+            project, brd_sections, stakeholders_section, open_issues
+        )
 
         return {
             "projectId": project_id,
@@ -613,64 +708,72 @@ class BRDGenerationService:
                 if ev.get("evidence_quote"):
                     evidence_text += f"[{ev.get('stakeholder_name', '')}] {ev['evidence_quote']}\n"
 
-            chapter_map[chapter].append({
-                "focusText": entry.requirement_candidate,
-                "status": entry.validation_status,
-                "evidence": evidence_text.strip(),
-                "confidence": None,
-                "themeTitle": "",
-                "sourceRoles": entry.source_roles or [],
-                "mentionCount": entry.mention_count,
-            })
+            chapter_map[chapter].append(
+                {
+                    "focusText": entry.requirement_candidate,
+                    "status": entry.validation_status,
+                    "evidence": evidence_text.strip(),
+                    "confidence": None,
+                    "themeTitle": "",
+                    "sourceRoles": entry.source_roles or [],
+                    "mentionCount": entry.mention_count,
+                }
+            )
 
         # From memos: pain points → 業務痛點 chapter
         all_pain_points = []
         for memo in memos:
-            for pp in (memo.pain_points or []):
+            for pp in memo.pain_points or []:
                 all_pain_points.append(pp)
 
         if all_pain_points:
             chapter_map.setdefault("業務痛點", [])
             for pp in all_pain_points[:10]:
-                chapter_map["業務痛點"].append({
-                    "focusText": pp.get("description", ""),
-                    "status": "sufficient",
-                    "evidence": pp.get("evidence_quote", ""),
-                    "confidence": None,
-                    "themeTitle": "",
-                    "sourceRoles": pp.get("affected_roles", []),
-                    "mentionCount": 1,
-                })
+                chapter_map["業務痛點"].append(
+                    {
+                        "focusText": pp.get("description", ""),
+                        "status": "sufficient",
+                        "evidence": pp.get("evidence_quote", ""),
+                        "confidence": None,
+                        "themeTitle": "",
+                        "sourceRoles": pp.get("affected_roles", []),
+                        "mentionCount": 1,
+                    }
+                )
 
         # From memos: constraints
         all_constraints = []
         for memo in memos:
-            for ca in (memo.constraints_and_assumptions or []):
+            for ca in memo.constraints_and_assumptions or []:
                 all_constraints.append(ca)
 
         if all_constraints:
             chapter_map.setdefault("限制與假設", [])
             for ca in all_constraints[:10]:
-                chapter_map["限制與假設"].append({
-                    "focusText": ca.get("content", ""),
-                    "status": "sufficient",
-                    "evidence": ca.get("evidence_quote", ""),
-                    "confidence": None,
-                    "themeTitle": "",
-                    "sourceRoles": [],
-                    "mentionCount": 1,
-                })
+                chapter_map["限制與假設"].append(
+                    {
+                        "focusText": ca.get("content", ""),
+                        "status": "sufficient",
+                        "evidence": ca.get("evidence_quote", ""),
+                        "confidence": None,
+                        "themeTitle": "",
+                        "sourceRoles": [],
+                        "mentionCount": 1,
+                    }
+                )
 
         sections = []
         for chapter, items in chapter_map.items():
             confirmed = [i for i in items if i["status"] not in ("missing", "rejected")]
             missing = [i for i in items if i["status"] == "missing"]
-            sections.append({
-                "chapter": chapter,
-                "confirmedItems": confirmed,
-                "missingItems": missing,
-                "isComplete": len(missing) == 0 and len(confirmed) > 0,
-            })
+            sections.append(
+                {
+                    "chapter": chapter,
+                    "confirmedItems": confirmed,
+                    "missingItems": missing,
+                    "isComplete": len(missing) == 0 and len(confirmed) > 0,
+                }
+            )
 
         return sections
 
@@ -690,7 +793,9 @@ class BRDGenerationService:
                 "subject_matter_expert": "領域專家",
             }
             power = power_map.get(p.decision_power, p.decision_power or "—")
-            lines.append(f"| {p.name} | {p.role_title or p.stakeholder_type} | {p.department or '—'} | {power} |")
+            lines.append(
+                f"| {p.name} | {p.role_title or p.stakeholder_type} | {p.department or '—'} | {power} |"
+            )
         lines.append("")
         return "\n".join(lines)
 
@@ -699,19 +804,22 @@ class BRDGenerationService:
         issues = []
         for entry in entries:
             if entry.validation_status in ("needs_more_evidence", "conflicted"):
-                issues.append({
-                    "focusText": entry.requirement_candidate,
-                    "status": entry.validation_status,
-                    "missingRoles": entry.missing_validation_from or [],
-                    "conflicts": entry.conflicts or [],
-                })
+                issues.append(
+                    {
+                        "focusText": entry.requirement_candidate,
+                        "status": entry.validation_status,
+                        "missingRoles": entry.missing_validation_from or [],
+                        "conflicts": entry.conflicts or [],
+                    }
+                )
         return issues
 
     def _render_project_brd_markdown(
         self, project, sections: List[Dict], stakeholders_section: str, open_issues: List[Dict]
     ) -> str:
         """Render project-level BRD as markdown."""
-        from datetime import timezone, timedelta
+        from datetime import timedelta, timezone
+
         now = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%d")
 
         lines = []

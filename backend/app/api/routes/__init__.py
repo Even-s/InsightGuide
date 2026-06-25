@@ -1,15 +1,17 @@
 """API routes package."""
 
 # InsightGuide routes
-from app.api.routes import documents
-from app.api.routes import sections
-from app.api.routes import question_cards
-from app.api.routes import interview_sessions
-from app.api.routes import auth
-from app.api.routes import realtime
-from app.api.routes import prep_sessions
-from app.api.routes import events
-from app.api.routes import session_reports
+from app.api.routes import (
+    auth,
+    documents,
+    events,
+    interview_sessions,
+    prep_sessions,
+    question_cards,
+    realtime,
+    sections,
+    session_reports,
+)
 
 __all__ = [
     "documents",

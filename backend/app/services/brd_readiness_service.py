@@ -1,17 +1,18 @@
 """BRD Readiness Service - evaluates whether a project is ready for BRD generation."""
 
-import uuid
 import logging
+import uuid
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
+
 from sqlalchemy.orm import Session
 
 from app.models.brd_readiness_report import BRDReadinessReport
-from app.models.requirement_evidence_matrix import RequirementEvidenceMatrix, EvidenceMatrixEntry
 from app.models.interview_insight_memo import InterviewInsightMemo
-from app.models.stakeholder_slot import StakeholderSlot
-from app.models.stakeholder_profile import StakeholderProfile
 from app.models.project import Project
+from app.models.requirement_evidence_matrix import EvidenceMatrixEntry, RequirementEvidenceMatrix
+from app.models.stakeholder_profile import StakeholderProfile
+from app.models.stakeholder_slot import StakeholderSlot
 
 logger = logging.getLogger(__name__)
 
@@ -25,29 +26,39 @@ class BRDReadinessService:
             raise ValueError(f"Project {project_id} not found")
 
         # Gather data
-        matrix = db.query(RequirementEvidenceMatrix).filter(
-            RequirementEvidenceMatrix.project_id == project_id
-        ).first()
+        matrix = (
+            db.query(RequirementEvidenceMatrix)
+            .filter(RequirementEvidenceMatrix.project_id == project_id)
+            .first()
+        )
 
         entries = []
         if matrix:
-            entries = db.query(EvidenceMatrixEntry).filter(
-                EvidenceMatrixEntry.matrix_id == matrix.id
-            ).all()
+            entries = (
+                db.query(EvidenceMatrixEntry)
+                .filter(EvidenceMatrixEntry.matrix_id == matrix.id)
+                .all()
+            )
 
-        memos = db.query(InterviewInsightMemo).filter(
-            InterviewInsightMemo.project_id == project_id,
-            InterviewInsightMemo.status == "completed",
-        ).all()
+        memos = (
+            db.query(InterviewInsightMemo)
+            .filter(
+                InterviewInsightMemo.project_id == project_id,
+                InterviewInsightMemo.status == "completed",
+            )
+            .all()
+        )
 
-        slots = db.query(StakeholderSlot).filter(
-            StakeholderSlot.project_id == project_id
-        ).all()
+        slots = db.query(StakeholderSlot).filter(StakeholderSlot.project_id == project_id).all()
 
-        profiles = db.query(StakeholderProfile).filter(
-            StakeholderProfile.project_id == project_id,
-            StakeholderProfile.status == "interviewed",
-        ).all()
+        profiles = (
+            db.query(StakeholderProfile)
+            .filter(
+                StakeholderProfile.project_id == project_id,
+                StakeholderProfile.status == "interviewed",
+            )
+            .all()
+        )
 
         # Evaluate
         stakeholder_coverage = self._evaluate_stakeholder_coverage(slots, profiles)
@@ -105,9 +116,12 @@ class BRDReadinessService:
 
     def get_latest_report(self, db: Session, project_id: str) -> Optional[BRDReadinessReport]:
         """Get the most recent readiness report for a project."""
-        return db.query(BRDReadinessReport).filter(
-            BRDReadinessReport.project_id == project_id
-        ).order_by(BRDReadinessReport.generated_at.desc()).first()
+        return (
+            db.query(BRDReadinessReport)
+            .filter(BRDReadinessReport.project_id == project_id)
+            .order_by(BRDReadinessReport.generated_at.desc())
+            .first()
+        )
 
     def can_generate_brd(self, db: Session, project_id: str) -> Dict[str, Any]:
         """Quick check: can we generate a BRD?"""
@@ -127,7 +141,11 @@ class BRDReadinessService:
         required_slots = [s for s in slots if s.priority == "required"]
         completed_slots = [s for s in required_slots if s.status == "completed"]
         skipped_slots = [s for s in required_slots if s.status == "skipped"]
-        missing_slots = [s for s in required_slots if s.status in ("unassigned", "partially_assigned", "assigned")]
+        missing_slots = [
+            s
+            for s in required_slots
+            if s.status in ("unassigned", "partially_assigned", "assigned")
+        ]
 
         interviewed_roles = {p.stakeholder_type for p in profiles}
 
@@ -157,7 +175,7 @@ class BRDReadinessService:
             categories_with_evidence[cat]["entries"] += 1
             if entry.validation_status == "validated":
                 categories_with_evidence[cat]["validated"] += 1
-            for role in (entry.source_roles or []):
+            for role in entry.source_roles or []:
                 categories_with_evidence[cat]["roles"].add(role)
 
         # Check pain points and process coverage from memos
@@ -166,44 +184,61 @@ class BRDReadinessService:
         has_constraints = any(m.constraints_and_assumptions for m in memos)
 
         if has_pain_points:
-            ready.append({
-                "section": "業務流程痛點",
-                "evidence_count": sum(len(m.pain_points or []) for m in memos),
-                "source_roles": sorted({
-                    (m.stakeholder_summary or {}).get("role", "unknown")
-                    for m in memos if m.pain_points
-                }),
-                "confidence": "high",
-            })
+            ready.append(
+                {
+                    "section": "業務流程痛點",
+                    "evidence_count": sum(len(m.pain_points or []) for m in memos),
+                    "source_roles": sorted(
+                        {
+                            (m.stakeholder_summary or {}).get("role", "unknown")
+                            for m in memos
+                            if m.pain_points
+                        }
+                    ),
+                    "confidence": "high",
+                }
+            )
         else:
-            insufficient.append({
-                "section": "業務流程痛點",
-                "reason": "尚無訪談提及痛點",
-                "missing_roles": [],
-                "priority": "high",
-            })
+            insufficient.append(
+                {
+                    "section": "業務流程痛點",
+                    "reason": "尚無訪談提及痛點",
+                    "missing_roles": [],
+                    "priority": "high",
+                }
+            )
 
         if has_process:
-            ready.append({
-                "section": "現有流程描述",
-                "evidence_count": sum(len(m.process_descriptions or []) for m in memos),
-                "source_roles": sorted({
-                    (m.stakeholder_summary or {}).get("role", "unknown")
-                    for m in memos if m.process_descriptions
-                }),
-                "confidence": "medium",
-            })
+            ready.append(
+                {
+                    "section": "現有流程描述",
+                    "evidence_count": sum(len(m.process_descriptions or []) for m in memos),
+                    "source_roles": sorted(
+                        {
+                            (m.stakeholder_summary or {}).get("role", "unknown")
+                            for m in memos
+                            if m.process_descriptions
+                        }
+                    ),
+                    "confidence": "medium",
+                }
+            )
 
         if has_constraints:
-            ready.append({
-                "section": "限制與假設",
-                "evidence_count": sum(len(m.constraints_and_assumptions or []) for m in memos),
-                "source_roles": sorted({
-                    (m.stakeholder_summary or {}).get("role", "unknown")
-                    for m in memos if m.constraints_and_assumptions
-                }),
-                "confidence": "medium",
-            })
+            ready.append(
+                {
+                    "section": "限制與假設",
+                    "evidence_count": sum(len(m.constraints_and_assumptions or []) for m in memos),
+                    "source_roles": sorted(
+                        {
+                            (m.stakeholder_summary or {}).get("role", "unknown")
+                            for m in memos
+                            if m.constraints_and_assumptions
+                        }
+                    ),
+                    "confidence": "medium",
+                }
+            )
 
         # Check categories from evidence matrix
         for cat, info in categories_with_evidence.items():
@@ -218,29 +253,39 @@ class BRDReadinessService:
             }.get(cat, cat)
 
             if info["validated"] >= 2 or (info["entries"] >= 3 and len(info["roles"]) >= 2):
-                ready.append({
-                    "section": section_name,
-                    "evidence_count": info["entries"],
-                    "source_roles": sorted(info["roles"]),
-                    "confidence": "high" if info["validated"] >= 2 else "medium",
-                })
+                ready.append(
+                    {
+                        "section": section_name,
+                        "evidence_count": info["entries"],
+                        "source_roles": sorted(info["roles"]),
+                        "confidence": "high" if info["validated"] >= 2 else "medium",
+                    }
+                )
             elif info["entries"] > 0:
-                insufficient.append({
-                    "section": section_name,
-                    "reason": f"僅 {len(info['roles'])} 個角色提供證據" if len(info["roles"]) < 2 else "驗證數不足",
-                    "missing_roles": [],
-                    "priority": "medium",
-                })
+                insufficient.append(
+                    {
+                        "section": section_name,
+                        "reason": (
+                            f"僅 {len(info['roles'])} 個角色提供證據"
+                            if len(info["roles"]) < 2
+                            else "驗證數不足"
+                        ),
+                        "missing_roles": [],
+                        "priority": "medium",
+                    }
+                )
 
         # Check for technical sections
         tech_roles_heard = any("engineering" in (e.source_roles or []) for e in entries)
         if not tech_roles_heard and entries:
-            insufficient.append({
-                "section": "技術限制與系統整合",
-                "reason": "尚無工程/IT角色訪談",
-                "missing_roles": ["engineering", "IT"],
-                "priority": "high",
-            })
+            insufficient.append(
+                {
+                    "section": "技術限制與系統整合",
+                    "reason": "尚無工程/IT角色訪談",
+                    "missing_roles": ["engineering", "IT"],
+                    "priority": "high",
+                }
+            )
 
         return {"ready": ready, "insufficient": insufficient}
 
@@ -250,11 +295,13 @@ class BRDReadinessService:
         for entry in entries:
             if entry.validation_status == "conflicted" and entry.conflicts:
                 for c in entry.conflicts:
-                    conflicts.append({
-                        "topic": entry.requirement_candidate[:60],
-                        "conflicting_parties": c.get("conflicting_roles", []),
-                        "details": c.get("description", ""),
-                    })
+                    conflicts.append(
+                        {
+                            "topic": entry.requirement_candidate[:60],
+                            "conflicting_parties": c.get("conflicting_roles", []),
+                            "details": c.get("description", ""),
+                        }
+                    )
         return conflicts
 
     def _build_suggestions(self, entries: List, slots: List, coverage: Dict) -> List[Dict]:
@@ -268,29 +315,33 @@ class BRDReadinessService:
                 if s.role_label == role_label:
                     matching_cat = s.role_category
                     break
-            suggestions.append({
-                "target_role": role_label,
-                "role_category": matching_cat or "unknown",
-                "objective": f"完成「{role_label}」角色的需求訪談",
-                "urgency": "high",
-                "key_questions": [],
-            })
+            suggestions.append(
+                {
+                    "target_role": role_label,
+                    "role_category": matching_cat or "unknown",
+                    "objective": f"完成「{role_label}」角色的需求訪談",
+                    "urgency": "high",
+                    "key_questions": [],
+                }
+            )
 
         # From missing_validation_from in entries
         role_demand: Dict[str, int] = {}
         for entry in entries:
-            for role in (entry.missing_validation_from or []):
+            for role in entry.missing_validation_from or []:
                 role_demand[role] = role_demand.get(role, 0) + 1
 
         for role, count in sorted(role_demand.items(), key=lambda x: -x[1]):
             if not any(s.get("role_category") == role for s in suggestions):
-                suggestions.append({
-                    "target_role": role,
-                    "role_category": role,
-                    "objective": f"驗證 {count} 條候選需求的技術/業務可行性",
-                    "urgency": "high" if count >= 3 else "medium",
-                    "key_questions": [],
-                })
+                suggestions.append(
+                    {
+                        "target_role": role,
+                        "role_category": role,
+                        "objective": f"驗證 {count} 條候選需求的技術/業務可行性",
+                        "urgency": "high" if count >= 3 else "medium",
+                        "key_questions": [],
+                    }
+                )
 
         return suggestions[:5]
 
@@ -318,10 +369,10 @@ class BRDReadinessService:
         conflict_score = 1.0 - conflict_penalty
 
         score = (
-            section_score * 0.4 +
-            stakeholder_score * 0.3 +
-            evidence_score * 0.2 +
-            conflict_score * 0.1
+            section_score * 0.4
+            + stakeholder_score * 0.3
+            + evidence_score * 0.2
+            + conflict_score * 0.1
         )
 
         return max(0.0, min(1.0, score))
@@ -333,7 +384,11 @@ class BRDReadinessService:
         lines.append("")
 
         # Verdict
-        emoji = "✅" if report.generation_mode == "full" else "⚠️" if report.generation_mode == "partial" else "❌"
+        emoji = (
+            "✅"
+            if report.generation_mode == "full"
+            else "⚠️" if report.generation_mode == "partial" else "❌"
+        )
         lines.append(f"## 結論 {emoji}")
         lines.append("")
         lines.append(report.recommendation or "")
@@ -358,7 +413,9 @@ class BRDReadinessService:
             lines.append("")
             for s in report.ready_sections:
                 roles = ", ".join(s.get("source_roles", []))
-                lines.append(f"- **{s['section']}** — {s.get('evidence_count', 0)} 條證據 ({roles})")
+                lines.append(
+                    f"- **{s['section']}** — {s.get('evidence_count', 0)} 條證據 ({roles})"
+                )
             lines.append("")
 
         # Insufficient sections
@@ -368,7 +425,9 @@ class BRDReadinessService:
             for s in report.insufficient_sections:
                 missing = ", ".join(s.get("missing_roles", []))
                 reason = s.get("reason", "")
-                lines.append(f"- **{s['section']}** — {reason}" + (f" (缺: {missing})" if missing else ""))
+                lines.append(
+                    f"- **{s['section']}** — {reason}" + (f" (缺: {missing})" if missing else "")
+                )
             lines.append("")
 
         # Conflicts
@@ -387,7 +446,9 @@ class BRDReadinessService:
             lines.append("| 對象 | 目的 | 急迫性 |")
             lines.append("|------|------|--------|")
             for s in report.suggested_next_interviews:
-                lines.append(f"| {s.get('target_role', '')} | {s.get('objective', '')} | {s.get('urgency', '')} |")
+                lines.append(
+                    f"| {s.get('target_role', '')} | {s.get('objective', '')} | {s.get('urgency', '')} |"
+                )
             lines.append("")
 
         return "\n".join(lines)

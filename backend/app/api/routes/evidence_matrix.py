@@ -1,9 +1,10 @@
 """Evidence Matrix routes."""
 
 import logging
+from typing import Optional
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import Optional
 
 from app.db.session import get_db
 from app.services.evidence_matrix_service import evidence_matrix_service
@@ -35,11 +36,16 @@ def _entry_to_response(entry) -> dict:
 @router.get("/projects/{project_id}/evidence-matrix")
 async def get_evidence_matrix(project_id: str, db: Session = Depends(get_db)):
     """Get the requirement evidence matrix for a project."""
-    from app.models.requirement_evidence_matrix import RequirementEvidenceMatrix, EvidenceMatrixEntry
+    from app.models.requirement_evidence_matrix import (
+        EvidenceMatrixEntry,
+        RequirementEvidenceMatrix,
+    )
 
-    matrix = db.query(RequirementEvidenceMatrix).filter(
-        RequirementEvidenceMatrix.project_id == project_id
-    ).first()
+    matrix = (
+        db.query(RequirementEvidenceMatrix)
+        .filter(RequirementEvidenceMatrix.project_id == project_id)
+        .first()
+    )
 
     if not matrix:
         return {
@@ -48,9 +54,12 @@ async def get_evidence_matrix(project_id: str, db: Session = Depends(get_db)):
             "summary": evidence_matrix_service.get_matrix_summary(db, project_id),
         }
 
-    entries = db.query(EvidenceMatrixEntry).filter(
-        EvidenceMatrixEntry.matrix_id == matrix.id
-    ).order_by(EvidenceMatrixEntry.mention_count.desc()).all()
+    entries = (
+        db.query(EvidenceMatrixEntry)
+        .filter(EvidenceMatrixEntry.matrix_id == matrix.id)
+        .order_by(EvidenceMatrixEntry.mention_count.desc())
+        .all()
+    )
 
     return {
         "matrix": {
@@ -76,9 +85,13 @@ async def refresh_evidence_matrix(project_id: str, db: Session = Depends(get_db)
         raise HTTPException(status_code=500, detail="Failed to refresh evidence matrix")
 
     from app.models.requirement_evidence_matrix import EvidenceMatrixEntry
-    entries = db.query(EvidenceMatrixEntry).filter(
-        EvidenceMatrixEntry.matrix_id == matrix.id
-    ).order_by(EvidenceMatrixEntry.mention_count.desc()).all()
+
+    entries = (
+        db.query(EvidenceMatrixEntry)
+        .filter(EvidenceMatrixEntry.matrix_id == matrix.id)
+        .order_by(EvidenceMatrixEntry.mention_count.desc())
+        .all()
+    )
 
     return {
         "matrix": {
@@ -117,11 +130,13 @@ async def get_interview_suggestions(project_id: str, db: Session = Depends(get_d
 
     suggestions = []
     for role in summary.get("roles_missing", []):
-        suggestions.append({
-            "target_role": role,
-            "reason": f"有候選需求等待 {role} 角色驗證",
-            "urgency": "high" if summary.get("needs_more_evidence", 0) > 2 else "medium",
-        })
+        suggestions.append(
+            {
+                "target_role": role,
+                "reason": f"有候選需求等待 {role} 角色驗證",
+                "urgency": "high" if summary.get("needs_more_evidence", 0) > 2 else "medium",
+            }
+        )
 
     return {
         "suggestions": suggestions,

@@ -1,15 +1,16 @@
 """Server-Sent Events (SSE) routes for real-time updates."""
 
-import logging
 import asyncio
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.services.event_service import event_service
-from app.models.interview_session import InterviewSession
 from app.models.document import Document
+from app.models.interview_session import InterviewSession
+from app.services.event_service import event_service
 
 logger = logging.getLogger(__name__)
 
@@ -17,10 +18,7 @@ router = APIRouter()
 
 
 @router.get("/sessions/{session_id}/stream")
-async def stream_session_events(
-    session_id: str,
-    db: Session = Depends(get_db)
-):
+async def stream_session_events(session_id: str, db: Session = Depends(get_db)):
     """
     Subscribe to real-time events for an interview session via SSE.
 
@@ -53,18 +51,13 @@ async def stream_session_events(
     logger.info(f"SSE stream requested for session {session_id}")
 
     # Verify session or document exists (deck analysis uses document_id as session key)
-    session = db.query(InterviewSession).filter(
-        InterviewSession.id == session_id
-    ).first()
+    session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
 
     if not session:
-        document = db.query(Document).filter(
-            Document.id == session_id
-        ).first()
+        document = db.query(Document).filter(Document.id == session_id).first()
         if not document:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Session {session_id} not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Session {session_id} not found"
             )
 
     async def event_generator():
@@ -73,7 +66,7 @@ async def stream_session_events(
 
         try:
             # Send initial connection confirmation
-            yield f"event: connected\ndata: {{\"sessionId\": \"{session_id}\"}}\n\n"
+            yield f'event: connected\ndata: {{"sessionId": "{session_id}"}}\n\n'
 
             # Send heartbeat every 30 seconds to keep connection alive
             heartbeat_task = asyncio.create_task(send_heartbeats(queue))
@@ -116,8 +109,8 @@ async def stream_session_events(
         headers={
             "Cache-Control": "no-cache",
             "X-Accel-Buffering": "no",  # Disable nginx buffering
-            "Connection": "keep-alive"
-        }
+            "Connection": "keep-alive",
+        },
     )
 
 
@@ -133,17 +126,11 @@ async def get_connection_count(session_id: str):
     """
     count = event_service.get_connection_count(session_id)
 
-    return {
-        "sessionId": session_id,
-        "activeConnections": count
-    }
+    return {"sessionId": session_id, "activeConnections": count}
 
 
 @router.post("/sessions/{session_id}/test-event")
-async def send_test_event(
-    session_id: str,
-    db: Session = Depends(get_db)
-):
+async def send_test_event(session_id: str, db: Session = Depends(get_db)):
     """
     Send a test event to all subscribers (for testing).
 
@@ -154,17 +141,16 @@ async def send_test_event(
     if settings.ENVIRONMENT != "development":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Test endpoint only available in development"
+            detail="Test endpoint only available in development",
         )
 
-    await event_service.publish(session_id, {
-        'type': 'TEST_EVENT',
-        'message': 'This is a test event',
-        'timestamp': '2026-05-25T...'
-    })
+    await event_service.publish(
+        session_id,
+        {"type": "TEST_EVENT", "message": "This is a test event", "timestamp": "2026-05-25T..."},
+    )
 
     return {
         "message": "Test event sent",
         "sessionId": session_id,
-        "subscribers": event_service.get_connection_count(session_id)
+        "subscribers": event_service.get_connection_count(session_id),
     }

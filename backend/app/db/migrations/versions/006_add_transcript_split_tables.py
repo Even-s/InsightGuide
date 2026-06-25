@@ -11,9 +11,8 @@ Phase 1: Data Flow Separation
 - Adds transcript management fields to interview_sessions
 """
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = '006_add_transcript_split_tables'

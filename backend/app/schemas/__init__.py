@@ -2,50 +2,47 @@
 
 # New InsightGuide schemas
 from app.schemas.document import (
+    DocumentAnalysisResponse,
     DocumentCreate,
     DocumentResponse,
     DocumentStatus,
-    DocumentAnalysisResponse,
-)
-from app.schemas.section import (
-    SectionResponse,
-    SectionWithQuestionCards,
-)
-from app.schemas.question_card import (
-    QuestionCardSchema,
-    QuestionCardCreate,
-    QuestionCardUpdate,
-    CoverageRule,
-    MustMentionElement,
-    SufficiencyThresholds,
-    SufficiencyEvidence,
-)
-from app.schemas.interview import (
-    InterviewSessionSchema,
-    InterviewSessionCreate,
-    InterviewSessionUpdate,
-    InterviewCardStateSchema,
-    InterviewCardStateUpdate,
-    UtteranceSchema,
-    UtteranceCreate,
-    InterviewSessionWithDocument,
-    InterviewSessionListResponse,
-)
-from app.schemas.prep_session import (
-    PrepSessionSchema,
-    PrepSessionCreate,
-    PrepSessionUpdate,
-    PrepSessionWithDocument,
-    PrepSessionListResponse,
 )
 from app.schemas.evaluation import (
-    EvaluateAnswersInput,
-    EvaluateAnswersOutput,
     AISemanticEvaluationInput,
     AISemanticEvaluationOutput,
     CandidateQuestionCard,
+    EvaluateAnswersInput,
+    EvaluateAnswersOutput,
     SemanticDecision,
 )
+from app.schemas.interview import (
+    InterviewCardStateSchema,
+    InterviewCardStateUpdate,
+    InterviewSessionCreate,
+    InterviewSessionListResponse,
+    InterviewSessionSchema,
+    InterviewSessionUpdate,
+    InterviewSessionWithDocument,
+    UtteranceCreate,
+    UtteranceSchema,
+)
+from app.schemas.prep_session import (
+    PrepSessionCreate,
+    PrepSessionListResponse,
+    PrepSessionSchema,
+    PrepSessionUpdate,
+    PrepSessionWithDocument,
+)
+from app.schemas.question_card import (
+    CoverageRule,
+    MustMentionElement,
+    QuestionCardCreate,
+    QuestionCardSchema,
+    QuestionCardUpdate,
+    SufficiencyEvidence,
+    SufficiencyThresholds,
+)
+from app.schemas.section import SectionResponse, SectionWithQuestionCards
 
 __all__ = [
     # New InsightGuide schemas

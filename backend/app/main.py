@@ -1,17 +1,32 @@
 """FastAPI application entry point for InsightGuide."""
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
-from fastapi.encoders import jsonable_encoder
 import json
 
-from app.core.config import settings
-from app.core.logging import setup_logging
-from app.core.json_encoder import DateTimeEncoder
+from fastapi import FastAPI
+from fastapi.encoders import jsonable_encoder
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 # InsightGuide routes
-from app.api.routes import documents, sections, question_cards, interview_sessions, auth, realtime, prep_sessions, events, session_reports, brd, diarize, projects, insight_memos, evidence_matrix
+from app.api.routes import (
+    auth,
+    brd,
+    diarize,
+    documents,
+    events,
+    evidence_matrix,
+    insight_memos,
+    interview_sessions,
+    prep_sessions,
+    projects,
+    question_cards,
+    realtime,
+    sections,
+    session_reports,
+)
+from app.core.config import settings
+from app.core.json_encoder import DateTimeEncoder
+from app.core.logging import setup_logging
 
 # Setup logging
 setup_logging()
@@ -20,13 +35,16 @@ setup_logging()
 from pydantic import ConfigDict
 from pydantic.json import pydantic_encoder
 
+
 def custom_encoder(obj):
     """Custom JSON encoder for datetime objects."""
     from datetime import datetime
+
     if isinstance(obj, datetime):
         # Serialize UTC datetime with 'Z' suffix
-        return obj.isoformat() + 'Z'
+        return obj.isoformat() + "Z"
     return pydantic_encoder(obj)
+
 
 # Create FastAPI application
 app = FastAPI(
@@ -100,21 +118,26 @@ async def health_check():
 async def startup_event():
     """Run on application startup."""
     import logging
+
     logger = logging.getLogger(__name__)
     logger.info("InsightGuide API starting up...")
     logger.info(f"Environment: {settings.ENVIRONMENT}")
     logger.info(f"Debug mode: {settings.DEBUG}")
 
     # Ensure demo user exists (required by FK on projects/sessions)
-    from app.db.session import SessionLocal
     from sqlalchemy import text
+
+    from app.db.session import SessionLocal
+
     db = SessionLocal()
     try:
-        db.execute(text(
-            "INSERT INTO users (id, email, hashed_password, created_at, updated_at) "
-            "VALUES ('user_default', 'demo@insightguide.local', 'not_used', NOW(), NOW()) "
-            "ON CONFLICT (id) DO NOTHING"
-        ))
+        db.execute(
+            text(
+                "INSERT INTO users (id, email, hashed_password, created_at, updated_at) "
+                "VALUES ('user_default', 'demo@insightguide.local', 'not_used', NOW(), NOW()) "
+                "ON CONFLICT (id) DO NOTHING"
+            )
+        )
         db.commit()
     except Exception:
         db.rollback()
@@ -126,5 +149,6 @@ async def startup_event():
 async def shutdown_event():
     """Run on application shutdown."""
     import logging
+
     logger = logging.getLogger(__name__)
     logger.info("InsightGuide API shutting down...")

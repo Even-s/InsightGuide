@@ -1,11 +1,12 @@
 """Event service for real-time updates via Server-Sent Events (SSE)."""
 
-import logging
-import json
 import asyncio
-from typing import Dict, Any, Set
-from datetime import datetime
+import json
+import logging
 from collections import defaultdict
+from datetime import datetime
+from typing import Any, Dict, Set
+
 import redis
 import redis.asyncio as async_redis
 
@@ -28,7 +29,9 @@ class EventService:
         self._connections: Dict[str, Set[asyncio.Queue]] = defaultdict(set)
         self._queue_loops: Dict[asyncio.Queue, asyncio.AbstractEventLoop] = {}
         self._redis_client = redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
-        self._async_redis_client = async_redis.Redis.from_url(settings.REDIS_URL, decode_responses=True)
+        self._async_redis_client = async_redis.Redis.from_url(
+            settings.REDIS_URL, decode_responses=True
+        )
 
     def redis_channel(self, session_id: str) -> str:
         """Return the Redis pub/sub channel used for this event stream."""
@@ -101,8 +104,8 @@ class EventService:
             return
 
         # Add timestamp if not present
-        if 'timestamp' not in event:
-            event['timestamp'] = datetime.utcnow().isoformat()
+        if "timestamp" not in event:
+            event["timestamp"] = datetime.utcnow().isoformat()
 
         # Format as SSE message
         sse_data = self._format_sse_message(event)
@@ -140,16 +143,13 @@ class EventService:
             session_id: Interview session ID
             event: Event data dict
         """
-        if 'timestamp' not in event:
-            event['timestamp'] = datetime.utcnow().isoformat()
+        if "timestamp" not in event:
+            event["timestamp"] = datetime.utcnow().isoformat()
 
         sse_data = self._format_sse_message(event)
 
         try:
-            self._redis_client.publish(
-                self.redis_channel(session_id),
-                sse_data
-            )
+            self._redis_client.publish(self.redis_channel(session_id), sse_data)
         except Exception as e:
             logger.warning(f"Failed to publish {event.get('type')} to Redis: {e}")
 
@@ -191,8 +191,8 @@ class EventService:
         id: unique_id
         (blank line)
         """
-        event_type = event.get('type', 'message')
-        event_id = event.get('id', '')
+        event_type = event.get("type", "message")
+        event_id = event.get("id", "")
         data = json.dumps(event, ensure_ascii=False)
 
         lines = []

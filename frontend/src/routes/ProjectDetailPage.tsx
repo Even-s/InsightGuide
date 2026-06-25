@@ -640,7 +640,7 @@ export default function ProjectDetailPage() {
                                         apiClient.get('/api/interview-sessions/', { params: { projectId, limit: 50 } })
                                           .then(res => {
                                             const sessions = res.data.sessions || []
-                                            const profileSession = sessions.find((s: any) => s.stakeholderProfileId === profile.id)
+                                            const profileSession = sessions.find((s: Record<string, unknown>) => s.stakeholderProfileId === profile.id)
                                             if (profileSession) navigate(`/sessions/${profileSession.id}/insight-memo`)
                                           })
                                       }}

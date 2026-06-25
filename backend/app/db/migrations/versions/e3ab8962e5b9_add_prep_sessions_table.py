@@ -5,9 +5,8 @@ Revises: 0edc97eda1b4
 Create Date: 2026-05-26 10:44:29.427499
 
 """
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision = 'e3ab8962e5b9'
@@ -39,10 +38,11 @@ def upgrade() -> None:
     op.create_index(op.f('ix_presentation_sessions_prep_session_id'), 'presentation_sessions', ['prep_session_id'], unique=False)
 
     # Data migration: Create one PrepSession per Deck and link existing PresentationSessions
-    from datetime import datetime
-    from sqlalchemy.sql import table, column
-    from sqlalchemy import String, DateTime
     import uuid
+    from datetime import datetime
+
+    from sqlalchemy import DateTime, String
+    from sqlalchemy.sql import column, table
 
     conn = op.get_bind()
 

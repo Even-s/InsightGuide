@@ -3,17 +3,18 @@
 import logging
 import uuid
 from datetime import datetime
-from typing import Optional
 from io import BytesIO
+from typing import Optional
 
-from fastapi import UploadFile, HTTPException, status
+from fastapi import HTTPException, UploadFile, status
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
+from app.db.session import SessionLocal
 from app.models.document import Document
 from app.models.user import User
 from app.services.s3_service import s3_service
-from app.core.config import settings
-from app.db.session import SessionLocal
+
 # Avoid circular import - import analyze_document inside the function where it's used
 
 logger = logging.getLogger(__name__)
@@ -36,15 +37,14 @@ class DocumentService:
         # Check file extension
         if not file.filename:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="No filename provided"
+                status_code=status.HTTP_400_BAD_REQUEST, detail="No filename provided"
             )
 
         file_ext = file.filename.split(".")[-1].lower()
         if file_ext not in settings.ALLOWED_EXTENSIONS:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid file type. Allowed: {', '.join(settings.ALLOWED_EXTENSIONS)}"
+                detail=f"Invalid file type. Allowed: {', '.join(settings.ALLOWED_EXTENSIONS)}",
             )
 
         # Note: File size validation should be done at middleware level
@@ -101,15 +101,15 @@ class DocumentService:
                 "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 "doc": "application/msword",
                 "md": "text/markdown",
-                "txt": "text/plain"
+                "txt": "text/plain",
             }
-            content_type = file.content_type or content_type_map.get(file_ext, "application/octet-stream")
+            content_type = file.content_type or content_type_map.get(
+                file_ext, "application/octet-stream"
+            )
 
             # Upload to S3
             source_file_url = s3_service.upload_file(
-                file_obj,
-                object_key,
-                content_type=content_type
+                file_obj, object_key, content_type=content_type
             )
 
             logger.info(f"Uploaded file to {source_file_url}")
@@ -117,8 +117,7 @@ class DocumentService:
         except Exception as e:
             logger.error(f"Failed to upload file: {e}")
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to upload file"
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to upload file"
             )
 
         # Create document record
@@ -150,7 +149,7 @@ class DocumentService:
                 pass
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Failed to create document"
+                detail="Failed to create document",
             )
 
         # Auto-create PrepSession immediately for this document
@@ -165,7 +164,7 @@ class DocumentService:
                 title=f"{title} - Prep Session",
                 status="preparing",  # Will be updated to "ready" when analysis completes
                 created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow()
+                updated_at=datetime.utcnow(),
             )
             db.add(prep_session)
             db.commit()
@@ -174,13 +173,17 @@ class DocumentService:
             # Publish global event for prep session creation
             try:
                 from app.services.event_service import event_service
-                event_service.publish_sync(f"prep_sessions_global", {
-                    'type': 'PREP_SESSION_CREATED',
-                    'prepSessionId': prep_session.id,
-                    'documentId': prep_session.document_id,
-                    'status': prep_session.status,
-                    'title': prep_session.title
-                })
+
+                event_service.publish_sync(
+                    f"prep_sessions_global",
+                    {
+                        "type": "PREP_SESSION_CREATED",
+                        "prepSessionId": prep_session.id,
+                        "documentId": prep_session.document_id,
+                        "status": prep_session.status,
+                        "title": prep_session.title,
+                    },
+                )
                 logger.info(f"📤 Published PREP_SESSION_CREATED event for {prep_session.id}")
             except Exception as e:
                 logger.warning(f"Failed to publish prep session created event: {e}")
@@ -192,19 +195,26 @@ class DocumentService:
         # Enqueue document processing job
         try:
             from app.workers.document_analysis_worker import analyze_document
+
             try:
                 analyze_document.delay(document_id)
                 logger.info(f"Enqueued document processing job for document {document_id}")
             except Exception:
                 # Celery not available — run synchronously in background thread
                 import threading
+
                 def _run_analysis():
                     try:
                         analyze_document(document_id)
                         # Update prep session to ready after analysis
                         from app.models.prep_session import PrepSession
+
                         analysis_db = SessionLocal()
-                        ps = analysis_db.query(PrepSession).filter(PrepSession.id == document_id).first()
+                        ps = (
+                            analysis_db.query(PrepSession)
+                            .filter(PrepSession.id == document_id)
+                            .first()
+                        )
                         if ps:
                             ps.status = "ready"
                             analysis_db.commit()
@@ -250,6 +260,7 @@ class DocumentService:
 
         # Create a single section with the topic content
         from app.models.section import Section
+
         section = Section(
             id=f"sec_{uuid.uuid4().hex[:12]}",
             document_id=document_id,
@@ -264,6 +275,7 @@ class DocumentService:
         # Create prep session
         try:
             from app.models.prep_session import PrepSession
+
             prep_session = PrepSession(
                 id=document_id,
                 document_id=document_id,
@@ -281,22 +293,30 @@ class DocumentService:
         # Enqueue analysis
         try:
             from app.workers.document_analysis_worker import analyze_document
+
             try:
                 analyze_document.delay(document_id)
             except Exception:
                 import threading
+
                 def _run_analysis():
                     try:
                         analyze_document(document_id)
                         from app.models.prep_session import PrepSession
+
                         analysis_db = SessionLocal()
-                        ps = analysis_db.query(PrepSession).filter(PrepSession.id == document_id).first()
+                        ps = (
+                            analysis_db.query(PrepSession)
+                            .filter(PrepSession.id == document_id)
+                            .first()
+                        )
                         if ps:
                             ps.status = "ready"
                             analysis_db.commit()
                         analysis_db.close()
                     except Exception as e:
                         logger.error(f"Background analysis failed: {e}")
+
                 threading.Thread(target=_run_analysis, daemon=True).start()
         except Exception as e:
             logger.error(f"Failed to start analysis: {e}")
@@ -321,8 +341,7 @@ class DocumentService:
         document = db.query(Document).filter(Document.id == document_id).first()
         if not document:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Document {document_id} not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Document {document_id} not found"
             )
         return document
 

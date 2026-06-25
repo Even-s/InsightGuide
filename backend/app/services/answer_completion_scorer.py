@@ -1,7 +1,7 @@
 """Answer Completion Scorer - Deterministic scoring from criterion evaluations."""
 
 import logging
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 

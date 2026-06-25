@@ -1,18 +1,20 @@
 """BRD (Business Requirements Document) schemas."""
 
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
+
 from pydantic import BaseModel, Field
 
-from app.models.brd import BRDStatus, RequirementType, RequirementPriority
-
+from app.models.brd import BRDStatus, RequirementPriority, RequirementType
 
 # ============================================================================
 # Requirement Schemas
 # ============================================================================
 
+
 class RequirementBase(BaseModel):
     """Base requirement schema."""
+
     title: str
     description: str
     type: RequirementType
@@ -26,6 +28,7 @@ class RequirementBase(BaseModel):
 
 class RequirementCreate(RequirementBase):
     """Create requirement schema."""
+
     source_question_card_id: Optional[str] = None
     source_utterance_ids: Optional[List[str]] = None
     confidence: Optional[float] = None
@@ -33,6 +36,7 @@ class RequirementCreate(RequirementBase):
 
 class RequirementUpdate(BaseModel):
     """Update requirement schema."""
+
     title: Optional[str] = None
     description: Optional[str] = None
     type: Optional[RequirementType] = None
@@ -46,6 +50,7 @@ class RequirementUpdate(BaseModel):
 
 class RequirementResponse(RequirementBase):
     """Requirement response schema."""
+
     id: str
     brd_draft_id: str
     source_question_card_id: Optional[str]
@@ -62,8 +67,10 @@ class RequirementResponse(RequirementBase):
 # BRD Draft Schemas
 # ============================================================================
 
+
 class BRDDraftBase(BaseModel):
     """Base BRD draft schema."""
+
     title: Optional[str] = None
     executive_summary: Optional[str] = None
     project_overview: Optional[str] = None
@@ -77,16 +84,19 @@ class BRDDraftBase(BaseModel):
 
 class BRDDraftCreate(BaseModel):
     """Create BRD draft schema."""
+
     interview_session_id: str
 
 
 class BRDDraftUpdate(BRDDraftBase):
     """Update BRD draft schema."""
+
     pass
 
 
 class BRDDraftResponse(BRDDraftBase):
     """BRD draft response schema."""
+
     id: str
     interview_session_id: str
     user_id: str
@@ -107,11 +117,13 @@ class BRDDraftResponse(BRDDraftBase):
 
 class BRDGenerationRequest(BaseModel):
     """Request to generate BRD from interview session."""
+
     interview_session_id: str = Field(..., description="Interview session ID to generate BRD from")
 
 
 class BRDGenerationResponse(BaseModel):
     """Response after initiating BRD generation."""
+
     brd_id: str
     status: BRDStatus
     message: str
@@ -119,11 +131,13 @@ class BRDGenerationResponse(BaseModel):
 
 class BRDExportRequest(BaseModel):
     """Request to export BRD."""
+
     format: str = Field(..., description="Export format: 'markdown', 'pdf', or 'docx'")
 
 
 class BRDExportResponse(BaseModel):
     """Response after exporting BRD."""
+
     brd_id: str
     format: str
     export_url: Optional[str] = None

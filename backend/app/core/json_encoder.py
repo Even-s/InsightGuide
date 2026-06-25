@@ -1,7 +1,7 @@
 """Custom JSON encoder for datetime serialization."""
 
 import json
-from datetime import datetime, date
+from datetime import date, datetime
 from typing import Any
 
 
@@ -12,7 +12,7 @@ class DateTimeEncoder(json.JSONEncoder):
         """Encode datetime objects to ISO 8601 format with 'Z' suffix for UTC."""
         if isinstance(obj, datetime):
             # Ensure UTC datetime is serialized with 'Z' suffix
-            return obj.isoformat() + 'Z'
+            return obj.isoformat() + "Z"
         elif isinstance(obj, date):
             return obj.isoformat()
         return super().default(obj)

@@ -3,13 +3,18 @@ Unit tests for Billing Service
 Tests cost calculation, model normalization, and usage tracking.
 """
 
-import pytest
 from decimal import Decimal
 from unittest.mock import Mock, patch
 
+import pytest
+
 from app.services.billing_service import (
-    billing_service, BillingService,
-    MODEL_TOKEN_PRICES, MODEL_AUDIO_PRICES, ZERO, MILLION
+    MILLION,
+    MODEL_AUDIO_PRICES,
+    MODEL_TOKEN_PRICES,
+    ZERO,
+    BillingService,
+    billing_service,
 )
 
 
@@ -89,10 +94,7 @@ class TestBillingService:
 
     def test_token_cost_known_model(self):
         cost, pricing = billing_service.calculate_token_cost(
-            model="gpt-5.4-mini",
-            input_tokens=1000,
-            cached_input_tokens=0,
-            output_tokens=500
+            model="gpt-5.4-mini", input_tokens=1000, cached_input_tokens=0, output_tokens=500
         )
         assert cost > ZERO
         assert pricing["type"] == "text_tokens"
@@ -101,52 +103,34 @@ class TestBillingService:
 
     def test_token_cost_unknown_model(self):
         cost, pricing = billing_service.calculate_token_cost(
-            model="unknown-model",
-            input_tokens=1000,
-            cached_input_tokens=0,
-            output_tokens=500
+            model="unknown-model", input_tokens=1000, cached_input_tokens=0, output_tokens=500
         )
         assert cost == ZERO
         assert pricing["missingPrice"] is True
 
     def test_token_cost_with_cache(self):
         cost_no_cache, _ = billing_service.calculate_token_cost(
-            model="gpt-5.4-mini",
-            input_tokens=1000,
-            cached_input_tokens=0,
-            output_tokens=100
+            model="gpt-5.4-mini", input_tokens=1000, cached_input_tokens=0, output_tokens=100
         )
         cost_with_cache, _ = billing_service.calculate_token_cost(
-            model="gpt-5.4-mini",
-            input_tokens=1000,
-            cached_input_tokens=500,
-            output_tokens=100
+            model="gpt-5.4-mini", input_tokens=1000, cached_input_tokens=500, output_tokens=100
         )
         # Cached tokens are cheaper
         assert cost_with_cache < cost_no_cache
 
     def test_token_cost_zero_tokens(self):
         cost, _ = billing_service.calculate_token_cost(
-            model="gpt-5.4-mini",
-            input_tokens=0,
-            cached_input_tokens=0,
-            output_tokens=0
+            model="gpt-5.4-mini", input_tokens=0, cached_input_tokens=0, output_tokens=0
         )
         assert cost == ZERO
 
     def test_token_cost_negative_tokens_handled(self):
         cost, _ = billing_service.calculate_token_cost(
-            model="gpt-5.4-mini",
-            input_tokens=-100,
-            cached_input_tokens=0,
-            output_tokens=-50
+            model="gpt-5.4-mini", input_tokens=-100, cached_input_tokens=0, output_tokens=-50
         )
         assert cost >= ZERO
 
     # --- calculate_audio_cost ---
-
-
-
 
     def test_round_money(self):
         result = billing_service._round_money(Decimal("0.1234567"))

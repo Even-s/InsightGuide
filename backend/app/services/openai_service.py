@@ -2,7 +2,8 @@
 
 import json
 import logging
-from typing import List, Dict, Any, Optional
+from typing import Any, Dict, List, Optional
+
 from openai import OpenAI
 
 from app.core.config import settings
@@ -35,12 +36,9 @@ class OpenAIService:
                 "messages": [
                     {
                         "role": "system",
-                        "content": "You are an expert at analyzing interview content and generating structured metadata for topic cards. Always respond with valid JSON."
+                        "content": "You are an expert at analyzing interview content and generating structured metadata for topic cards. Always respond with valid JSON.",
                     },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
+                    {"role": "user", "content": prompt},
                 ],
                 "response_format": {"type": "json_object"},
             }
@@ -54,6 +52,7 @@ class OpenAIService:
                 raise ValueError("Empty response from OpenAI")
 
             import json
+
             return json.loads(content)
 
         except Exception as e:
@@ -93,7 +92,7 @@ class OpenAIService:
             section_text=section_text,
             section_title=section_title,
             document_title=document_title,
-            section_number=section_number
+            section_number=section_number,
         )
 
         try:
@@ -102,9 +101,9 @@ class OpenAIService:
                 "model": self.analysis_model,
                 "messages": [
                     {"role": "system", "content": self._get_document_analysis_system_prompt()},
-                    {"role": "user", "content": prompt}
+                    {"role": "user", "content": prompt},
                 ],
-                "response_format": {"type": "json_object"}
+                "response_format": {"type": "json_object"},
             }
 
             # Only add temperature for non-GPT-5 models
@@ -119,6 +118,7 @@ class OpenAIService:
                 raise ValueError("Empty response from OpenAI")
 
             import json
+
             result = json.loads(content)
 
             # Calculate cost and usage
@@ -127,7 +127,7 @@ class OpenAIService:
                 model=self.analysis_model,
                 input_tokens=usage.prompt_tokens,
                 cached_input_tokens=0,
-                output_tokens=usage.completion_tokens
+                output_tokens=usage.completion_tokens,
             )
 
             return {
@@ -137,8 +137,8 @@ class OpenAIService:
                     "prompt_tokens": usage.prompt_tokens,
                     "completion_tokens": usage.completion_tokens,
                     "total_tokens": usage.total_tokens,
-                    "cost_usd": cost_usd
-                }
+                    "cost_usd": cost_usd,
+                },
             }
 
         except Exception as e:
@@ -160,8 +160,7 @@ class OpenAIService:
         logger.info(f"Generating interview themes for: {document_title}")
 
         section_list = "\n".join(
-            f"- Section {s.section_number}: {s.title or '(untitled)'}"
-            for s in sections
+            f"- Section {s.section_number}: {s.title or '(untitled)'}" for s in sections
         )
 
         # Default fallback prompt
@@ -441,11 +440,15 @@ class OpenAIService:
         section_text: str,
         section_title: Optional[str] = None,
         document_title: Optional[str] = None,
-        section_number: int = 1
+        section_number: int = 1,
     ) -> str:
         """Build prompt for document section analysis."""
         title_info = f"Document: {document_title}\n" if document_title else ""
-        section_info = f"Section {section_number}: {section_title}\n\n" if section_title else f"Section {section_number}\n\n"
+        section_info = (
+            f"Section {section_number}: {section_title}\n\n"
+            if section_title
+            else f"Section {section_number}\n\n"
+        )
 
         return f"""{title_info}{section_info}Content:
 {section_text}

@@ -3,27 +3,28 @@
 import logging
 import uuid
 from datetime import datetime, timedelta
-from typing import Optional, List
-from sqlalchemy.orm import Session
-from sqlalchemy import desc, asc, and_
-from fastapi import HTTPException, status
+from typing import List, Optional
 
-from app.models.interview_session import InterviewSession, InterviewCardState
-from app.models.utterance import Utterance
-from app.models.live_utterance import LiveUtterance
+from fastapi import HTTPException, status
+from sqlalchemy import and_, asc, desc
+from sqlalchemy.orm import Session
+
+from app.core.config import settings
 from app.models.document import Document
+from app.models.interview_session import InterviewCardState, InterviewSession
+from app.models.live_utterance import LiveUtterance
 from app.models.prep_session import PrepSession
 from app.models.question_card import QuestionCard
+from app.models.utterance import Utterance
 from app.schemas.interview import (
-    InterviewSessionCreate,
-    InterviewSessionUpdate,
     InterviewCardStateUpdate,
-    UtteranceCreate,
+    InterviewSessionCreate,
     InterviewSessionListResponse,
-    InterviewSessionWithDocument
+    InterviewSessionUpdate,
+    InterviewSessionWithDocument,
+    UtteranceCreate,
 )
 from app.services.billing_service import billing_service
-from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -32,9 +33,7 @@ class InterviewService:
     """Service for interview session operations."""
 
     def calculate_active_duration(
-        self,
-        session: InterviewSession,
-        end_at: Optional[datetime] = None
+        self, session: InterviewSession, end_at: Optional[datetime] = None
     ) -> Optional[int]:
         """Calculate interview duration excluding paused time."""
         if not session.started_at:
@@ -63,10 +62,7 @@ class InterviewService:
         session.paused_at = None
 
     def create_session(
-        self,
-        db: Session,
-        user_id: str,
-        session_data: InterviewSessionCreate
+        self, db: Session, user_id: str, session_data: InterviewSessionCreate
     ) -> InterviewSession:
         """
         Create a new interview session under a prep session.
@@ -80,27 +76,27 @@ class InterviewService:
             Created interview session
         """
         # Verify prep session exists
-        prep_session = db.query(PrepSession).filter(
-            PrepSession.id == session_data.prepSessionId
-        ).first()
+        prep_session = (
+            db.query(PrepSession).filter(PrepSession.id == session_data.prepSessionId).first()
+        )
         if not prep_session:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Prep session {session_data.prepSessionId} not found"
+                detail=f"Prep session {session_data.prepSessionId} not found",
             )
 
         # Verify prep session belongs to user
         if prep_session.user_id != user_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have permission to create an interview session for this prep session"
+                detail="You don't have permission to create an interview session for this prep session",
             )
 
         # Verify prep session is ready
         if prep_session.status != "ready":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Prep session must be ready before starting interview. Current status: {prep_session.status}"
+                detail=f"Prep session must be ready before starting interview. Current status: {prep_session.status}",
             )
 
         # Verify document exists and matches
@@ -108,20 +104,20 @@ class InterviewService:
         if not document:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Document {session_data.documentId} not found"
+                detail=f"Document {session_data.documentId} not found",
             )
 
         if document.id != prep_session.document_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Document ID does not match prep session's document"
+                detail="Document ID does not match prep session's document",
             )
 
         # Verify document is analyzed and ready
         if document.status != "analyzed":
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Document must be analyzed before starting interview. Current status: {document.status}"
+                detail=f"Document must be analyzed before starting interview. Current status: {document.status}",
             )
 
         # Check for recent duplicate creation (within last 10 seconds)
@@ -134,13 +130,18 @@ class InterviewService:
         ).with_for_update().first()
 
         # Now check for recent sessions with the lock held
-        recent_session = db.query(InterviewSession).filter(
-            and_(
-                InterviewSession.prep_session_id == session_data.prepSessionId,
-                InterviewSession.user_id == user_id,
-                InterviewSession.created_at >= recent_threshold
+        recent_session = (
+            db.query(InterviewSession)
+            .filter(
+                and_(
+                    InterviewSession.prep_session_id == session_data.prepSessionId,
+                    InterviewSession.user_id == user_id,
+                    InterviewSession.created_at >= recent_threshold,
+                )
             )
-        ).order_by(desc(InterviewSession.created_at)).first()
+            .order_by(desc(InterviewSession.created_at))
+            .first()
+        )
 
         if recent_session:
             logger.info(
@@ -150,25 +151,31 @@ class InterviewService:
             return recent_session
 
         # Auto-end any active sessions for this prep session
-        active_sessions = db.query(InterviewSession).filter(
-            InterviewSession.prep_session_id == session_data.prepSessionId,
-            InterviewSession.user_id == user_id,
-            InterviewSession.status.in_(['idle', 'interviewing', 'paused', 'ready'])
-        ).all()
+        active_sessions = (
+            db.query(InterviewSession)
+            .filter(
+                InterviewSession.prep_session_id == session_data.prepSessionId,
+                InterviewSession.user_id == user_id,
+                InterviewSession.status.in_(["idle", "interviewing", "paused", "ready"]),
+            )
+            .all()
+        )
 
         if active_sessions:
             for old_session in active_sessions:
                 ended_at = datetime.utcnow()
                 self._end_current_pause(old_session, ended_at)
-                old_session.status = 'ended'
+                old_session.status = "ended"
                 old_session.ended_at = ended_at
             db.commit()
-            logger.info(f"Auto-ended {len(active_sessions)} old sessions for prep session {session_data.prepSessionId}")
+            logger.info(
+                f"Auto-ended {len(active_sessions)} old sessions for prep session {session_data.prepSessionId}"
+            )
 
         # Create session
         session_id = f"session_{uuid.uuid4().hex[:12]}"
-        project_id = getattr(session_data, 'projectId', None)
-        stakeholder_profile_id = getattr(session_data, 'stakeholderProfileId', None)
+        project_id = getattr(session_data, "projectId", None)
+        stakeholder_profile_id = getattr(session_data, "stakeholderProfileId", None)
         session = InterviewSession(
             id=session_id,
             prep_session_id=session_data.prepSessionId,
@@ -177,15 +184,15 @@ class InterviewService:
             project_id=project_id,
             stakeholder_profile_id=stakeholder_profile_id,
             status="idle",
-            created_at=datetime.utcnow()
+            created_at=datetime.utcnow(),
         )
 
         db.add(session)
 
         # Initialize card states for all question cards in the document
-        question_cards = db.query(QuestionCard).filter(
-            QuestionCard.document_id == session_data.documentId
-        ).all()
+        question_cards = (
+            db.query(QuestionCard).filter(QuestionCard.document_id == session_data.documentId).all()
+        )
 
         for card in question_cards:
             card_state = InterviewCardState(
@@ -194,7 +201,7 @@ class InterviewService:
                 question_card_id=card.id,
                 status="pending",
                 created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow()
+                updated_at=datetime.utcnow(),
             )
             db.add(card_state)
 
@@ -205,6 +212,7 @@ class InterviewService:
         if stakeholder_profile_id:
             try:
                 from app.services.role_filter_service import role_filter_service
+
                 result = role_filter_service.apply_role_filter_to_session(db, session_id)
                 logger.info(
                     f"Role filter applied: {result.get('applicable', 0)} applicable, "
@@ -222,29 +230,26 @@ class InterviewService:
 
     def get_session(self, db: Session, session_id: str) -> InterviewSession:
         """Get interview session by ID."""
-        session = db.query(InterviewSession).filter(
-            InterviewSession.id == session_id
-        ).first()
+        session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
 
         if not session:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Interview session {session_id} not found"
+                detail=f"Interview session {session_id} not found",
             )
 
         return session
 
     def update_session(
-        self,
-        db: Session,
-        session_id: str,
-        update_data: InterviewSessionUpdate
+        self, db: Session, session_id: str, update_data: InterviewSessionUpdate
     ) -> InterviewSession:
         """Update interview session."""
         session = self.get_session(db, session_id)
         old_section_id = session.current_section_id
 
-        logger.info(f"update_session payload: status={update_data.status}, currentSectionId={update_data.currentSectionId}")
+        logger.info(
+            f"update_session payload: status={update_data.status}, currentSectionId={update_data.currentSectionId}"
+        )
 
         if update_data.status:
             old_status = session.status
@@ -291,10 +296,7 @@ class InterviewService:
         return session
 
     def _mark_missed_must_cards_at_risk(
-        self,
-        db: Session,
-        session_id: str,
-        section_id: str
+        self, db: Session, session_id: str, section_id: str
     ) -> None:
         """
         Mark "must" importance question cards as "at_risk" when leaving a section.
@@ -302,20 +304,25 @@ class InterviewService:
         This helps interviewers track which critical questions were skipped.
         """
         # Get all question cards for this section
-        question_cards = db.query(QuestionCard).filter(
-            QuestionCard.section_id == section_id,
-            QuestionCard.importance == "must"
-        ).all()
+        question_cards = (
+            db.query(QuestionCard)
+            .filter(QuestionCard.section_id == section_id, QuestionCard.importance == "must")
+            .all()
+        )
 
         card_ids = [card.id for card in question_cards]
         if not card_ids:
             return
 
         # Get card states for these cards in this session
-        card_states = db.query(InterviewCardState).filter(
-            InterviewCardState.session_id == session_id,
-            InterviewCardState.question_card_id.in_(card_ids)
-        ).all()
+        card_states = (
+            db.query(InterviewCardState)
+            .filter(
+                InterviewCardState.session_id == session_id,
+                InterviewCardState.question_card_id.in_(card_ids),
+            )
+            .all()
+        )
 
         # Mark pending or listening cards as at_risk
         updated_count = 0
@@ -334,20 +341,23 @@ class InterviewService:
         db: Session,
         session_id: str,
         card_state_id: str,
-        update_data: InterviewCardStateUpdate
+        update_data: InterviewCardStateUpdate,
     ) -> InterviewCardState:
         """Manually update a card state during an interview."""
         self.get_session(db, session_id)
 
-        card_state = db.query(InterviewCardState).filter(
-            InterviewCardState.id == card_state_id,
-            InterviewCardState.session_id == session_id
-        ).first()
+        card_state = (
+            db.query(InterviewCardState)
+            .filter(
+                InterviewCardState.id == card_state_id, InterviewCardState.session_id == session_id
+            )
+            .first()
+        )
 
         if not card_state:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Card state {card_state_id} not found"
+                detail=f"Card state {card_state_id} not found",
             )
 
         old_status = card_state.status
@@ -358,7 +368,10 @@ class InterviewService:
         card_state.updated_at = datetime.utcnow()
 
         # Set answered_at timestamp when status becomes sufficient
-        if update_data.status in ["sufficient", "probably_sufficient"] and old_status not in ["sufficient", "probably_sufficient"]:
+        if update_data.status in ["sufficient", "probably_sufficient"] and old_status not in [
+            "sufficient",
+            "probably_sufficient",
+        ]:
             card_state.answered_at = datetime.utcnow()
 
         db.commit()
@@ -368,25 +381,18 @@ class InterviewService:
 
         return card_state
 
-    def get_all_card_states(
-        self,
-        db: Session,
-        session_id: str
-    ) -> List[InterviewCardState]:
+    def get_all_card_states(self, db: Session, session_id: str) -> List[InterviewCardState]:
         """Get all card states for a session."""
         self.get_session(db, session_id)
 
-        card_states = db.query(InterviewCardState).filter(
-            InterviewCardState.session_id == session_id
-        ).all()
+        card_states = (
+            db.query(InterviewCardState).filter(InterviewCardState.session_id == session_id).all()
+        )
 
         return card_states
 
     def create_utterance(
-        self,
-        db: Session,
-        session_id: str,
-        utterance_data: UtteranceCreate
+        self, db: Session, session_id: str, utterance_data: UtteranceCreate
     ) -> LiveUtterance:
         """Create a new live utterance from Realtime API in an interview session.
 
@@ -398,28 +404,30 @@ class InterviewService:
         utterance_id = f"utt_{uuid.uuid4().hex[:12]}"
 
         # Calculate sequence index based on existing live utterances
-        existing_count = db.query(LiveUtterance).filter(
-            LiveUtterance.session_id == session_id
-        ).count()
+        existing_count = (
+            db.query(LiveUtterance).filter(LiveUtterance.session_id == session_id).count()
+        )
 
         utterance = LiveUtterance(
             id=utterance_id,
             session_id=session_id,
             realtime_event_id=utterance_data.realtimeItemId,
-            speaker=utterance_data.speaker or 'unknown',
+            speaker=utterance_data.speaker or "unknown",
             transcript=utterance_data.transcript,
             started_at=utterance_data.startedAt,
             ended_at=utterance_data.endedAt,
             sequence_index=existing_count,
             is_partial=False,
-            created_at=datetime.utcnow()
+            created_at=datetime.utcnow(),
         )
 
         db.add(utterance)
         db.commit()
         db.refresh(utterance)
 
-        logger.info(f"Created live utterance {utterance_id} in session {session_id} (speaker: {utterance.speaker})")
+        logger.info(
+            f"Created live utterance {utterance_id} in session {session_id} (speaker: {utterance.speaker})"
+        )
 
         return utterance
 
@@ -429,7 +437,7 @@ class InterviewService:
         session_id: str,
         section_id: Optional[str] = None,
         speaker: Optional[str] = None,
-        limit: int = 100
+        limit: int = 100,
     ) -> list:
         """Get utterances for a session.
 
@@ -439,14 +447,20 @@ class InterviewService:
 
         # Try final_utterances first (post-diarization, official)
         from app.models.final_utterance import FinalUtterance
-        finals = db.query(FinalUtterance).filter(
-            FinalUtterance.session_id == session_id
-        ).order_by(asc(FinalUtterance.sequence_index)).limit(limit).all()
+
+        finals = (
+            db.query(FinalUtterance)
+            .filter(FinalUtterance.session_id == session_id)
+            .order_by(asc(FinalUtterance.sequence_index))
+            .limit(limit)
+            .all()
+        )
         if finals:
             return finals
 
         # Fall back to live_utterances
         from app.models.live_utterance import LiveUtterance
+
         query = db.query(LiveUtterance).filter(LiveUtterance.session_id == session_id)
         if speaker:
             query = query.filter(LiveUtterance.speaker == speaker)
@@ -472,14 +486,10 @@ class InterviewService:
     ) -> InterviewSessionListResponse:
         """List interview sessions for a user, optionally filtered by project."""
         # Query sessions with document information
-        query = db.query(
-            InterviewSession,
-            Document.title.label('document_title')
-        ).join(
-            Document,
-            InterviewSession.document_id == Document.id
-        ).filter(
-            InterviewSession.user_id == user_id
+        query = (
+            db.query(InterviewSession, Document.title.label("document_title"))
+            .join(Document, InterviewSession.document_id == Document.id)
+            .filter(InterviewSession.user_id == user_id)
         )
 
         if project_id:
@@ -489,9 +499,9 @@ class InterviewService:
         total = query.count()
 
         # Get paginated results
-        results = query.order_by(
-            desc(InterviewSession.created_at)
-        ).limit(limit).offset(offset).all()
+        results = (
+            query.order_by(desc(InterviewSession.created_at)).limit(limit).offset(offset).all()
+        )
 
         usage_by_session_id = billing_service.summarize_sessions(
             db,
@@ -525,15 +535,12 @@ class InterviewService:
                 createdAt=session.created_at,
                 duration=duration,
                 costUsd=ai_usage["totalCostUsd"],
-                aiUsage=ai_usage
+                aiUsage=ai_usage,
             )
             sessions.append(session_data)
 
         return InterviewSessionListResponse(
-            sessions=sessions,
-            total=total,
-            limit=limit,
-            offset=offset
+            sessions=sessions, total=total, limit=limit, offset=offset
         )
 
     def delete_session(self, db: Session, session_id: str) -> None:
@@ -541,14 +548,10 @@ class InterviewService:
         session = self.get_session(db, session_id)
 
         # Delete all card states
-        db.query(InterviewCardState).filter(
-            InterviewCardState.session_id == session_id
-        ).delete()
+        db.query(InterviewCardState).filter(InterviewCardState.session_id == session_id).delete()
 
         # Delete all utterances
-        db.query(Utterance).filter(
-            Utterance.session_id == session_id
-        ).delete()
+        db.query(Utterance).filter(Utterance.session_id == session_id).delete()
 
         # Delete the session
         db.delete(session)

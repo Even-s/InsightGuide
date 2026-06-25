@@ -1,7 +1,8 @@
 """Live Utterance model - Realtime API transcripts during interview."""
 
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, ForeignKey, Text, Integer, Boolean
+
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base
@@ -22,7 +23,7 @@ class LiveUtterance(Base):
     realtime_event_id = Column(String, nullable=True)
     transcript = Column(Text, nullable=False)
 
-    speaker = Column(String, default='unknown')
+    speaker = Column(String, default="unknown")
     # During the interview we don't do speaker identification, all marked as unknown or interviewee
 
     started_at = Column(DateTime, nullable=True)

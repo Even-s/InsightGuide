@@ -1,36 +1,40 @@
 """Interview session routes."""
 
 import logging
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status, Body, Query
-from fastapi.concurrency import run_in_threadpool
-from sqlalchemy.orm import Session
 from typing import List, Optional
 
+from fastapi import APIRouter, BackgroundTasks, Body, Depends, HTTPException, Query, status
+from fastapi.concurrency import run_in_threadpool
+from sqlalchemy.orm import Session
+
 from app.db.session import get_db
-from app.services.interview_service import interview_service
-from app.services.billing_service import billing_service
-from app.services.report_analytics_service import report_analytics_service
-from app.services.report_export_service import report_export_service
 from app.schemas.interview import (
-    InterviewSessionSchema,
-    InterviewSessionCreate,
-    InterviewSessionUpdate,
-    UtteranceSchema,
-    UtteranceCreate,
     InterviewCardStateSchema,
     InterviewCardStateUpdate,
+    InterviewSessionCreate,
     InterviewSessionListResponse,
+    InterviewSessionSchema,
+    InterviewSessionUpdate,
     InterviewSessionWithDocument,
     PartialTranscriptMatchCreate,
+    UtteranceCreate,
+    UtteranceSchema,
 )
+from app.services.billing_service import billing_service
+from app.services.interview_service import interview_service
+from app.services.report_analytics_service import report_analytics_service
+from app.services.report_export_service import report_export_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+
 def convert_session_to_schema(session, db: Optional[Session] = None) -> InterviewSessionSchema:
     """Convert session model to schema."""
-    usage = billing_service.summarize_session(db, session.id) if db else billing_service.empty_summary()
+    usage = (
+        billing_service.summarize_session(db, session.id) if db else billing_service.empty_summary()
+    )
 
     # Calculate duration
     duration = None
@@ -60,11 +64,18 @@ def convert_utterance_to_schema(utterance) -> UtteranceSchema:
 
     Handles LiveUtterance, FinalUtterance, and legacy Utterance.
     """
-    realtime_id = getattr(utterance, 'realtime_event_id', None) or getattr(utterance, 'realtime_item_id', None)
-    section_id = getattr(utterance, 'section_id', None) or getattr(utterance, 'theme_id', None)
+    realtime_id = getattr(utterance, "realtime_event_id", None) or getattr(
+        utterance, "realtime_item_id", None
+    )
+    section_id = getattr(utterance, "section_id", None) or getattr(utterance, "theme_id", None)
 
     # FinalUtterance uses speaker_role/speaker_display_name instead of speaker
-    speaker = getattr(utterance, 'speaker', None) or getattr(utterance, 'speaker_role', None) or getattr(utterance, 'speaker_display_name', None) or 'unknown'
+    speaker = (
+        getattr(utterance, "speaker", None)
+        or getattr(utterance, "speaker_role", None)
+        or getattr(utterance, "speaker_display_name", None)
+        or "unknown"
+    )
 
     return UtteranceSchema(
         id=utterance.id,
@@ -72,10 +83,10 @@ def convert_utterance_to_schema(utterance) -> UtteranceSchema:
         sectionId=section_id,
         speaker=speaker,
         transcript=utterance.transcript,
-        startedAt=getattr(utterance, 'started_at', None),
-        endedAt=getattr(utterance, 'ended_at', None),
+        startedAt=getattr(utterance, "started_at", None),
+        endedAt=getattr(utterance, "ended_at", None),
         realtimeItemId=realtime_id,
-        createdAt=getattr(utterance, 'created_at', None),
+        createdAt=getattr(utterance, "created_at", None),
     )
 
 
@@ -110,7 +121,9 @@ async def list_interview_sessions(
     - offset: Number of sessions to skip (for pagination)
     - projectId: Optional filter by project
     """
-    logger.info(f"Listing interview sessions: limit={limit}, offset={offset}, project_id={project_id}")
+    logger.info(
+        f"Listing interview sessions: limit={limit}, offset={offset}, project_id={project_id}"
+    )
 
     # For MVP, use default user
     user_id = "user_default"
@@ -186,17 +199,20 @@ async def prepare_theme(
         raise HTTPException(status_code=404, detail="Session not found")
 
     # Compile rubrics for the requested theme (blocking)
-    cards = db.query(QuestionCard).filter(
-        QuestionCard.interview_theme_id == theme_id,
-    ).order_by(QuestionCard.order_index).all()
+    cards = (
+        db.query(QuestionCard)
+        .filter(
+            QuestionCard.interview_theme_id == theme_id,
+        )
+        .order_by(QuestionCard.order_index)
+        .all()
+    )
 
     if cards:
         question_rubric_service.pre_warm_rubrics(db, cards)
 
     # Queue background prewarming for remaining themes in order
-    background_tasks.add_task(
-        _prewarm_remaining_themes_sync, session.document_id, theme_id
-    )
+    background_tasks.add_task(_prewarm_remaining_themes_sync, session.document_id, theme_id)
 
     return {
         "themeId": theme_id,
@@ -214,19 +230,30 @@ def _prewarm_remaining_themes_sync(document_id: str, exclude_theme_id: str):
 
     db = SessionLocal()
     try:
-        themes = db.query(InterviewTheme).filter(
-            InterviewTheme.document_id == document_id,
-            InterviewTheme.is_enabled == True,
-            InterviewTheme.id != exclude_theme_id,
-        ).order_by(InterviewTheme.order_index).all()
+        themes = (
+            db.query(InterviewTheme)
+            .filter(
+                InterviewTheme.document_id == document_id,
+                InterviewTheme.is_enabled == True,
+                InterviewTheme.id != exclude_theme_id,
+            )
+            .order_by(InterviewTheme.order_index)
+            .all()
+        )
 
         for theme in themes:
-            cards = db.query(QuestionCard).filter(
-                QuestionCard.interview_theme_id == theme.id,
-            ).all()
+            cards = (
+                db.query(QuestionCard)
+                .filter(
+                    QuestionCard.interview_theme_id == theme.id,
+                )
+                .all()
+            )
             if cards:
                 question_rubric_service.pre_warm_rubrics(db, cards)
-                logger.info(f"Background pre-warmed rubrics for theme {theme.id} ({len(cards)} cards)")
+                logger.info(
+                    f"Background pre-warmed rubrics for theme {theme.id} ({len(cards)} cards)"
+                )
     except Exception as e:
         logger.warning(f"Background rubric pre-warm failed: {e}")
     finally:
@@ -309,7 +336,7 @@ async def create_utterance(
             utterance,
         )
 
-        theme_id = utterance.themeId or getattr(utterance_obj, 'section_id', None)
+        theme_id = utterance.themeId or getattr(utterance_obj, "section_id", None)
         background_tasks.add_task(
             process_utterance_evaluation_background,
             session_id,
@@ -347,6 +374,7 @@ def process_utterance_evaluation_background(
     If yes, skips (the newer task will evaluate with more context).
     """
     import time
+
     from app.db.session import SessionLocal
     from app.models.live_utterance import LiveUtterance
     from app.services.answer_evaluation_engine import answer_evaluation_engine
@@ -357,10 +385,15 @@ def process_utterance_evaluation_background(
     db = SessionLocal()
     try:
         # Check if newer utterances arrived during debounce window
-        latest_utt = db.query(LiveUtterance).filter(
-            LiveUtterance.session_id == session_id,
-            LiveUtterance.is_partial == False,
-        ).order_by(LiveUtterance.sequence_index.desc()).first()
+        latest_utt = (
+            db.query(LiveUtterance)
+            .filter(
+                LiveUtterance.session_id == session_id,
+                LiveUtterance.is_partial == False,
+            )
+            .order_by(LiveUtterance.sequence_index.desc())
+            .first()
+        )
 
         if latest_utt and latest_utt.id != utterance_id:
             logger.info(
@@ -372,16 +405,24 @@ def process_utterance_evaluation_background(
         if not section_id:
             from app.models.interview_session import InterviewSession as IS
             from app.models.interview_theme import InterviewTheme
+
             session_obj = db.query(IS).filter(IS.id == session_id).first()
             if session_obj:
-                first_theme = db.query(InterviewTheme).filter(
-                    InterviewTheme.document_id == session_obj.document_id,
-                    InterviewTheme.is_enabled == True,
-                ).order_by(InterviewTheme.order_index).first()
+                first_theme = (
+                    db.query(InterviewTheme)
+                    .filter(
+                        InterviewTheme.document_id == session_obj.document_id,
+                        InterviewTheme.is_enabled == True,
+                    )
+                    .order_by(InterviewTheme.order_index)
+                    .first()
+                )
                 if first_theme:
                     section_id = first_theme.id
             if not section_id:
-                logger.warning(f"Utterance {utterance_id} has no section_id and no fallback theme, skipping evaluation")
+                logger.warning(
+                    f"Utterance {utterance_id} has no section_id and no fallback theme, skipping evaluation"
+                )
                 return
 
         # Process utterance and get card state updates
@@ -396,16 +437,23 @@ def process_utterance_evaluation_background(
         )
 
         # If question was detected and no card was auto-activated, emit candidates
-        if not updates and not asked_card_id and answer_evaluation_engine._is_question_like(transcript):
+        if (
+            not updates
+            and not asked_card_id
+            and answer_evaluation_engine._is_question_like(transcript)
+        ):
             candidates = answer_evaluation_engine.find_candidate_cards(
                 db, session_id, section_id or "", transcript, top_k=3
             )
             if candidates:
-                event_service.publish_sync(session_id, {
-                    "type": "QUESTION_CARD_CANDIDATES",
-                    "utterance_id": utterance_id,
-                    "candidates": candidates,
-                })
+                event_service.publish_sync(
+                    session_id,
+                    {
+                        "type": "QUESTION_CARD_CANDIDATES",
+                        "utterance_id": utterance_id,
+                        "candidates": candidates,
+                    },
+                )
 
         # Emit events based on activation/completion separation
         for update in updates:
@@ -441,7 +489,7 @@ def process_utterance_evaluation_background(
                     "evidence": update.get("evidence"),
                     "evidenceTranscript": update.get("evidence_transcript"),
                     "evaluationSeq": update.get("evaluation_seq"),
-                }
+                },
             )
 
             # Emit granular evidence events only for real answer progress
@@ -461,7 +509,7 @@ def process_utterance_evaluation_background(
                             "evidence_quote": (crit_eval.get("evidence_quotes") or [None])[0],
                             "completion_score": completion_score,
                             "evaluationSeq": update.get("evaluation_seq"),
-                        }
+                        },
                     )
 
     except Exception as e:
@@ -484,10 +532,14 @@ async def update_utterance_speaker(
     if not new_speaker:
         raise HTTPException(status_code=400, detail="speaker is required")
 
-    utterance = db.query(Utterance).filter(
-        Utterance.id == utterance_id,
-        Utterance.session_id == session_id,
-    ).first()
+    utterance = (
+        db.query(Utterance)
+        .filter(
+            Utterance.id == utterance_id,
+            Utterance.session_id == session_id,
+        )
+        .first()
+    )
     if not utterance:
         raise HTTPException(status_code=404, detail="Utterance not found")
 
@@ -504,16 +556,12 @@ async def get_session_utterances(
     section_id: Optional[str] = Query(None, alias="sectionId"),
     speaker: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=1000),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """Get utterances for an interview session, optionally filtered by section and/or speaker."""
     logger.info(f"Retrieving utterances for session {session_id}")
     utterances = interview_service.get_utterances(
-        db=db,
-        session_id=session_id,
-        section_id=section_id,
-        speaker=speaker,
-        limit=limit
+        db=db, session_id=session_id, section_id=section_id, speaker=speaker, limit=limit
     )
     return [convert_utterance_to_schema(u) for u in utterances]
 
@@ -594,7 +642,7 @@ def process_partial_transcript_evaluation_background(
                     "evidence": update.get("evidence"),
                     "evidenceTranscript": update.get("evidence_transcript"),
                     "evaluationSeq": update.get("evaluation_seq"),  # Phase 2: for versioned SSE
-                }
+                },
             )
 
     except Exception as e:
@@ -611,9 +659,7 @@ async def get_session_card_states(session_id: str, db: Session = Depends(get_db)
     return [convert_card_state_to_schema(cs) for cs in card_states]
 
 
-@router.patch(
-    "/{session_id}/card-states/{card_state_id}", response_model=InterviewCardStateSchema
-)
+@router.patch("/{session_id}/card-states/{card_state_id}", response_model=InterviewCardStateSchema)
 async def update_session_card_state(
     session_id: str,
     card_state_id: str,
@@ -681,8 +727,8 @@ async def end_interview_session(
 def _generate_insight_memo_background(session_id: str):
     """Background task: generate Insight Memo after interview ends."""
     from app.db.session import SessionLocal
-    from app.services.insight_memo_service import insight_memo_service
     from app.services.evidence_matrix_service import evidence_matrix_service
+    from app.services.insight_memo_service import insight_memo_service
 
     db = SessionLocal()
     try:
@@ -715,12 +761,12 @@ async def get_interview_events(session_id: str, db: Session = Depends(get_db)):
 @router.get("/{session_id}/log")
 async def get_session_log(session_id: str, db: Session = Depends(get_db)):
     """Get a unified chronological timeline of everything that happened in a session."""
-    from app.models.utterance import Utterance
-    from app.models.live_utterance import LiveUtterance
-    from app.models.final_utterance import FinalUtterance
-    from app.models.interview_session import InterviewSession, InterviewCardState
-    from app.models.card_coverage_evaluation import CardCoverageEvaluation
     from app.models.ai_usage_event import AIUsageEvent
+    from app.models.card_coverage_evaluation import CardCoverageEvaluation
+    from app.models.final_utterance import FinalUtterance
+    from app.models.interview_session import InterviewCardState, InterviewSession
+    from app.models.live_utterance import LiveUtterance
+    from app.models.utterance import Utterance
 
     session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
     if not session:
@@ -729,78 +775,123 @@ async def get_session_log(session_id: str, db: Session = Depends(get_db)):
     events = []
 
     if session.started_at:
-        events.append({"type": "session", "action": "started", "timestamp": session.started_at.isoformat()})
+        events.append(
+            {"type": "session", "action": "started", "timestamp": session.started_at.isoformat()}
+        )
     if session.paused_at:
-        events.append({"type": "session", "action": "paused", "timestamp": session.paused_at.isoformat()})
+        events.append(
+            {"type": "session", "action": "paused", "timestamp": session.paused_at.isoformat()}
+        )
     if session.ended_at:
-        events.append({"type": "session", "action": "ended", "timestamp": session.ended_at.isoformat()})
+        events.append(
+            {"type": "session", "action": "ended", "timestamp": session.ended_at.isoformat()}
+        )
 
     # Prefer final_utterances, then live_utterances, then old utterances
-    final_utts = db.query(FinalUtterance).filter(FinalUtterance.session_id == session_id).order_by(FinalUtterance.sequence_index).all()
+    final_utts = (
+        db.query(FinalUtterance)
+        .filter(FinalUtterance.session_id == session_id)
+        .order_by(FinalUtterance.sequence_index)
+        .all()
+    )
     if final_utts:
         for u in final_utts:
-            events.append({
-                "type": "utterance",
-                "speaker": u.speaker_display_name or u.speaker_label,
-                "transcript": u.transcript,
-                "timestamp": (u.started_at or u.created_at).isoformat(),
-            })
+            events.append(
+                {
+                    "type": "utterance",
+                    "speaker": u.speaker_display_name or u.speaker_label,
+                    "transcript": u.transcript,
+                    "timestamp": (u.started_at or u.created_at).isoformat(),
+                }
+            )
     else:
-        live_utts = db.query(LiveUtterance).filter(LiveUtterance.session_id == session_id, LiveUtterance.is_partial == False).order_by(LiveUtterance.created_at).all()
+        live_utts = (
+            db.query(LiveUtterance)
+            .filter(LiveUtterance.session_id == session_id, LiveUtterance.is_partial == False)
+            .order_by(LiveUtterance.created_at)
+            .all()
+        )
         if live_utts:
             for u in live_utts:
-                events.append({
-                    "type": "utterance",
-                    "speaker": u.speaker,
-                    "transcript": u.transcript,
-                    "timestamp": (u.started_at or u.created_at).isoformat(),
-                })
+                events.append(
+                    {
+                        "type": "utterance",
+                        "speaker": u.speaker,
+                        "transcript": u.transcript,
+                        "timestamp": (u.started_at or u.created_at).isoformat(),
+                    }
+                )
         else:
-            old_utts = db.query(Utterance).filter(Utterance.session_id == session_id).order_by(Utterance.created_at).all()
+            old_utts = (
+                db.query(Utterance)
+                .filter(Utterance.session_id == session_id)
+                .order_by(Utterance.created_at)
+                .all()
+            )
             for u in old_utts:
-                events.append({
-                    "type": "utterance",
-                    "speaker": u.speaker,
-                    "transcript": u.transcript,
-                    "timestamp": (u.started_at or u.created_at).isoformat(),
-                })
+                events.append(
+                    {
+                        "type": "utterance",
+                        "speaker": u.speaker,
+                        "transcript": u.transcript,
+                        "timestamp": (u.started_at or u.created_at).isoformat(),
+                    }
+                )
 
     # Card coverage: prefer CardCoverageEvaluation, fallback to InterviewCardState
-    coverage_evals = db.query(CardCoverageEvaluation).filter(CardCoverageEvaluation.session_id == session_id).order_by(CardCoverageEvaluation.created_at).all()
+    coverage_evals = (
+        db.query(CardCoverageEvaluation)
+        .filter(CardCoverageEvaluation.session_id == session_id)
+        .order_by(CardCoverageEvaluation.created_at)
+        .all()
+    )
     if coverage_evals:
         for ce in coverage_evals:
-            events.append({
-                "type": "card_update",
-                "cardId": ce.card_id,
-                "status": ce.state,
-                "basisType": ce.basis_type,
-                "confidence": float(ce.confidence) if ce.confidence else None,
-                "evidence": ce.evidence,
-                "timestamp": ce.created_at.isoformat(),
-            })
+            events.append(
+                {
+                    "type": "card_update",
+                    "cardId": ce.card_id,
+                    "status": ce.state,
+                    "basisType": ce.basis_type,
+                    "confidence": float(ce.confidence) if ce.confidence else None,
+                    "evidence": ce.evidence,
+                    "timestamp": ce.created_at.isoformat(),
+                }
+            )
     else:
-        card_states = db.query(InterviewCardState).filter(InterviewCardState.session_id == session_id).all()
+        card_states = (
+            db.query(InterviewCardState).filter(InterviewCardState.session_id == session_id).all()
+        )
         for cs in card_states:
             if cs.status != "pending":
-                events.append({
-                    "type": "card_update",
-                    "cardId": cs.question_card_id,
-                    "status": cs.status,
-                    "confidence": float(cs.confidence) if cs.confidence else None,
-                    "evidenceTranscript": cs.evidence_transcript,
-                    "timestamp": (cs.answered_at or cs.updated_at).isoformat(),
-                })
+                events.append(
+                    {
+                        "type": "card_update",
+                        "cardId": cs.question_card_id,
+                        "status": cs.status,
+                        "confidence": float(cs.confidence) if cs.confidence else None,
+                        "evidenceTranscript": cs.evidence_transcript,
+                        "timestamp": (cs.answered_at or cs.updated_at).isoformat(),
+                    }
+                )
 
-    ai_events = db.query(AIUsageEvent).filter(AIUsageEvent.interview_session_id == session_id).order_by(AIUsageEvent.created_at).all()
+    ai_events = (
+        db.query(AIUsageEvent)
+        .filter(AIUsageEvent.interview_session_id == session_id)
+        .order_by(AIUsageEvent.created_at)
+        .all()
+    )
     for ae in ai_events:
-        events.append({
-            "type": "ai_usage",
-            "operation": ae.operation,
-            "model": ae.model,
-            "totalTokens": ae.total_tokens,
-            "costUsd": float(ae.cost_usd),
-            "timestamp": ae.created_at.isoformat(),
-        })
+        events.append(
+            {
+                "type": "ai_usage",
+                "operation": ae.operation,
+                "model": ae.model,
+                "totalTokens": ae.total_tokens,
+                "costUsd": float(ae.cost_usd),
+                "timestamp": ae.created_at.isoformat(),
+            }
+        )
 
     events.sort(key=lambda e: e["timestamp"])
 
@@ -896,58 +987,76 @@ async def get_session_analytics(session_id: str, db: Session = Depends(get_db)):
         - AI usage stats (model call counts, tokens, costs)
         - Quality metrics (evidence quote rate, prefilter effectiveness)
     """
+    from sqlalchemy import func
+
+    from app.models.ai_usage_event import AIUsageEvent
+    from app.models.card_coverage_evaluation import CardCoverageEvaluation
+    from app.models.final_utterance import FinalUtterance
     from app.models.interview_session import InterviewSession
     from app.models.live_utterance import LiveUtterance
-    from app.models.final_utterance import FinalUtterance
-    from app.models.card_coverage_evaluation import CardCoverageEvaluation
-    from app.models.question_instance import QuestionInstance
     from app.models.question_answer import QuestionAnswer
-    from app.models.utterance_alignment import UtteranceAlignment
-    from app.models.ai_usage_event import AIUsageEvent
     from app.models.question_card import QuestionCard
-    from sqlalchemy import func
+    from app.models.question_instance import QuestionInstance
+    from app.models.utterance_alignment import UtteranceAlignment
 
     session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
     # === Transcription Stats ===
-    live_count = db.query(LiveUtterance).filter(
-        LiveUtterance.session_id == session_id,
-        LiveUtterance.is_partial == False,
-    ).count()
+    live_count = (
+        db.query(LiveUtterance)
+        .filter(
+            LiveUtterance.session_id == session_id,
+            LiveUtterance.is_partial == False,
+        )
+        .count()
+    )
 
-    final_count = db.query(FinalUtterance).filter(
-        FinalUtterance.session_id == session_id
-    ).count()
+    final_count = db.query(FinalUtterance).filter(FinalUtterance.session_id == session_id).count()
 
-    speakers = db.query(func.count(func.distinct(FinalUtterance.speaker_label))).filter(
-        FinalUtterance.session_id == session_id
-    ).scalar() or 0
+    speakers = (
+        db.query(func.count(func.distinct(FinalUtterance.speaker_label)))
+        .filter(FinalUtterance.session_id == session_id)
+        .scalar()
+        or 0
+    )
 
     # Alignment match rate
-    total_alignments = db.query(UtteranceAlignment).filter(
-        UtteranceAlignment.session_id == session_id
-    ).count()
+    total_alignments = (
+        db.query(UtteranceAlignment).filter(UtteranceAlignment.session_id == session_id).count()
+    )
 
-    matched_alignments = db.query(UtteranceAlignment).filter(
-        UtteranceAlignment.session_id == session_id,
-        UtteranceAlignment.final_utterance_id.isnot(None),
-    ).count()
+    matched_alignments = (
+        db.query(UtteranceAlignment)
+        .filter(
+            UtteranceAlignment.session_id == session_id,
+            UtteranceAlignment.final_utterance_id.isnot(None),
+        )
+        .count()
+    )
 
-    alignment_rate = round(matched_alignments / total_alignments, 3) if total_alignments > 0 else None
+    alignment_rate = (
+        round(matched_alignments / total_alignments, 3) if total_alignments > 0 else None
+    )
 
     # === Card Coverage Stats ===
-    total_cards = db.query(QuestionCard).filter(
-        QuestionCard.document_id == session.document_id
-    ).count() if session.document_id else 0
+    total_cards = (
+        db.query(QuestionCard).filter(QuestionCard.document_id == session.document_id).count()
+        if session.document_id
+        else 0
+    )
 
     def coverage_breakdown(basis_type):
         """Get latest evaluation per card for given basis type."""
-        evals = db.query(CardCoverageEvaluation).filter(
-            CardCoverageEvaluation.session_id == session_id,
-            CardCoverageEvaluation.basis_type == basis_type,
-        ).all()
+        evals = (
+            db.query(CardCoverageEvaluation)
+            .filter(
+                CardCoverageEvaluation.session_id == session_id,
+                CardCoverageEvaluation.basis_type == basis_type,
+            )
+            .all()
+        )
 
         # Get latest eval per card (highest evaluation_seq)
         latest = {}
@@ -969,15 +1078,23 @@ async def get_session_analytics(session_id: str, db: Session = Depends(get_db)):
     final = coverage_breakdown("final")
 
     # Drift analysis (compare latest live vs latest final per card)
-    live_evals = db.query(CardCoverageEvaluation).filter(
-        CardCoverageEvaluation.session_id == session_id,
-        CardCoverageEvaluation.basis_type == "live",
-    ).all()
+    live_evals = (
+        db.query(CardCoverageEvaluation)
+        .filter(
+            CardCoverageEvaluation.session_id == session_id,
+            CardCoverageEvaluation.basis_type == "live",
+        )
+        .all()
+    )
 
-    final_evals = db.query(CardCoverageEvaluation).filter(
-        CardCoverageEvaluation.session_id == session_id,
-        CardCoverageEvaluation.basis_type == "final",
-    ).all()
+    final_evals = (
+        db.query(CardCoverageEvaluation)
+        .filter(
+            CardCoverageEvaluation.session_id == session_id,
+            CardCoverageEvaluation.basis_type == "final",
+        )
+        .all()
+    )
 
     # Build latest eval maps
     latest_live = {}
@@ -987,7 +1104,10 @@ async def get_session_analytics(session_id: str, db: Session = Depends(get_db)):
 
     latest_final = {}
     for e in final_evals:
-        if e.card_id not in latest_final or e.evaluation_seq > latest_final[e.card_id].evaluation_seq:
+        if (
+            e.card_id not in latest_final
+            or e.evaluation_seq > latest_final[e.card_id].evaluation_seq
+        ):
             latest_final[e.card_id] = e
 
     # Compare states
@@ -1015,54 +1135,58 @@ async def get_session_analytics(session_id: str, db: Session = Depends(get_db)):
             unchanged += 1
 
     # === Q/A Stats ===
-    q_count = db.query(QuestionInstance).filter(
-        QuestionInstance.session_id == session_id
-    ).count()
+    q_count = db.query(QuestionInstance).filter(QuestionInstance.session_id == session_id).count()
 
-    qa_statuses = db.query(
-        QuestionAnswer.answer_status,
-        func.count(QuestionAnswer.id)
-    ).filter(
-        QuestionAnswer.session_id == session_id
-    ).group_by(QuestionAnswer.answer_status).all()
+    qa_statuses = (
+        db.query(QuestionAnswer.answer_status, func.count(QuestionAnswer.id))
+        .filter(QuestionAnswer.session_id == session_id)
+        .group_by(QuestionAnswer.answer_status)
+        .all()
+    )
 
     qa_stats = {status: count for status, count in qa_statuses}
 
-    card_matched = db.query(QuestionInstance).filter(
-        QuestionInstance.session_id == session_id,
-        QuestionInstance.card_id.isnot(None),
-    ).count()
+    card_matched = (
+        db.query(QuestionInstance)
+        .filter(
+            QuestionInstance.session_id == session_id,
+            QuestionInstance.card_id.isnot(None),
+        )
+        .count()
+    )
 
     card_match_rate = round(card_matched / q_count, 3) if q_count > 0 else None
 
     # === AI Usage Stats ===
-    ai_events = db.query(AIUsageEvent).filter(
-        AIUsageEvent.interview_session_id == session_id
-    ).all()
+    ai_events = db.query(AIUsageEvent).filter(AIUsageEvent.interview_session_id == session_id).all()
 
-    nano_count = sum(1 for e in ai_events if e.model and 'nano' in e.model.lower())
-    mini_count = sum(1 for e in ai_events if e.model and 'mini' in e.model.lower())
+    nano_count = sum(1 for e in ai_events if e.model and "nano" in e.model.lower())
+    mini_count = sum(1 for e in ai_events if e.model and "mini" in e.model.lower())
     total_tokens = sum(e.total_tokens or 0 for e in ai_events)
     total_cost = sum(float(e.cost_usd) if e.cost_usd else 0 for e in ai_events)
 
     # === Quality Metrics ===
     # Evidence quote rate (for final sufficient cards)
-    final_sufficient = db.query(CardCoverageEvaluation).filter(
-        CardCoverageEvaluation.session_id == session_id,
-        CardCoverageEvaluation.basis_type == "final",
-        CardCoverageEvaluation.state == "sufficient",
-    ).all()
+    final_sufficient = (
+        db.query(CardCoverageEvaluation)
+        .filter(
+            CardCoverageEvaluation.session_id == session_id,
+            CardCoverageEvaluation.basis_type == "final",
+            CardCoverageEvaluation.state == "sufficient",
+        )
+        .all()
+    )
 
     # Get latest sufficient per card
     latest_sufficient = {}
     for e in final_sufficient:
-        if e.card_id not in latest_sufficient or e.evaluation_seq > latest_sufficient[e.card_id].evaluation_seq:
+        if (
+            e.card_id not in latest_sufficient
+            or e.evaluation_seq > latest_sufficient[e.card_id].evaluation_seq
+        ):
             latest_sufficient[e.card_id] = e
 
-    with_evidence = sum(
-        1 for e in latest_sufficient.values()
-        if e.evidence and len(e.evidence) > 0
-    )
+    with_evidence = sum(1 for e in latest_sufficient.values() if e.evidence and len(e.evidence) > 0)
     evidence_rate = round(with_evidence / len(latest_sufficient), 3) if latest_sufficient else None
 
     # Candidate cards per evaluation (average from card coverage evaluations)
@@ -1123,10 +1247,7 @@ async def apply_role_filter(session_id: str, db: Session = Depends(get_db)):
 
     result = role_filter_service.apply_role_filter_to_session(db, session_id)
     if result.get("skipped"):
-        raise HTTPException(
-            status_code=400,
-            detail="Session has no stakeholder profile assigned"
-        )
+        raise HTTPException(status_code=400, detail="Session has no stakeholder profile assigned")
     return result
 
 
@@ -1180,6 +1301,7 @@ def _brief_to_response(brief) -> dict:
 
 # --- Human-in-the-loop Card Routing ---
 
+
 @router.post("/{session_id}/route-question")
 async def route_question(session_id: str, body: dict, db: Session = Depends(get_db)):
     """Find top candidate cards for a question. Does not auto-activate."""
@@ -1207,11 +1329,13 @@ async def route_question(session_id: str, body: dict, db: Session = Depends(get_
 @router.post("/{session_id}/active-card")
 async def set_active_card(session_id: str, body: dict, db: Session = Depends(get_db)):
     """User confirms which card is currently being discussed."""
-    from app.models.interview_session import InterviewSession as IS, InterviewCardState
-    from app.models.card_coverage_evaluation import CardCoverageEvaluation
-    from app.services.event_service import event_service
-    from datetime import datetime
     import uuid
+    from datetime import datetime
+
+    from app.models.card_coverage_evaluation import CardCoverageEvaluation
+    from app.models.interview_session import InterviewCardState
+    from app.models.interview_session import InterviewSession as IS
+    from app.services.event_service import event_service
 
     card_id = body.get("cardId")
     source = body.get("source", "user_confirmed")
@@ -1229,14 +1353,18 @@ async def set_active_card(session_id: str, body: dict, db: Session = Depends(get
     session.active_card_confirmed_at = datetime.utcnow()
 
     # Activate the card (pending → listening)
-    card_state = db.query(InterviewCardState).filter(
-        InterviewCardState.session_id == session_id,
-        InterviewCardState.question_card_id == card_id,
-    ).first()
+    card_state = (
+        db.query(InterviewCardState)
+        .filter(
+            InterviewCardState.session_id == session_id,
+            InterviewCardState.question_card_id == card_id,
+        )
+        .first()
+    )
 
     result_status = "listening"
-    if card_state and card_state.status == 'pending':
-        card_state.status = 'listening'
+    if card_state and card_state.status == "pending":
+        card_state.status = "listening"
         card_state.activation_score = 1.0
         card_state.updated_at = datetime.utcnow()
         result_status = "listening"
@@ -1249,14 +1377,17 @@ async def set_active_card(session_id: str, body: dict, db: Session = Depends(get
     db.commit()
 
     # Emit event
-    event_service.publish_sync(session_id, {
-        "type": "ACTIVE_CARD_CHANGED",
-        "card_id": card_id,
-        "status": result_status,
-        "source": source,
-        "activation_score": 1.0,
-        "completion_score": 0.0,
-    })
+    event_service.publish_sync(
+        session_id,
+        {
+            "type": "ACTIVE_CARD_CHANGED",
+            "card_id": card_id,
+            "status": result_status,
+            "source": source,
+            "activation_score": 1.0,
+            "completion_score": 0.0,
+        },
+    )
 
     # Replay buffered utterances against the confirmed card (idempotent: buffer already cleared above)
     if buffer:
@@ -1269,30 +1400,42 @@ async def set_active_card(session_id: str, body: dict, db: Session = Depends(get
             if not utt:
                 continue
             updates = answer_evaluation_engine._evaluate_answer(
-                db, session_id, utt.id, utt.transcript, section_id,
+                db,
+                session_id,
+                utt.id,
+                utt.transcript,
+                section_id,
                 utt.speaker or "interviewee",
             )
             for update in updates:
                 new_status = update["new_status"]
-                event_type = "CARD_COVERED" if new_status == "sufficient" else "CARD_PROGRESS_CHANGED"
-                event_service.publish_sync(session_id, {
-                    "type": event_type,
-                    "card_id": update["card_id"],
-                    "old_status": update["old_status"],
-                    "new_status": new_status,
-                    "activation_score": update.get("activation_score", 1.0),
-                    "completion_score": update.get("completion_score", 0),
-                    "confidence": update["confidence"],
-                    "evidence": update.get("evidence"),
-                    "evidenceTranscript": update.get("evidence_transcript"),
-                    "evaluationSeq": update.get("evaluation_seq"),
-                })
+                event_type = (
+                    "CARD_COVERED" if new_status == "sufficient" else "CARD_PROGRESS_CHANGED"
+                )
+                event_service.publish_sync(
+                    session_id,
+                    {
+                        "type": event_type,
+                        "card_id": update["card_id"],
+                        "old_status": update["old_status"],
+                        "new_status": new_status,
+                        "activation_score": update.get("activation_score", 1.0),
+                        "completion_score": update.get("completion_score", 0),
+                        "confidence": update["confidence"],
+                        "evidence": update.get("evidence"),
+                        "evidenceTranscript": update.get("evidence_transcript"),
+                        "evaluationSeq": update.get("evaluation_seq"),
+                    },
+                )
 
-        event_service.publish_sync(session_id, {
-            "type": "ANSWER_BUFFER_REPLAYED",
-            "card_id": card_id,
-            "replayed_count": len(buffer),
-        })
+        event_service.publish_sync(
+            session_id,
+            {
+                "type": "ANSWER_BUFFER_REPLAYED",
+                "card_id": card_id,
+                "replayed_count": len(buffer),
+            },
+        )
 
     return {
         "cardId": card_id,
@@ -1323,20 +1466,27 @@ async def clear_active_card(session_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/{session_id}/cards/{card_id}/manual-complete")
-async def manual_complete_card(session_id: str, card_id: str, body: dict, db: Session = Depends(get_db)):
+async def manual_complete_card(
+    session_id: str, card_id: str, body: dict, db: Session = Depends(get_db)
+):
     """User manually marks a card as completed."""
-    from app.models.interview_session import InterviewCardState
-    from app.models.card_coverage_evaluation import CardCoverageEvaluation
-    from app.services.event_service import event_service
-    from datetime import datetime
     import uuid
+    from datetime import datetime
+
+    from app.models.card_coverage_evaluation import CardCoverageEvaluation
+    from app.models.interview_session import InterviewCardState
+    from app.services.event_service import event_service
 
     note = body.get("note", "")
 
-    card_state = db.query(InterviewCardState).filter(
-        InterviewCardState.session_id == session_id,
-        InterviewCardState.question_card_id == card_id,
-    ).first()
+    card_state = (
+        db.query(InterviewCardState)
+        .filter(
+            InterviewCardState.session_id == session_id,
+            InterviewCardState.question_card_id == card_id,
+        )
+        .first()
+    )
     if not card_state:
         raise HTTPException(status_code=404, detail="Card state not found")
 
@@ -1369,14 +1519,17 @@ async def manual_complete_card(session_id: str, card_id: str, body: dict, db: Se
     db.add(coverage_eval)
     db.commit()
 
-    event_service.publish_sync(session_id, {
-        "type": "CARD_MANUALLY_COMPLETED",
-        "card_id": card_id,
-        "old_status": old_status,
-        "new_status": "sufficient",
-        "completion_source": "manual",
-        "note": note,
-    })
+    event_service.publish_sync(
+        session_id,
+        {
+            "type": "CARD_MANUALLY_COMPLETED",
+            "card_id": card_id,
+            "old_status": old_status,
+            "new_status": "sufficient",
+            "completion_source": "manual",
+            "note": note,
+        },
+    )
 
     return {
         "cardId": card_id,
@@ -1388,14 +1541,19 @@ async def manual_complete_card(session_id: str, card_id: str, body: dict, db: Se
 @router.post("/{session_id}/cards/{card_id}/undo-complete")
 async def undo_complete_card(session_id: str, card_id: str, db: Session = Depends(get_db)):
     """Undo a manual completion — revert card to its previous state."""
-    from app.models.interview_session import InterviewCardState
-    from app.services.event_service import event_service
     from datetime import datetime
 
-    card_state = db.query(InterviewCardState).filter(
-        InterviewCardState.session_id == session_id,
-        InterviewCardState.question_card_id == card_id,
-    ).first()
+    from app.models.interview_session import InterviewCardState
+    from app.services.event_service import event_service
+
+    card_state = (
+        db.query(InterviewCardState)
+        .filter(
+            InterviewCardState.session_id == session_id,
+            InterviewCardState.question_card_id == card_id,
+        )
+        .first()
+    )
     if not card_state:
         raise HTTPException(status_code=404, detail="Card state not found")
 
@@ -1408,10 +1566,13 @@ async def undo_complete_card(session_id: str, card_id: str, db: Session = Depend
     card_state.updated_at = datetime.utcnow()
     db.commit()
 
-    event_service.publish_sync(session_id, {
-        "type": "CARD_UNDO_COMPLETED",
-        "card_id": card_id,
-        "new_status": prev_status,
-    })
+    event_service.publish_sync(
+        session_id,
+        {
+            "type": "CARD_UNDO_COMPLETED",
+            "card_id": card_id,
+            "new_status": prev_status,
+        },
+    )
 
     return {"cardId": card_id, "status": prev_status}

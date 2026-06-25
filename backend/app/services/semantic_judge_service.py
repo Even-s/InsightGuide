@@ -1,7 +1,8 @@
 """Semantic judge service for text cleanup using LLM."""
 
-import logging
 import json
+import logging
+
 from openai import OpenAI
 
 from app.core.config import settings
@@ -23,7 +24,9 @@ class SemanticJudgeService:
             return ""
 
         try:
-            system_prompt = "你是繁體中文簡報講稿編輯器。只做保守清理，不改寫成新內容，並只回 JSON。"
+            system_prompt = (
+                "你是繁體中文簡報講稿編輯器。只做保守清理，不改寫成新內容，並只回 JSON。"
+            )
             user_prompt = f"""請清理以下由語音轉錄而來的講稿內容。
 
 原則：
@@ -49,7 +52,7 @@ class SemanticJudgeService:
                     {"role": "user", "content": user_prompt},
                 ],
                 response_format={"type": "json_object"},
-                temperature=0.1
+                temperature=0.1,
             )
 
             result = json.loads(response.choices[0].message.content)

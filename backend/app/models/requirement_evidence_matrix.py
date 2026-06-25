@@ -1,7 +1,8 @@
 """Requirement Evidence Matrix models."""
 
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, ForeignKey, Text, JSON, Integer
+
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base
@@ -31,7 +32,9 @@ class RequirementEvidenceMatrix(Base):
 
     # Relationships
     project = relationship("Project", back_populates="evidence_matrix")
-    entries = relationship("EvidenceMatrixEntry", back_populates="matrix", cascade="all, delete-orphan")
+    entries = relationship(
+        "EvidenceMatrixEntry", back_populates="matrix", cascade="all, delete-orphan"
+    )
 
 
 class EvidenceMatrixEntry(Base):
@@ -40,7 +43,9 @@ class EvidenceMatrixEntry(Base):
     __tablename__ = "evidence_matrix_entries"
 
     id = Column(String, primary_key=True)
-    matrix_id = Column(String, ForeignKey("requirement_evidence_matrices.id"), nullable=False, index=True)
+    matrix_id = Column(
+        String, ForeignKey("requirement_evidence_matrices.id"), nullable=False, index=True
+    )
 
     requirement_candidate = Column(Text, nullable=False)
     category = Column(String, nullable=True)

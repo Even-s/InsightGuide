@@ -1,17 +1,18 @@
 """Interview Brief Service - generates role-based interview plans."""
 
-import uuid
-import logging
 import json
+import logging
+import uuid
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
+
 from sqlalchemy.orm import Session
 
 from app.models.interview_brief import InterviewBrief
 from app.models.interview_session import InterviewSession
-from app.models.stakeholder_profile import StakeholderProfile
 from app.models.project import Project
 from app.models.question_card import QuestionCard
+from app.models.stakeholder_profile import StakeholderProfile
 
 logger = logging.getLogger(__name__)
 
@@ -23,37 +24,32 @@ class InterviewBriefService:
 
         Requires the session to have project_id and stakeholder_profile_id set.
         """
-        session = db.query(InterviewSession).filter(
-            InterviewSession.id == session_id
-        ).first()
+        session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
         if not session:
             raise ValueError(f"Session {session_id} not found")
         if not session.project_id or not session.stakeholder_profile_id:
             raise ValueError("Session must have project_id and stakeholder_profile_id")
 
         # Check for existing brief
-        existing = db.query(InterviewBrief).filter(
-            InterviewBrief.session_id == session_id
-        ).first()
+        existing = db.query(InterviewBrief).filter(InterviewBrief.session_id == session_id).first()
         if existing:
             db.delete(existing)
             db.flush()
 
-        stakeholder = db.query(StakeholderProfile).filter(
-            StakeholderProfile.id == session.stakeholder_profile_id
-        ).first()
-        project = db.query(Project).filter(
-            Project.id == session.project_id
-        ).first()
+        stakeholder = (
+            db.query(StakeholderProfile)
+            .filter(StakeholderProfile.id == session.stakeholder_profile_id)
+            .first()
+        )
+        project = db.query(Project).filter(Project.id == session.project_id).first()
 
         if not stakeholder or not project:
             raise ValueError("Stakeholder or project not found")
 
         # Filter cards by role
         from app.services.role_filter_service import role_filter_service
-        cards = db.query(QuestionCard).filter(
-            QuestionCard.document_id == session.document_id
-        ).all()
+
+        cards = db.query(QuestionCard).filter(QuestionCard.document_id == session.document_id).all()
         categorized = role_filter_service.filter_cards_for_stakeholder(cards, stakeholder)
 
         applicable_cards = categorized["applicable"] + categorized["uncertain"]
@@ -96,9 +92,7 @@ class InterviewBriefService:
         return brief
 
     def get_brief(self, db: Session, session_id: str) -> Optional[InterviewBrief]:
-        return db.query(InterviewBrief).filter(
-            InterviewBrief.session_id == session_id
-        ).first()
+        return db.query(InterviewBrief).filter(InterviewBrief.session_id == session_id).first()
 
     def _gather_prior_follow_ups(
         self, db: Session, project_id: str, stakeholder: StakeholderProfile
@@ -144,20 +138,21 @@ class InterviewBriefService:
                 f"專長：{', '.join(stakeholder.expertise_tags or [])}\n"
                 f"不熟悉：{', '.join(stakeholder.knowledge_boundaries or [])}\n\n"
                 f"## 適合此角色的問題 ({len(applicable_cards)} 題)\n"
-                + "\n".join(card_summaries[:15]) + "\n\n"
+                + "\n".join(card_summaries[:15])
+                + "\n\n"
                 f"## 不適合此角色的問題 ({len(not_applicable_cards)} 題，將被跳過)\n\n"
                 "請產生 JSON 格式的訪談計劃：\n"
                 "{\n"
                 '  "interview_objective": "一句話描述本次訪談目標",\n'
                 '  "recommended_topics": [\n'
                 '    {"topic": "主題", "reason": "為什麼要問", "priority": "high|medium|low"}\n'
-                '  ],\n'
+                "  ],\n"
                 '  "excluded_topics": [\n'
                 '    {"topic": "主題", "reason": "為什麼不該問這位受訪者"}\n'
-                '  ],\n'
+                "  ],\n"
                 '  "suggested_questions": [\n'
                 '    {"question": "建議的開場問題", "intent": "目的", "expected_insight": "預期得到什麼"}\n'
-                '  ],\n'
+                "  ],\n"
                 '  "time_estimate_minutes": 45\n'
                 "}\n\n"
                 "規則：\n"
@@ -183,7 +178,10 @@ class InterviewBriefService:
 
             result = json.loads(content)
             return {
-                "interview_objective": result.get("interview_objective", f"訪問 {stakeholder.name} 了解 {stakeholder.stakeholder_type} 視角"),
+                "interview_objective": result.get(
+                    "interview_objective",
+                    f"訪問 {stakeholder.name} 了解 {stakeholder.stakeholder_type} 視角",
+                ),
                 "recommended_topics": result.get("recommended_topics", []),
                 "excluded_topics": result.get("excluded_topics", []),
                 "suggested_questions": result.get("suggested_questions", []),
@@ -198,8 +196,16 @@ class InterviewBriefService:
         self, project: Project, stakeholder: StakeholderProfile, cards: List[QuestionCard]
     ) -> Dict[str, Any]:
         """Fallback brief when AI is unavailable."""
-        expertise_str = ", ".join(stakeholder.expertise_tags[:3]) if stakeholder.expertise_tags else stakeholder.stakeholder_type
-        boundary_str = ", ".join(stakeholder.knowledge_boundaries[:3]) if stakeholder.knowledge_boundaries else "無"
+        expertise_str = (
+            ", ".join(stakeholder.expertise_tags[:3])
+            if stakeholder.expertise_tags
+            else stakeholder.stakeholder_type
+        )
+        boundary_str = (
+            ", ".join(stakeholder.knowledge_boundaries[:3])
+            if stakeholder.knowledge_boundaries
+            else "無"
+        )
 
         return {
             "interview_objective": f"了解 {stakeholder.name}（{stakeholder.role_title or stakeholder.stakeholder_type}）對專案需求的觀點",
@@ -212,7 +218,11 @@ class InterviewBriefService:
                 for t in (stakeholder.knowledge_boundaries or [])[:3]
             ],
             "suggested_questions": [
-                {"question": c.question_text, "intent": c.question_type, "expected_insight": c.focus_text or ""}
+                {
+                    "question": c.question_text,
+                    "intent": c.question_type,
+                    "expected_insight": c.focus_text or "",
+                }
                 for c in cards[:3]
             ],
             "time_estimate_minutes": max(30, len(cards) * 3),

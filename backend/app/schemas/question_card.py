@@ -1,12 +1,14 @@
 """Question Card Pydantic schemas."""
 
-from typing import Literal, Optional, List
 from datetime import datetime
+from typing import List, Literal, Optional
+
 from pydantic import BaseModel, Field
 
 
 class MustMentionElement(BaseModel):
     """Element that must be mentioned for the answer to be considered sufficient."""
+
     text: str
     required: bool = True
     aliases: List[str] = Field(default_factory=list)
@@ -15,6 +17,7 @@ class MustMentionElement(BaseModel):
 
 class ScoringWeights(BaseModel):
     """Weights for scoring algorithm."""
+
     semanticSimilarity: float = 0.55
     keywordCoverage: float = 0.25
     elementCoverage: float = 0.20
@@ -22,12 +25,14 @@ class ScoringWeights(BaseModel):
 
 class SufficiencyThresholds(BaseModel):
     """Thresholds for sufficiency decisions."""
+
     probablySufficient: float = 0.62
     sufficient: float = 0.78
 
 
 class CoverageRule(BaseModel):
     """Rules for determining if a question has been answered sufficiently."""
+
     semanticAnchors: List[str]
     expectedKeywords: List[str] = Field(default_factory=list)
     mustMentionElements: List[MustMentionElement] = Field(default_factory=list)
@@ -38,6 +43,7 @@ class CoverageRule(BaseModel):
 
 class SufficiencyEvidence(BaseModel):
     """Evidence of answer sufficiency."""
+
     matchedUtteranceIds: List[str] = Field(default_factory=list)
     matchedTranscript: Optional[str] = None
     matchedAt: Optional[datetime] = None
@@ -49,6 +55,7 @@ class SufficiencyEvidence(BaseModel):
 
 class CardUI(BaseModel):
     """UI-specific properties for question card."""
+
     color: Literal["default", "green", "yellow", "red", "gray"] = "default"
     isVisible: bool = True
     isPinned: bool = False
@@ -57,6 +64,7 @@ class CardUI(BaseModel):
 
 class QuestionCardSchema(BaseModel):
     """Question Card schema."""
+
     id: str
     documentId: str
     interviewThemeId: Optional[str] = None
@@ -72,9 +80,16 @@ class QuestionCardSchema(BaseModel):
     estimatedSeconds: int = Field(default=30, ge=5, le=300)
     orderIndex: int = Field(default=0, ge=0)
     status: Literal[
-        "pending", "listening", "probably_sufficient", "sufficient",
-        "at_risk", "skipped", "manually_checked", "disabled",
-        "not_applicable_for_role", "needs_different_stakeholder"
+        "pending",
+        "listening",
+        "probably_sufficient",
+        "sufficient",
+        "at_risk",
+        "skipped",
+        "manually_checked",
+        "disabled",
+        "not_applicable_for_role",
+        "needs_different_stakeholder",
     ] = "pending"
     confidence: Optional[float] = Field(None, ge=0, le=1)
     evidence: Optional[SufficiencyEvidence] = None
@@ -94,6 +109,7 @@ class QuestionCardSchema(BaseModel):
 
 class QuestionCardCreate(BaseModel):
     """Schema for creating a question card (simplified - user provides question and importance)."""
+
     sectionId: Optional[str] = Field(None, alias="sectionId")
     questionText: Optional[str] = Field(None, min_length=1, max_length=200)
     title: Optional[str] = Field(None, min_length=1, max_length=200)
@@ -130,6 +146,7 @@ class QuestionCardCreate(BaseModel):
 
 class QuestionCardUpdate(BaseModel):
     """Schema for updating a question card."""
+
     questionText: Optional[str] = Field(None, min_length=1, max_length=200)
     suggestedFollowup: Optional[str] = Field(None, max_length=2000)
     importance: Optional[Literal["must", "should"]] = None
@@ -142,9 +159,11 @@ class QuestionCardUpdate(BaseModel):
 
 class QuestionCardFollowupCleanupRequest(BaseModel):
     """Request for cleaning speech-transcribed question content."""
+
     text: str = Field(min_length=1, max_length=4000)
 
 
 class QuestionCardFollowupCleanupResponse(BaseModel):
     """Cleaned speech-transcribed question content."""
+
     cleanedText: str

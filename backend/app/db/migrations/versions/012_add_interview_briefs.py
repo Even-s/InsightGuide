@@ -8,9 +8,8 @@ Phase 2: Interview Brief
 - Creates interview_briefs table for role-based interview plans
 """
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = '012_add_interview_briefs'
 down_revision = '011_add_card_role_targeting'

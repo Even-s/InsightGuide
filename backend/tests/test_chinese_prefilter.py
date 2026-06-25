@@ -4,6 +4,7 @@ Tests character bigram overlap scoring for Chinese text.
 """
 
 import pytest
+
 from app.services.answer_evaluation_engine import AnswerEvaluationEngine
 
 
@@ -69,6 +70,7 @@ class TestPrefilterCandidatesWithChinese:
 
     def _make_card_data(self, focus_text="", question_text="", keywords=None, elements=None):
         from unittest.mock import Mock
+
         card = Mock()
         card.focus_text = focus_text
         card.question_text = question_text
@@ -94,9 +96,7 @@ class TestPrefilterCandidatesWithChinese:
             self._make_card_data(focus_text="資料收集流程"),
             self._make_card_data(focus_text="系統架構設計"),
         ]
-        result = self.engine._prefilter_candidates(
-            "我們的資料收集有很多問題", candidates, top_k=8
-        )
+        result = self.engine._prefilter_candidates("我們的資料收集有很多問題", candidates, top_k=8)
         # Both returned since <= top_k, but first should score higher
         assert len(result) >= 1
 

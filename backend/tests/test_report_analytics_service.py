@@ -3,13 +3,14 @@ Unit tests for Report Analytics Service
 Tests report generation, coverage stats, and performance metrics.
 """
 
-import pytest
-from unittest.mock import Mock, patch
 from datetime import datetime, timedelta
+from unittest.mock import Mock, patch
 
-from app.services.report_analytics_service import report_analytics_service, ReportAnalyticsService
+import pytest
+
 from app.models.interview_session import InterviewSession
 from app.models.utterance import Utterance
+from app.services.report_analytics_service import ReportAnalyticsService, report_analytics_service
 
 
 class TestReportAnalyticsService:
@@ -33,7 +34,7 @@ class TestReportAnalyticsService:
             started_at=now - timedelta(minutes=30),
             ended_at=now,
             paused_duration_seconds=0,
-            created_at=now - timedelta(minutes=35)
+            created_at=now - timedelta(minutes=35),
         )
         return session
 
@@ -42,11 +43,11 @@ class TestReportAnalyticsService:
         assert isinstance(report_analytics_service, ReportAnalyticsService)
 
     def test_service_has_required_methods(self):
-        assert hasattr(report_analytics_service, 'generate_comprehensive_report')
-        assert hasattr(report_analytics_service, 'calculate_coverage_stats')
-        assert hasattr(report_analytics_service, 'generate_timeline')
-        assert hasattr(report_analytics_service, 'calculate_performance_metrics')
-        assert hasattr(report_analytics_service, 'generate_insights')
+        assert hasattr(report_analytics_service, "generate_comprehensive_report")
+        assert hasattr(report_analytics_service, "calculate_coverage_stats")
+        assert hasattr(report_analytics_service, "generate_timeline")
+        assert hasattr(report_analytics_service, "calculate_performance_metrics")
+        assert hasattr(report_analytics_service, "generate_insights")
 
     # --- _count_chinese_characters ---
 
@@ -74,15 +75,25 @@ class TestReportAnalyticsService:
 
     # --- calculate_performance_metrics ---
 
-    @patch('app.services.report_analytics_service.interview_service')
+    @patch("app.services.report_analytics_service.interview_service")
     def test_performance_metrics_basic(self, mock_interview_svc, mock_db, sample_session):
         mock_interview_svc.calculate_active_duration.return_value = 1800
 
         utterances = [
-            Utterance(id="u1", session_id="session-123", speaker="interviewee",
-                      transcript="今天介紹機器學習的基本概念和應用場景", created_at=datetime.utcnow()),
-            Utterance(id="u2", session_id="session-123", speaker="interviewee",
-                      transcript="深度學習是機器學習的一個子領域", created_at=datetime.utcnow()),
+            Utterance(
+                id="u1",
+                session_id="session-123",
+                speaker="interviewee",
+                transcript="今天介紹機器學習的基本概念和應用場景",
+                created_at=datetime.utcnow(),
+            ),
+            Utterance(
+                id="u2",
+                session_id="session-123",
+                speaker="interviewee",
+                transcript="深度學習是機器學習的一個子領域",
+                created_at=datetime.utcnow(),
+            ),
         ]
 
         mock_query = Mock()

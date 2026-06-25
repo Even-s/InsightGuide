@@ -2,22 +2,20 @@
 
 from logging.config import fileConfig
 
-from sqlalchemy import engine_from_config
-from sqlalchemy import pool
-
 from alembic import context
+from sqlalchemy import engine_from_config, pool
 
 # Import Base and all models
 from app.db.session import Base
-from app.models.user import User
-from app.models.document import Document
-from app.models.section import Section
-from app.models.question_card import QuestionCard
-from app.models.prep_session import PrepSession
-from app.models.interview_session import InterviewSession, InterviewCardState
-from app.models.utterance import Utterance
 from app.models.ai_usage_event import AIUsageEvent
 from app.models.brd import BRDDraft, Requirement
+from app.models.document import Document
+from app.models.interview_session import InterviewCardState, InterviewSession
+from app.models.prep_session import PrepSession
+from app.models.question_card import QuestionCard
+from app.models.section import Section
+from app.models.user import User
+from app.models.utterance import Utterance
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

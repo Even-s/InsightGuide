@@ -5,9 +5,10 @@ Phase 1: Updated to write to final_utterances instead of replacing old utterance
 
 import logging
 import uuid
-from io import BytesIO
 from datetime import datetime, timedelta
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from io import BytesIO
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db
@@ -34,9 +35,9 @@ async def diarize_session_audio(
     - Does NOT delete live_utterances (they remain for debugging/traceability)
     - Updates session.transcript_status = 'finalized'
     """
+    from app.models.final_utterance import FinalUtterance
     from app.models.interview_session import InterviewSession
     from app.models.transcript_revision import TranscriptRevision
-    from app.models.final_utterance import FinalUtterance
 
     logger.info(f"Starting post-interview diarization for session {session_id}")
 
@@ -73,7 +74,15 @@ async def diarize_session_audio(
 
     # Save audio to local filesystem
     import os
-    audio_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))), "uploads", "audio", session_id)
+
+    audio_dir = os.path.join(
+        os.path.dirname(
+            os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        ),
+        "uploads",
+        "audio",
+        session_id,
+    )
     os.makedirs(audio_dir, exist_ok=True)
     audio_path = os.path.join(audio_dir, f"{revision_id}.{file_ext}")
 
@@ -117,7 +126,11 @@ async def diarize_session_audio(
 
             # Generate speaker display name (Speaker 1, Speaker 2, etc.)
             try:
-                speaker_num = int(seg.speaker.split('_')[1]) + 1 if seg.speaker.startswith('speaker_') else idx + 1
+                speaker_num = (
+                    int(seg.speaker.split("_")[1]) + 1
+                    if seg.speaker.startswith("speaker_")
+                    else idx + 1
+                )
                 speaker_display_name = f"Speaker {speaker_num}"
             except (IndexError, ValueError):
                 speaker_display_name = seg.speaker
@@ -147,11 +160,14 @@ async def diarize_session_audio(
         session.final_transcript_revision_id = revision_id
 
         db.commit()
-        logger.info(f"Diarization complete: created {inserted} final utterances (live utterances preserved)")
+        logger.info(
+            f"Diarization complete: created {inserted} final utterances (live utterances preserved)"
+        )
 
         # Phase 4: Run Q/A reconstruction
         try:
             from app.services.qa_reconstruction_service import qa_reconstruction_service
+
             logger.info(f"Running Q/A reconstruction for session {session_id}")
             qa_reconstruction_service.reconstruct(
                 db=db,
@@ -166,6 +182,7 @@ async def diarize_session_audio(
         # Phase 2: Run final card coverage evaluation
         try:
             from app.services.answer_evaluation_engine import answer_evaluation_engine
+
             logger.info(f"Running final card coverage evaluation for session {session_id}")
             final_results = answer_evaluation_engine.run_final_coverage(
                 db=db,
@@ -184,6 +201,7 @@ async def diarize_session_audio(
         # Phase 5: Run utterance alignment
         try:
             from app.services.alignment_service import alignment_service
+
             logger.info(f"Running utterance alignment for session {session_id}")
             alignment_service.align(
                 db=db,

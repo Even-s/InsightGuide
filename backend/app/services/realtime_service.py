@@ -1,7 +1,8 @@
 """OpenAI Realtime API integration service."""
 
 import logging
-from typing import Dict, Any
+from typing import Any, Dict
+
 import httpx
 
 from app.core.config import settings

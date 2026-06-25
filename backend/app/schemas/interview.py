@@ -1,19 +1,28 @@
 """Interview session Pydantic schemas."""
 
-from typing import Literal, Optional, List, Dict, Any
 from datetime import datetime
+from typing import Any, Dict, List, Literal, Optional
+
 from pydantic import BaseModel, Field
 
 
 class InterviewSessionSchema(BaseModel):
     """Interview session schema."""
+
     id: str
     prepSessionId: str
     documentId: str
     userId: str
     status: Literal[
-        "idle", "preparing", "ready", "interviewing",
-        "paused", "section_transitioning", "recovering", "ended", "failed"
+        "idle",
+        "preparing",
+        "ready",
+        "interviewing",
+        "paused",
+        "section_transitioning",
+        "recovering",
+        "ended",
+        "failed",
     ]
     currentSectionId: Optional[str] = None
     startedAt: Optional[datetime] = None
@@ -30,6 +39,7 @@ class InterviewSessionSchema(BaseModel):
 
 class InterviewSessionCreate(BaseModel):
     """Schema for creating an interview session."""
+
     prepSessionId: str
     documentId: str
     projectId: Optional[str] = None
@@ -38,19 +48,37 @@ class InterviewSessionCreate(BaseModel):
 
 class InterviewSessionUpdate(BaseModel):
     """Schema for updating an interview session."""
-    status: Optional[Literal[
-        "idle", "preparing", "ready", "interviewing",
-        "paused", "section_transitioning", "recovering", "ended", "failed"
-    ]] = None
+
+    status: Optional[
+        Literal[
+            "idle",
+            "preparing",
+            "ready",
+            "interviewing",
+            "paused",
+            "section_transitioning",
+            "recovering",
+            "ended",
+            "failed",
+        ]
+    ] = None
     currentSectionId: Optional[str] = None
 
 
 class InterviewCardStateUpdate(BaseModel):
     """Schema for manually updating an interview card state."""
+
     status: Literal[
-        "pending", "listening", "probably_sufficient", "sufficient",
-        "at_risk", "skipped", "manually_checked", "disabled",
-        "not_applicable_for_role", "needs_different_stakeholder"
+        "pending",
+        "listening",
+        "probably_sufficient",
+        "sufficient",
+        "at_risk",
+        "skipped",
+        "manually_checked",
+        "disabled",
+        "not_applicable_for_role",
+        "needs_different_stakeholder",
     ]
     confidence: Optional[float] = Field(None, ge=0, le=1)
     evidenceTranscript: Optional[str] = None
@@ -59,13 +87,21 @@ class InterviewCardStateUpdate(BaseModel):
 
 class InterviewCardStateSchema(BaseModel):
     """Interview card state schema."""
+
     id: str
     sessionId: str
     questionCardId: str
     status: Literal[
-        "pending", "listening", "probably_sufficient", "sufficient",
-        "at_risk", "skipped", "manually_checked", "disabled",
-        "not_applicable_for_role", "needs_different_stakeholder"
+        "pending",
+        "listening",
+        "probably_sufficient",
+        "sufficient",
+        "at_risk",
+        "skipped",
+        "manually_checked",
+        "disabled",
+        "not_applicable_for_role",
+        "needs_different_stakeholder",
     ]
     confidence: Optional[float] = Field(None, ge=0, le=1)
     answeredAt: Optional[datetime] = None
@@ -80,6 +116,7 @@ class InterviewCardStateSchema(BaseModel):
 
 class UtteranceSchema(BaseModel):
     """Utterance schema."""
+
     id: str
     sessionId: str
     sectionId: Optional[str] = None
@@ -96,6 +133,7 @@ class UtteranceSchema(BaseModel):
 
 class UtteranceCreate(BaseModel):
     """Schema for creating an utterance."""
+
     transcript: str
     themeId: Optional[str] = None
     sectionId: Optional[str] = None
@@ -108,6 +146,7 @@ class UtteranceCreate(BaseModel):
 
 class PartialTranscriptMatchCreate(BaseModel):
     """Schema for streaming partial transcript matching."""
+
     transcript: str = Field(min_length=1, max_length=4000)
     themeId: Optional[str] = None
     sectionId: Optional[str] = None
@@ -118,6 +157,7 @@ class PartialTranscriptMatchCreate(BaseModel):
 
 class InterviewSessionWithDocument(BaseModel):
     """Interview session with document information."""
+
     id: str
     prepSessionId: str
     documentId: str
@@ -126,8 +166,15 @@ class InterviewSessionWithDocument(BaseModel):
     projectId: Optional[str] = None
     stakeholderProfileId: Optional[str] = None
     status: Literal[
-        "idle", "preparing", "ready", "interviewing",
-        "paused", "section_transitioning", "recovering", "ended", "failed"
+        "idle",
+        "preparing",
+        "ready",
+        "interviewing",
+        "paused",
+        "section_transitioning",
+        "recovering",
+        "ended",
+        "failed",
     ]
     currentSectionId: Optional[str] = None
     startedAt: Optional[datetime] = None
@@ -145,6 +192,7 @@ class InterviewSessionWithDocument(BaseModel):
 
 class InterviewSessionListResponse(BaseModel):
     """Response schema for session list with pagination."""
+
     sessions: List[InterviewSessionWithDocument]
     total: int
     limit: int

@@ -4,26 +4,26 @@ Generates professional PDF documents from BRD drafts using ReportLab.
 """
 
 import logging
-from io import BytesIO
 from datetime import datetime
+from io import BytesIO
 from typing import Optional
 
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import letter, A4
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.enums import TA_CENTER, TA_JUSTIFY, TA_LEFT
+from reportlab.lib.pagesizes import A4, letter
+from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
-from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import (
-    SimpleDocTemplate,
+    KeepTogether,
+    PageBreak,
     Paragraph,
+    SimpleDocTemplate,
     Spacer,
     Table,
     TableStyle,
-    PageBreak,
-    KeepTogether,
 )
-from reportlab.pdfbase import pdfmetrics
-from reportlab.pdfbase.ttfonts import TTFont
 
 from app.models.brd import BRDDraft, Requirement
 
@@ -145,15 +145,11 @@ class BRDPDFExportService:
 
         # Business Objectives
         if brd.business_objectives:
-            story.extend(
-                self._build_list_section("Business Objectives", brd.business_objectives)
-            )
+            story.extend(self._build_list_section("Business Objectives", brd.business_objectives))
 
         # Success Criteria
         if brd.success_criteria:
-            story.extend(
-                self._build_list_section("Success Criteria", brd.success_criteria)
-            )
+            story.extend(self._build_list_section("Success Criteria", brd.success_criteria))
 
         # Stakeholders
         if brd.stakeholders:
@@ -196,7 +192,10 @@ class BRDPDFExportService:
         # Metadata table
         metadata_data = [
             ["Document ID:", str(brd.id)[:8]],
-            ["Generated:", brd.generated_at.strftime("%Y-%m-%d %H:%M") if brd.generated_at else "N/A"],
+            [
+                "Generated:",
+                brd.generated_at.strftime("%Y-%m-%d %H:%M") if brd.generated_at else "N/A",
+            ],
             ["Status:", brd.status.value.replace("_", " ").title()],
         ]
 
@@ -292,26 +291,18 @@ class BRDPDFExportService:
             # Requirement title with priority and type badges
             priority_label = req.priority.value.replace("_", " ").title()
             type_label = req.type.value.replace("_", " ").title()
-            title_text = f'<b>{req.title}</b> [{priority_label}] [{type_label}]'
-            req_elements.append(
-                Paragraph(title_text, self.styles["CustomHeading2"])
-            )
+            title_text = f"<b>{req.title}</b> [{priority_label}] [{type_label}]"
+            req_elements.append(Paragraph(title_text, self.styles["CustomHeading2"]))
             req_elements.append(Spacer(1, 0.05 * inch))
 
             # Description
-            req_elements.append(
-                Paragraph(req.description, self.styles["CustomBody"])
-            )
+            req_elements.append(Paragraph(req.description, self.styles["CustomBody"]))
             req_elements.append(Spacer(1, 0.1 * inch))
 
             # User story (if exists)
             if req.user_story:
-                req_elements.append(
-                    Paragraph("<b>User Story:</b>", self.styles["CustomBody"])
-                )
-                req_elements.append(
-                    Paragraph(req.user_story, self.styles["CustomBullet"])
-                )
+                req_elements.append(Paragraph("<b>User Story:</b>", self.styles["CustomBody"]))
+                req_elements.append(Paragraph(req.user_story, self.styles["CustomBullet"]))
                 req_elements.append(Spacer(1, 0.1 * inch))
 
             # Acceptance criteria (if exists)
@@ -320,9 +311,7 @@ class BRDPDFExportService:
                     Paragraph("<b>Acceptance Criteria:</b>", self.styles["CustomBody"])
                 )
                 for criteria in req.acceptance_criteria:
-                    req_elements.append(
-                        Paragraph(f"• {criteria}", self.styles["CustomBullet"])
-                    )
+                    req_elements.append(Paragraph(f"• {criteria}", self.styles["CustomBullet"]))
                 req_elements.append(Spacer(1, 0.1 * inch))
 
             # Add border box around requirement

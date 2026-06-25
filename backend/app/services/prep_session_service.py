@@ -3,19 +3,20 @@
 import logging
 import uuid
 from datetime import datetime
-from typing import Optional, List
-from sqlalchemy.orm import Session
-from sqlalchemy import desc, asc, func
-from fastapi import HTTPException, status
+from typing import List, Optional
 
-from app.models.prep_session import PrepSession
-from app.models.interview_session import InterviewSession
+from fastapi import HTTPException, status
+from sqlalchemy import asc, desc, func
+from sqlalchemy.orm import Session
+
 from app.models.document import Document
+from app.models.interview_session import InterviewSession
+from app.models.prep_session import PrepSession
 from app.schemas.prep_session import (
     PrepSessionCreate,
-    PrepSessionUpdate,
     PrepSessionListResponse,
-    PrepSessionWithDocument
+    PrepSessionUpdate,
+    PrepSessionWithDocument,
 )
 from app.services.billing_service import billing_service
 
@@ -26,10 +27,7 @@ class PrepSessionService:
     """Service for prep session operations."""
 
     def create_prep_session(
-        self,
-        db: Session,
-        user_id: str,
-        prep_session_data: PrepSessionCreate
+        self, db: Session, user_id: str, prep_session_data: PrepSessionCreate
     ) -> PrepSession:
         """
         Create a new prep session.
@@ -47,25 +45,23 @@ class PrepSessionService:
         if not document:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Document {prep_session_data.documentId} not found"
+                detail=f"Document {prep_session_data.documentId} not found",
             )
 
         # Verify document belongs to user
         if document.user_id != user_id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="You don't have permission to create a prep session for this document"
+                detail="You don't have permission to create a prep session for this document",
             )
 
         # Check if a prep session already exists for this document
-        existing = db.query(PrepSession).filter(
-            PrepSession.id == prep_session_data.documentId
-        ).first()
+        existing = (
+            db.query(PrepSession).filter(PrepSession.id == prep_session_data.documentId).first()
+        )
 
         if existing:
-            logger.info(
-                f"Prep session already exists for document {prep_session_data.documentId}"
-            )
+            logger.info(f"Prep session already exists for document {prep_session_data.documentId}")
             return existing
 
         # Create prep session with appropriate status based on document status
@@ -80,7 +76,7 @@ class PrepSessionService:
             title=prep_session_data.title,
             status=prep_session_status,
             created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            updated_at=datetime.utcnow(),
         )
 
         db.add(prep_session)
@@ -95,23 +91,18 @@ class PrepSessionService:
 
     def get_prep_session(self, db: Session, prep_session_id: str) -> PrepSession:
         """Get prep session by ID."""
-        prep_session = db.query(PrepSession).filter(
-            PrepSession.id == prep_session_id
-        ).first()
+        prep_session = db.query(PrepSession).filter(PrepSession.id == prep_session_id).first()
 
         if not prep_session:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Prep session {prep_session_id} not found"
+                detail=f"Prep session {prep_session_id} not found",
             )
 
         return prep_session
 
     def update_prep_session(
-        self,
-        db: Session,
-        prep_session_id: str,
-        update_data: PrepSessionUpdate
+        self, db: Session, prep_session_id: str, update_data: PrepSessionUpdate
     ) -> PrepSession:
         """Update prep session."""
         prep_session = self.get_prep_session(db, prep_session_id)
@@ -154,6 +145,7 @@ class PrepSessionService:
 
         try:
             from app.services.document_service import document_service
+
             # The document is the aggregate root for uploaded content. Deleting it
             # cascades to prep sessions, interview sessions, sections, question
             # cards, card states, and utterances in one database transaction.
@@ -180,13 +172,12 @@ class PrepSessionService:
             db: Database session
             user_id: User ID whose prep sessions to delete
         """
-        prep_sessions = db.query(PrepSession).filter(
-            PrepSession.user_id == user_id
-        ).all()
+        prep_sessions = db.query(PrepSession).filter(PrepSession.user_id == user_id).all()
         document_ids = [prep_session.document_id for prep_session in prep_sessions]
 
         try:
             from app.services.document_service import document_service
+
             for document_id in document_ids:
                 document_service.delete_document(db, document_id, commit=False)
             db.commit()
@@ -211,7 +202,7 @@ class PrepSessionService:
         limit: int = 50,
         offset: int = 0,
         sort_by: str = "createdAt",
-        order: str = "desc"
+        order: str = "desc",
     ) -> PrepSessionListResponse:
         """
         List prep sessions with filtering, sorting, and pagination.
@@ -259,9 +250,11 @@ class PrepSessionService:
         for prep_session in prep_sessions:
             usage = document_usage.get(prep_session.document_id, billing_service.empty_summary())
             # Count interview sessions for this prep session
-            interview_count = db.query(func.count(InterviewSession.id)).filter(
-                InterviewSession.prep_session_id == prep_session.id
-            ).scalar()
+            interview_count = (
+                db.query(func.count(InterviewSession.id))
+                .filter(InterviewSession.prep_session_id == prep_session.id)
+                .scalar()
+            )
 
             prep_sessions_with_deck.append(
                 PrepSessionWithDocument(
@@ -280,32 +273,26 @@ class PrepSessionService:
             )
 
         return PrepSessionListResponse(
-            prepSessions=prep_sessions_with_deck,
-            total=total,
-            limit=limit,
-            offset=offset
+            prepSessions=prep_sessions_with_deck, total=total, limit=limit, offset=offset
         )
 
     def _get_sort_field(self, sort_by: str) -> str:
         """Map sort_by string to model field name."""
-        field_map = {
-            "createdAt": "created_at",
-            "updatedAt": "updated_at",
-            "status": "status"
-        }
+        field_map = {"createdAt": "created_at", "updatedAt": "updated_at", "status": "status"}
         return field_map.get(sort_by, "created_at")
 
     def get_prep_session_interview_sessions(
-        self,
-        db: Session,
-        prep_session_id: str
+        self, db: Session, prep_session_id: str
     ) -> List[InterviewSession]:
         """Get all interview sessions for a prep session."""
         self.get_prep_session(db, prep_session_id)  # Verify prep session exists
 
-        sessions = db.query(InterviewSession).filter(
-            InterviewSession.prep_session_id == prep_session_id
-        ).order_by(InterviewSession.created_at.desc()).all()
+        sessions = (
+            db.query(InterviewSession)
+            .filter(InterviewSession.prep_session_id == prep_session_id)
+            .order_by(InterviewSession.created_at.desc())
+            .all()
+        )
 
         return sessions
 

@@ -3,9 +3,10 @@
 Separates provisional (live) from final coverage evaluations.
 """
 
-from sqlalchemy import Column, String, DateTime, Integer, ForeignKey, Numeric
-from sqlalchemy.dialects.postgresql import JSON
 from datetime import datetime
+
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, Numeric, String
+from sqlalchemy.dialects.postgresql import JSON
 
 from app.db.session import Base
 
@@ -19,6 +20,7 @@ class CardCoverageEvaluation(Base):
 
     This allows real-time UI feedback without polluting formal BRD evidence.
     """
+
     __tablename__ = "card_coverage_evaluations"
 
     id = Column(String, primary_key=True)

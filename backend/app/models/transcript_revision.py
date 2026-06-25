@@ -1,7 +1,8 @@
 """Transcript Revision model - manages formal transcript versions."""
 
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, ForeignKey, Text, Integer
+
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base
@@ -40,5 +41,9 @@ class TranscriptRevision(Base):
     completed_at = Column(DateTime, nullable=True)
 
     # Relationships
-    session = relationship("InterviewSession", back_populates="transcript_revisions", foreign_keys=[session_id])
-    final_utterances = relationship("FinalUtterance", back_populates="transcript_revision", cascade="all, delete-orphan")
+    session = relationship(
+        "InterviewSession", back_populates="transcript_revisions", foreign_keys=[session_id]
+    )
+    final_utterances = relationship(
+        "FinalUtterance", back_populates="transcript_revision", cascade="all, delete-orphan"
+    )

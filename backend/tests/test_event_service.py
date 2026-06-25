@@ -4,10 +4,11 @@ Tests SSE formatting, connection management, and Redis channel naming.
 """
 
 import asyncio
-import pytest
-from unittest.mock import Mock, patch, AsyncMock
+from unittest.mock import AsyncMock, Mock, patch
 
-from app.services.event_service import event_service, EventService
+import pytest
+
+from app.services.event_service import EventService, event_service
 
 
 class TestEventService:

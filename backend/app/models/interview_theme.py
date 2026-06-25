@@ -1,7 +1,8 @@
 """InterviewTheme model — logical interview topic units derived from AI analysis."""
 
 from datetime import datetime
-from sqlalchemy import Column, String, Integer, Boolean, DateTime, ForeignKey, Text, ARRAY
+
+from sqlalchemy import ARRAY, Boolean, Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base

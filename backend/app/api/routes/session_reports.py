@@ -1,9 +1,10 @@
 """Session Reports API routes."""
 
 import logging
+from typing import Any, Dict
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import Dict, Any
 
 from app.db.session import get_db
 from app.services.report_analytics_service import report_analytics_service

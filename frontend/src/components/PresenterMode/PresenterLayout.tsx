@@ -189,6 +189,7 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
         console.error('Failed to save utterance:', err)
         setTranscriptionError(err instanceof Error ? err.message : 'Failed to save transcript')
       })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId])
 
   const sendPartialTranscriptMatch = useCallback((text: string, itemId?: string) => {

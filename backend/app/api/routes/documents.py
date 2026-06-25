@@ -1,17 +1,18 @@
 """Document management routes."""
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, status, Form
+import asyncio
+import logging
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from typing import List, Optional
-import logging
-import asyncio
 
 from app.db.session import get_db
-from app.services.document_service import document_service
+from app.schemas.document import DocumentAnalysisResponse, DocumentResponse, DocumentStatus
 from app.services.billing_service import billing_service
+from app.services.document_service import document_service
 from app.services.s3_service import s3_service
-from app.schemas.document import DocumentResponse, DocumentStatus, DocumentAnalysisResponse
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ async def create_document(
     file: UploadFile = File(..., description="PDF, Word, Markdown, or Text file to upload"),
     title: Optional[str] = Form(None, description="Optional document title"),
     project_id: Optional[str] = Form(None, description="Project to associate this document with"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     Upload a requirements document and create a new document record.
@@ -145,17 +146,17 @@ async def get_document_analysis(document_id: str, db: Session = Depends(get_db))
     This endpoint returns the complete analysis results after
     AI processing is complete.
     """
-    from app.services.section_service import section_service
-    from app.services.question_card_service import question_card_service
-    from app.schemas.section import SectionWithQuestionCards
     from app.schemas.question_card import QuestionCardSchema
+    from app.schemas.section import SectionWithQuestionCards
+    from app.services.question_card_service import question_card_service
+    from app.services.section_service import section_service
 
     document = document_service.get_document(db, document_id)
 
     if document.status == "failed":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Document analysis failed. Please re-upload."
+            detail=f"Document analysis failed. Please re-upload.",
         )
 
     # Load sections
@@ -169,15 +170,17 @@ async def get_document_analysis(document_id: str, db: Session = Depends(get_db))
     for section in sections:
         section_cards = [c for c in all_question_cards if c.section_id == section.id]
 
-        sections_data.append({
-            "id": section.id,
-            "document_id": section.document_id,
-            "page_number": section.section_number,
-            "title": section.title,
-            "extracted_text": section.extracted_text,
-            "ai_summary": section.ai_summary,
-            "topic_cards_count": len(section_cards)
-        })
+        sections_data.append(
+            {
+                "id": section.id,
+                "document_id": section.document_id,
+                "page_number": section.section_number,
+                "title": section.title,
+                "extracted_text": section.extracted_text,
+                "ai_summary": section.ai_summary,
+                "topic_cards_count": len(section_cards),
+            }
+        )
 
     return DocumentAnalysisResponse(
         document_id=document.id,
@@ -199,14 +202,21 @@ async def get_interview_plan(document_id: str, db: Session = Depends(get_db)):
 
     document = document_service.get_document(db, document_id)
 
-    themes = db.query(InterviewTheme).filter(
-        InterviewTheme.document_id == document_id
-    ).order_by(InterviewTheme.order_index).all()
+    themes = (
+        db.query(InterviewTheme)
+        .filter(InterviewTheme.document_id == document_id)
+        .order_by(InterviewTheme.order_index)
+        .all()
+    )
 
-    all_cards = db.query(QuestionCard).filter(
-        QuestionCard.document_id == document_id,
-        QuestionCard.interview_theme_id.isnot(None)
-    ).order_by(QuestionCard.order_index).all()
+    all_cards = (
+        db.query(QuestionCard)
+        .filter(
+            QuestionCard.document_id == document_id, QuestionCard.interview_theme_id.isnot(None)
+        )
+        .order_by(QuestionCard.order_index)
+        .all()
+    )
 
     cards_by_theme = {}
     for card in all_cards:
@@ -216,43 +226,50 @@ async def get_interview_plan(document_id: str, db: Session = Depends(get_db)):
     for theme in themes:
         theme_cards = cards_by_theme.get(theme.id, [])
         # Check if all cards in this theme have compiled rubrics
-        rubric_ready = all(
-            (c.coverage_rule or {}).get("rubricVersion") and (c.coverage_rule or {}).get("criteria")
-            for c in theme_cards
-        ) if theme_cards else True
-        themes_data.append({
-            "id": theme.id,
-            "themeNumber": theme.theme_number,
-            "title": theme.title,
-            "rationale": theme.rationale,
-            "brdMapping": theme.brd_mapping or [],
-            "priority": theme.priority,
-            "estimatedMinutes": theme.estimated_minutes,
-            "sourceSectionIds": theme.source_section_ids or [],
-            "orderIndex": theme.order_index,
-            "isRequired": theme.is_required,
-            "isEnabled": theme.is_enabled,
-            "userNotes": theme.user_notes,
-            "rubricReady": rubric_ready,
-            "cards": [
-                {
-                    "id": c.id,
-                    "focusText": c.focus_text,
-                    "questionText": c.question_text,
-                    "questionType": c.question_type,
-                    "importance": c.importance,
-                    "suggestedFollowup": c.suggested_followup,
-                    "expectedAnswerElements": c.expected_answer_elements or [],
-                    "brdMapping": c.brd_mapping or [],
-                    "estimatedSeconds": c.estimated_seconds,
-                    "orderIndex": c.order_index,
-                    "status": c.status,
-                    "confidence": float(c.confidence) if c.confidence else None,
-                    "createdBy": c.created_by,
-                }
+        rubric_ready = (
+            all(
+                (c.coverage_rule or {}).get("rubricVersion")
+                and (c.coverage_rule or {}).get("criteria")
                 for c in theme_cards
-            ],
-        })
+            )
+            if theme_cards
+            else True
+        )
+        themes_data.append(
+            {
+                "id": theme.id,
+                "themeNumber": theme.theme_number,
+                "title": theme.title,
+                "rationale": theme.rationale,
+                "brdMapping": theme.brd_mapping or [],
+                "priority": theme.priority,
+                "estimatedMinutes": theme.estimated_minutes,
+                "sourceSectionIds": theme.source_section_ids or [],
+                "orderIndex": theme.order_index,
+                "isRequired": theme.is_required,
+                "isEnabled": theme.is_enabled,
+                "userNotes": theme.user_notes,
+                "rubricReady": rubric_ready,
+                "cards": [
+                    {
+                        "id": c.id,
+                        "focusText": c.focus_text,
+                        "questionText": c.question_text,
+                        "questionType": c.question_type,
+                        "importance": c.importance,
+                        "suggestedFollowup": c.suggested_followup,
+                        "expectedAnswerElements": c.expected_answer_elements or [],
+                        "brdMapping": c.brd_mapping or [],
+                        "estimatedSeconds": c.estimated_seconds,
+                        "orderIndex": c.order_index,
+                        "status": c.status,
+                        "confidence": float(c.confidence) if c.confidence else None,
+                        "createdBy": c.created_by,
+                    }
+                    for c in theme_cards
+                ],
+            }
+        )
 
     return {
         "documentId": document.id,
@@ -278,10 +295,7 @@ async def get_document_sections(document_id: str, db: Session = Depends(get_db))
     """Get all sections for a document."""
     document = document_service.get_document(db, document_id)
 
-    return {
-        "document_id": document.id,
-        "sections": []
-    }
+    return {"document_id": document.id, "sections": []}
 
 
 @router.get("/{document_id}/events")
@@ -293,9 +307,10 @@ async def document_events_stream(document_id: str, db: Session = Depends(get_db)
     - CARD_CREATED: New question card generated
     - ANALYSIS_COMPLETE: All sections analyzed
     """
-    from app.services.event_service import event_service
     import redis.asyncio as async_redis
+
     from app.core.config import settings
+    from app.services.event_service import event_service
 
     # Verify document exists
     document_service.get_document(db, document_id)
@@ -309,15 +324,14 @@ async def document_events_stream(document_id: str, db: Session = Depends(get_db)
 
         try:
             # Send initial connected event
-            yield f"event: connected\ndata: {{\"status\": \"connected\", \"document_id\": \"{document_id}\"}}\n\n"
+            yield f'event: connected\ndata: {{"status": "connected", "document_id": "{document_id}"}}\n\n'
 
             # Stream events from queue
             while True:
                 try:
-                    redis_message_task = asyncio.create_task(pubsub.get_message(
-                        ignore_subscribe_messages=True,
-                        timeout=30.0
-                    ))
+                    redis_message_task = asyncio.create_task(
+                        pubsub.get_message(ignore_subscribe_messages=True, timeout=30.0)
+                    )
                     local_message_task = asyncio.create_task(queue.get())
 
                     done, pending = await asyncio.wait(
@@ -342,7 +356,9 @@ async def document_events_stream(document_id: str, db: Session = Depends(get_db)
                         event_data = message
 
                     if event_data:
-                        yield event_data if str(event_data).endswith("\n\n") else f"{event_data}\n\n"
+                        yield (
+                            event_data if str(event_data).endswith("\n\n") else f"{event_data}\n\n"
+                        )
 
                 except asyncio.TimeoutError:
                     # Send keepalive comment to prevent connection timeout
@@ -364,5 +380,5 @@ async def document_events_stream(document_id: str, db: Session = Depends(get_db)
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",  # Disable buffering in nginx
-        }
+        },
     )

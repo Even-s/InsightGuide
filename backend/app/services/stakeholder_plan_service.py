@@ -1,22 +1,31 @@
 """Stakeholder Plan service — dynamic interview planning engine."""
 
-import uuid
 import logging
+import uuid
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
+
 from sqlalchemy.orm import Session
 
-from app.models.project import Project
-from app.models.stakeholder_slot import StakeholderSlot
-from app.models.stakeholder_profile import StakeholderProfile
 from app.models.interview_session import InterviewSession
+from app.models.project import Project
+from app.models.stakeholder_profile import StakeholderProfile
+from app.models.stakeholder_slot import StakeholderSlot
 
 logger = logging.getLogger(__name__)
 
 
 ROLE_CATEGORIES = [
-    "business", "product", "engineering", "management",
-    "operations", "customer_support", "legal", "finance", "design", "qa",
+    "business",
+    "product",
+    "engineering",
+    "management",
+    "operations",
+    "customer_support",
+    "legal",
+    "finance",
+    "design",
+    "qa",
 ]
 
 
@@ -53,15 +62,19 @@ class StakeholderPlanService:
             db.add(slot)
 
         db.commit()
-        return db.query(StakeholderSlot).filter(
-            StakeholderSlot.project_id == project_id
-        ).order_by(StakeholderSlot.order_index).all()
+        return (
+            db.query(StakeholderSlot)
+            .filter(StakeholderSlot.project_id == project_id)
+            .order_by(StakeholderSlot.order_index)
+            .all()
+        )
 
     def _ai_suggest_slots(self, project: Project) -> List[Dict[str, Any]]:
         """Use AI to suggest stakeholder slots based on project title and description."""
         try:
-            from app.services.openai_service import openai_service
             import json
+
+            from app.services.openai_service import openai_service
 
             system_prompt = (
                 "你是資深的需求分析顧問。你的任務是根據專案描述，判斷「初始階段最少需要找哪幾種人聊」。\n\n"
@@ -138,7 +151,11 @@ class StakeholderPlanService:
                 "role_label": "業務 / 銷售",
                 "rationale": "了解客戶需求來源與現有流程痛點",
                 "expected_contributions": ["客戶流程", "痛點", "需求來源", "使用情境"],
-                "key_questions_to_cover": ["目前怎麼管理需求？", "最常見的客戶問題？", "流程中最大的障礙？"],
+                "key_questions_to_cover": [
+                    "目前怎麼管理需求？",
+                    "最常見的客戶問題？",
+                    "流程中最大的障礙？",
+                ],
                 "priority": "required",
                 "min_interviews": 1,
             },
@@ -147,7 +164,11 @@ class StakeholderPlanService:
                 "role_label": "產品經理 (PM)",
                 "rationale": "確認需求優先級、產品流程與驗收標準",
                 "expected_contributions": ["需求排序", "產品路線圖", "驗收標準", "使用者故事"],
-                "key_questions_to_cover": ["需求如何被決定優先級？", "什麼是成功的標準？", "目前的產品流程？"],
+                "key_questions_to_cover": [
+                    "需求如何被決定優先級？",
+                    "什麼是成功的標準？",
+                    "目前的產品流程？",
+                ],
                 "priority": "required",
                 "min_interviews": 1,
             },
@@ -156,7 +177,11 @@ class StakeholderPlanService:
                 "role_label": "工程 / IT",
                 "rationale": "確認技術可行性、系統限制與整合方式",
                 "expected_contributions": ["技術限制", "系統整合", "API", "效能需求", "資料流"],
-                "key_questions_to_cover": ["現有系統的技術限制？", "哪些整合是必須的？", "效能需求？"],
+                "key_questions_to_cover": [
+                    "現有系統的技術限制？",
+                    "哪些整合是必須的？",
+                    "效能需求？",
+                ],
                 "priority": "required",
                 "min_interviews": 1,
             },
@@ -173,9 +198,9 @@ class StakeholderPlanService:
 
     def create_slot(self, db: Session, project_id: str, data: Dict[str, Any]) -> StakeholderSlot:
         """Manually create a stakeholder slot."""
-        max_order = db.query(StakeholderSlot).filter(
-            StakeholderSlot.project_id == project_id
-        ).count()
+        max_order = (
+            db.query(StakeholderSlot).filter(StakeholderSlot.project_id == project_id).count()
+        )
 
         slot = StakeholderSlot(
             id=f"slot_{uuid.uuid4().hex[:12]}",
@@ -195,7 +220,9 @@ class StakeholderPlanService:
         db.refresh(slot)
         return slot
 
-    def update_slot(self, db: Session, slot_id: str, data: Dict[str, Any]) -> Optional[StakeholderSlot]:
+    def update_slot(
+        self, db: Session, slot_id: str, data: Dict[str, Any]
+    ) -> Optional[StakeholderSlot]:
         slot = db.query(StakeholderSlot).filter(StakeholderSlot.id == slot_id).first()
         if not slot:
             return None
@@ -229,7 +256,9 @@ class StakeholderPlanService:
                 slot.order_index = i
         db.commit()
 
-    def create_profile(self, db: Session, project_id: str, data: Dict[str, Any]) -> StakeholderProfile:
+    def create_profile(
+        self, db: Session, project_id: str, data: Dict[str, Any]
+    ) -> StakeholderProfile:
         """Create a stakeholder profile."""
         profile = StakeholderProfile(
             id=f"stkh_{uuid.uuid4().hex[:12]}",
@@ -251,7 +280,9 @@ class StakeholderPlanService:
         self._update_slot_statuses(db, project_id)
         return profile
 
-    def update_profile(self, db: Session, profile_id: str, data: Dict[str, Any]) -> Optional[StakeholderProfile]:
+    def update_profile(
+        self, db: Session, profile_id: str, data: Dict[str, Any]
+    ) -> Optional[StakeholderProfile]:
         profile = db.query(StakeholderProfile).filter(StakeholderProfile.id == profile_id).first()
         if not profile:
             return None
@@ -280,13 +311,16 @@ class StakeholderPlanService:
 
     def get_plan_status(self, db: Session, project_id: str) -> Dict[str, Any]:
         """Get current stakeholder plan status overview."""
-        slots = db.query(StakeholderSlot).filter(
-            StakeholderSlot.project_id == project_id
-        ).order_by(StakeholderSlot.order_index).all()
+        slots = (
+            db.query(StakeholderSlot)
+            .filter(StakeholderSlot.project_id == project_id)
+            .order_by(StakeholderSlot.order_index)
+            .all()
+        )
 
-        profiles = db.query(StakeholderProfile).filter(
-            StakeholderProfile.project_id == project_id
-        ).all()
+        profiles = (
+            db.query(StakeholderProfile).filter(StakeholderProfile.project_id == project_id).all()
+        )
 
         slot_details = []
         total_required = 0
@@ -338,18 +372,20 @@ class StakeholderPlanService:
 
     def _update_slot_statuses(self, db: Session, project_id: str):
         """Recalculate all slot statuses based on their profiles and sessions."""
-        slots = db.query(StakeholderSlot).filter(
-            StakeholderSlot.project_id == project_id
-        ).all()
+        slots = db.query(StakeholderSlot).filter(StakeholderSlot.project_id == project_id).all()
 
         for slot in slots:
             if slot.status == "skipped":
                 continue
 
-            profiles = db.query(StakeholderProfile).filter(
-                StakeholderProfile.slot_id == slot.id,
-                StakeholderProfile.status != "unavailable",
-            ).all()
+            profiles = (
+                db.query(StakeholderProfile)
+                .filter(
+                    StakeholderProfile.slot_id == slot.id,
+                    StakeholderProfile.status != "unavailable",
+                )
+                .all()
+            )
 
             if not profiles:
                 slot.status = "unassigned"
@@ -368,7 +404,9 @@ class StakeholderPlanService:
 
         db.commit()
 
-    def update_plan_after_interview(self, db: Session, project_id: str, memo_id: str) -> Dict[str, Any]:
+    def update_plan_after_interview(
+        self, db: Session, project_id: str, memo_id: str
+    ) -> Dict[str, Any]:
         """Update plan after an interview completes (called after Insight Memo generation).
 
         For now, just recalculate slot statuses. In Phase 3+, this will also

@@ -1,6 +1,7 @@
 """Celery application configuration."""
 
 from celery import Celery
+
 from app.core.config import settings
 
 celery_app = Celery(
@@ -10,7 +11,7 @@ celery_app = Celery(
     include=[
         "app.workers.document_analysis_worker",
         "app.workers.session_report_worker",
-    ]
+    ],
 )
 
 celery_app.conf.update(

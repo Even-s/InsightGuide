@@ -1,7 +1,17 @@
 """AI usage accounting models."""
 
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, ForeignKey, JSON, Integer, Numeric, UniqueConstraint
+
+from sqlalchemy import (
+    JSON,
+    Column,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base

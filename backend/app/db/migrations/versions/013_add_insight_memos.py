@@ -8,9 +8,8 @@ Phase 3: Interview Insight Memo
 - Creates interview_insight_memos table for structured post-interview insights
 """
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = '013_add_insight_memos'
 down_revision = '012_add_interview_briefs'

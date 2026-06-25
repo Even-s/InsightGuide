@@ -78,13 +78,7 @@ class ReportExportService:
             from reportlab.lib.units import mm
             from reportlab.pdfbase import pdfmetrics
             from reportlab.pdfbase.cidfonts import UnicodeCIDFont
-            from reportlab.platypus import (
-                Paragraph,
-                SimpleDocTemplate,
-                Spacer,
-                Table,
-                TableStyle,
-            )
+            from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
         except ImportError as exc:
             raise RuntimeError(
                 "PDF export requires reportlab. Install backend requirements before exporting PDF."
@@ -140,7 +134,9 @@ class ReportExportService:
         metrics = report["performance_metrics"]
 
         story.append(Paragraph("InsightGuide Interview Report", styles["InsightGuideTitle"]))
-        story.append(Paragraph(f"Document: {self._safe_text(deck_title)}", styles["InsightGuideBody"]))
+        story.append(
+            Paragraph(f"Document: {self._safe_text(deck_title)}", styles["InsightGuideBody"])
+        )
         story.append(
             Paragraph(
                 f"Session ID: {self._safe_text(report['session_id'])}",
@@ -199,7 +195,9 @@ class ReportExportService:
             topic_rows.append(
                 [
                     str(topic.get("slide_page") or ""),
-                    Paragraph(self._safe_text(topic.get("title") or ""), styles["InsightGuideBody"]),
+                    Paragraph(
+                        self._safe_text(topic.get("title") or ""), styles["InsightGuideBody"]
+                    ),
                     topic.get("importance") or "",
                     topic.get("status") or "",
                     f"{round((topic.get('confidence') or 0) * 100)}%",

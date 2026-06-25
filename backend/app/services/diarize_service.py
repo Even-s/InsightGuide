@@ -1,9 +1,10 @@
 """Diarization service using GPT-4o-transcribe with speaker identification."""
 
-import logging
 import io
-from typing import List
+import logging
 from dataclasses import dataclass
+from typing import List
+
 from openai import OpenAI
 
 from app.core.config import settings
@@ -59,28 +60,34 @@ class DiarizeService:
             )
 
             segments = []
-            if hasattr(response, 'segments') and response.segments:
+            if hasattr(response, "segments") and response.segments:
                 for seg in response.segments:
-                    speaker = getattr(seg, 'speaker', None) or "speaker_0"
-                    segments.append(DiarizedSegment(
-                        speaker=speaker,
-                        text=seg.text.strip(),
-                        start=seg.start,
-                        end=seg.end,
-                    ))
+                    speaker = getattr(seg, "speaker", None) or "speaker_0"
+                    segments.append(
+                        DiarizedSegment(
+                            speaker=speaker,
+                            text=seg.text.strip(),
+                            start=seg.start,
+                            end=seg.end,
+                        )
+                    )
 
-            if not segments and hasattr(response, 'text') and response.text.strip():
-                segments.append(DiarizedSegment(
-                    speaker="speaker_0",
-                    text=response.text.strip(),
-                    start=0.0,
-                    end=0.0,
-                ))
+            if not segments and hasattr(response, "text") and response.text.strip():
+                segments.append(
+                    DiarizedSegment(
+                        speaker="speaker_0",
+                        text=response.text.strip(),
+                        start=0.0,
+                        end=0.0,
+                    )
+                )
 
             return segments
 
         except Exception as e:
-            logger.error(f"Diarize transcription failed for session {session_id} chunk {chunk_index}: {e}")
+            logger.error(
+                f"Diarize transcription failed for session {session_id} chunk {chunk_index}: {e}"
+            )
             return []
 
 

@@ -31,6 +31,7 @@ export default function PresenterPage() {
 
     setError('Missing session or deck id')
     setIsLoading(false)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [documentId, urlSessionId])
 
   async function loadExistingSession(sessionId: string) {

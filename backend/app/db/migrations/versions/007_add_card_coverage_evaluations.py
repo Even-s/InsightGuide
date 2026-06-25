@@ -5,8 +5,8 @@ Revises: 006_add_transcript_split_tables
 Create Date: 2026-06-15
 """
 
-from alembic import op
 import sqlalchemy as sa
+from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.

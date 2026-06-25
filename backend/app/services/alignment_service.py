@@ -8,10 +8,11 @@ import logging
 import uuid
 from datetime import timedelta
 from typing import List
+
 from sqlalchemy.orm import Session
 
-from app.models.live_utterance import LiveUtterance
 from app.models.final_utterance import FinalUtterance
+from app.models.live_utterance import LiveUtterance
 from app.models.utterance_alignment import UtteranceAlignment
 
 logger = logging.getLogger(__name__)
@@ -29,19 +30,31 @@ class AlignmentService:
             transcript_revision_id: Transcript revision ID from diarization
         """
         # Load all non-partial live utterances
-        lives = db.query(LiveUtterance).filter(
-            LiveUtterance.session_id == session_id,
-            LiveUtterance.is_partial == False,
-        ).order_by(LiveUtterance.created_at).all()
+        lives = (
+            db.query(LiveUtterance)
+            .filter(
+                LiveUtterance.session_id == session_id,
+                LiveUtterance.is_partial == False,
+            )
+            .order_by(LiveUtterance.created_at)
+            .all()
+        )
 
         # Load all final utterances for this revision
-        finals = db.query(FinalUtterance).filter(
-            FinalUtterance.session_id == session_id,
-            FinalUtterance.transcript_revision_id == transcript_revision_id,
-        ).order_by(FinalUtterance.sequence_index).all()
+        finals = (
+            db.query(FinalUtterance)
+            .filter(
+                FinalUtterance.session_id == session_id,
+                FinalUtterance.transcript_revision_id == transcript_revision_id,
+            )
+            .order_by(FinalUtterance.sequence_index)
+            .all()
+        )
 
         if not lives or not finals:
-            logger.info(f"Alignment skipped for session {session_id}: lives={len(lives)}, finals={len(finals)}")
+            logger.info(
+                f"Alignment skipped for session {session_id}: lives={len(lives)}, finals={len(finals)}"
+            )
             return
 
         records = []
@@ -79,16 +92,18 @@ class AlignmentService:
             confidence = (time_score * 0.6 + text_sim * 0.4) if best_final else 0.0
 
             # Only create alignment if confidence is above threshold (0.2)
-            records.append(UtteranceAlignment(
-                id=f"ua_{uuid.uuid4().hex[:12]}",
-                session_id=session_id,
-                live_utterance_id=live.id,
-                final_utterance_id=best_final.id if best_final and confidence > 0.2 else None,
-                transcript_revision_id=transcript_revision_id,
-                time_overlap_score=time_score,
-                text_similarity_score=text_sim,
-                alignment_confidence=confidence,
-            ))
+            records.append(
+                UtteranceAlignment(
+                    id=f"ua_{uuid.uuid4().hex[:12]}",
+                    session_id=session_id,
+                    live_utterance_id=live.id,
+                    final_utterance_id=best_final.id if best_final and confidence > 0.2 else None,
+                    transcript_revision_id=transcript_revision_id,
+                    time_overlap_score=time_score,
+                    text_similarity_score=text_sim,
+                    alignment_confidence=confidence,
+                )
+            )
 
         # Bulk insert alignment records
         db.bulk_save_objects(records)

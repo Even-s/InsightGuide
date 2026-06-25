@@ -1,7 +1,8 @@
 """Stakeholder Profile model."""
 
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, ForeignKey, Text, JSON, Integer
+
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base
@@ -41,4 +42,8 @@ class StakeholderProfile(Base):
     # Relationships
     project = relationship("Project", back_populates="stakeholder_profiles")
     slot = relationship("StakeholderSlot", back_populates="profiles")
-    interview_sessions = relationship("InterviewSession", back_populates="stakeholder_profile", foreign_keys="[InterviewSession.stakeholder_profile_id]")
+    interview_sessions = relationship(
+        "InterviewSession",
+        back_populates="stakeholder_profile",
+        foreign_keys="[InterviewSession.stakeholder_profile_id]",
+    )

@@ -4,7 +4,8 @@ Tests deterministic scoring logic from criterion evaluations.
 """
 
 import pytest
-from app.services.answer_completion_scorer import answer_completion_scorer, AnswerCompletionScorer
+
+from app.services.answer_completion_scorer import AnswerCompletionScorer, answer_completion_scorer
 
 
 class TestCalculateCompletion:
@@ -116,7 +117,9 @@ class TestIsSufficient:
         return [{"id": "c0", "weight": 1.0, "critical": critical, "required": required}]
 
     def _make_eval(self, status="satisfied", evidence=True):
-        return [{"criterion_id": "c0", "status": status, "evidence_quotes": ["q"] if evidence else []}]
+        return [
+            {"criterion_id": "c0", "status": status, "evidence_quotes": ["q"] if evidence else []}
+        ]
 
     def test_sufficient_when_all_gates_pass(self):
         criteria = self._make_criteria()
@@ -174,10 +177,15 @@ class TestDetermineState:
         assert answer_completion_scorer.determine_state(0.9, True, True, False) == "sufficient"
 
     def test_partial_never_sufficient(self):
-        assert answer_completion_scorer.determine_state(0.9, True, True, True) == "probably_sufficient"
+        assert (
+            answer_completion_scorer.determine_state(0.9, True, True, True) == "probably_sufficient"
+        )
 
     def test_high_score_not_sufficient_is_probably(self):
-        assert answer_completion_scorer.determine_state(0.6, False, True, False) == "probably_sufficient"
+        assert (
+            answer_completion_scorer.determine_state(0.6, False, True, False)
+            == "probably_sufficient"
+        )
 
     def test_low_score_with_response_is_listening(self):
         assert answer_completion_scorer.determine_state(0.2, False, True, False) == "listening"

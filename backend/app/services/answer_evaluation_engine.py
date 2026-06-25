@@ -1,18 +1,19 @@
 """Answer Evaluation Engine - Core service for evaluating answer sufficiency."""
 
 import logging
-from typing import List, Dict, Any, Optional
-from datetime import datetime
 import uuid
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
 from sqlalchemy.orm import Session
 
-from app.services.question_card_service import question_card_service
-from app.services.question_rubric_service import question_rubric_service
-from app.services.answer_completion_scorer import answer_completion_scorer
-from app.models.question_card import QuestionCard
+from app.models.card_coverage_evaluation import CardCoverageEvaluation
 from app.models.interview_session import InterviewCardState
 from app.models.live_utterance import LiveUtterance
-from app.models.card_coverage_evaluation import CardCoverageEvaluation
+from app.models.question_card import QuestionCard
+from app.services.answer_completion_scorer import answer_completion_scorer
+from app.services.question_card_service import question_card_service
+from app.services.question_rubric_service import question_rubric_service
 
 logger = logging.getLogger(__name__)
 
@@ -32,12 +33,16 @@ class AnswerEvaluationEngine:
 
     def _get_next_evaluation_seq(self, db: Session, session_id: str, card_id: str) -> int:
         """Get the next evaluation sequence number for a card in a session."""
-        max_seq = db.query(CardCoverageEvaluation).filter(
-            CardCoverageEvaluation.session_id == session_id,
-            CardCoverageEvaluation.card_id == card_id,
-        ).with_entities(CardCoverageEvaluation.evaluation_seq).order_by(
-            CardCoverageEvaluation.evaluation_seq.desc()
-        ).first()
+        max_seq = (
+            db.query(CardCoverageEvaluation)
+            .filter(
+                CardCoverageEvaluation.session_id == session_id,
+                CardCoverageEvaluation.card_id == card_id,
+            )
+            .with_entities(CardCoverageEvaluation.evaluation_seq)
+            .order_by(CardCoverageEvaluation.evaluation_seq.desc())
+            .first()
+        )
 
         return (max_seq[0] + 1) if max_seq else 1
 
@@ -49,31 +54,25 @@ class AnswerEvaluationEngine:
         element IDs, with anchor IDs accepted as compatibility aliases.
         """
         coverage_rule = question_card_service.normalize_coverage_rule_for_important_elements(
-            getattr(card, 'coverage_rule', None) or {}
+            getattr(card, "coverage_rule", None) or {}
         )
-        semantic_anchors = coverage_rule.get('semanticAnchors', []) or []
-        must_mention_elements = coverage_rule.get('mustMentionElements', []) or []
+        semantic_anchors = coverage_rule.get("semanticAnchors", []) or []
+        must_mention_elements = coverage_rule.get("mustMentionElements", []) or []
 
         element_ids = [
-            f"element_{index}"
-            for index, element in enumerate(must_mention_elements)
-            if element
+            f"element_{index}" for index, element in enumerate(must_mention_elements) if element
         ]
         if element_ids:
             return element_ids
 
-        return [
-            f"anchor_{index}"
-            for index, anchor in enumerate(semantic_anchors)
-            if anchor
-        ]
+        return [f"anchor_{index}" for index, anchor in enumerate(semantic_anchors) if anchor]
 
     def _canonicalize_element_ids(self, card: QuestionCard, element_ids: set[str]) -> set[str]:
         """Map AI-returned anchor IDs into the canonical completion ID space."""
         coverage_rule = question_card_service.normalize_coverage_rule_for_important_elements(
-            getattr(card, 'coverage_rule', None) or {}
+            getattr(card, "coverage_rule", None) or {}
         )
-        must_mention_elements = coverage_rule.get('mustMentionElements', []) or []
+        must_mention_elements = coverage_rule.get("mustMentionElements", []) or []
         element_count = len([element for element in must_mention_elements if element])
         required_element_ids = set(self._get_required_element_ids(card))
         if not required_element_ids:
@@ -85,9 +84,9 @@ class AnswerEvaluationEngine:
                 canonical_ids.add(element_id)
                 continue
 
-            if element_count and element_id.startswith('anchor_'):
+            if element_count and element_id.startswith("anchor_"):
                 try:
-                    index = int(element_id.split('_', 1)[1])
+                    index = int(element_id.split("_", 1)[1])
                 except (IndexError, ValueError):
                     continue
                 mapped_id = f"element_{index % element_count}"
@@ -106,12 +105,10 @@ class AnswerEvaluationEngine:
         """Keep AI completion percentage and element IDs internally consistent."""
         required_element_ids = set(self._get_required_element_ids(card))
         covered_element_ids = self._canonicalize_element_ids(
-            card,
-            set(completion.get('covered_element_ids', []) or [])
+            card, set(completion.get("covered_element_ids", []) or [])
         )
         missing_element_ids = self._canonicalize_element_ids(
-            card,
-            set(completion.get('missing_element_ids', []) or [])
+            card, set(completion.get("missing_element_ids", []) or [])
         )
 
         if not required_element_ids:
@@ -124,18 +121,50 @@ class AnswerEvaluationEngine:
         return sorted(covered_element_ids), sorted(missing_element_ids)
 
     # High-confidence question detector: must have question signal AND lack answer signal
-    _QUESTION_ENDINGS = ('?', '？', '呢', '嗎', '嘛')
+    _QUESTION_ENDINGS = ("?", "？", "呢", "嗎", "嘛")
     _QUESTION_MARKERS = (
-        '哪些', '什麼', '如何', '為什麼', '有沒有', '是否', '能否',
-        '怎麼', '請問', '想問', '可不可以', '你有', '你會',
+        "哪些",
+        "什麼",
+        "如何",
+        "為什麼",
+        "有沒有",
+        "是否",
+        "能否",
+        "怎麼",
+        "請問",
+        "想問",
+        "可不可以",
+        "你有",
+        "你會",
     )
     _ANSWER_MARKERS = (
-        '我們會', '我們用', '我們有', '我會', '我有', '我遇到',
-        '之前有', '當時', '有一次', '例如', '像是',
-        '客戶要', '客戶說', '主管會', '同事幫',
-        '遇到過', '處理方式', '解決方案', '解決了', '後來就',
-        '因為所以', '結果是', '通常會', '其實是',
-        '我做的是', '我的做法', '我負責',
+        "我們會",
+        "我們用",
+        "我們有",
+        "我會",
+        "我有",
+        "我遇到",
+        "之前有",
+        "當時",
+        "有一次",
+        "例如",
+        "像是",
+        "客戶要",
+        "客戶說",
+        "主管會",
+        "同事幫",
+        "遇到過",
+        "處理方式",
+        "解決方案",
+        "解決了",
+        "後來就",
+        "因為所以",
+        "結果是",
+        "通常會",
+        "其實是",
+        "我做的是",
+        "我的做法",
+        "我負責",
     )
 
     def _is_question_like(self, text: str) -> bool:
@@ -148,9 +177,8 @@ class AnswerEvaluationEngine:
         if not stripped:
             return False
 
-        has_question_signal = (
-            stripped.endswith(self._QUESTION_ENDINGS)
-            or any(marker in stripped for marker in self._QUESTION_MARKERS)
+        has_question_signal = stripped.endswith(self._QUESTION_ENDINGS) or any(
+            marker in stripped for marker in self._QUESTION_MARKERS
         )
         if not has_question_signal:
             return False
@@ -159,24 +187,56 @@ class AnswerEvaluationEngine:
         return not has_answer_content
 
     # Filler patterns that should skip LLM evaluation
-    _FILLER_PATTERNS = frozenset([
-        '嗯', '嗯嗯', '好', '好的', '對', '對對', '是', '是的', '沒有', '沒',
-        '嗯哼', '喔', '哦', '啊', '呃', '那個', '就是', '然後',
-        '我想一下', '等一下', '讓我想想', '稍等',
-        'ok', 'okay', 'yeah', 'yes', 'no', 'hmm', 'uh', 'right',
-        'sure', 'got it', 'i see', 'mm',
-    ])
+    _FILLER_PATTERNS = frozenset(
+        [
+            "嗯",
+            "嗯嗯",
+            "好",
+            "好的",
+            "對",
+            "對對",
+            "是",
+            "是的",
+            "沒有",
+            "沒",
+            "嗯哼",
+            "喔",
+            "哦",
+            "啊",
+            "呃",
+            "那個",
+            "就是",
+            "然後",
+            "我想一下",
+            "等一下",
+            "讓我想想",
+            "稍等",
+            "ok",
+            "okay",
+            "yeah",
+            "yes",
+            "no",
+            "hmm",
+            "uh",
+            "right",
+            "sure",
+            "got it",
+            "i see",
+            "mm",
+        ]
+    )
 
     def _should_skip_utterance(self, text: str) -> bool:
         """Return True if utterance is too trivial to warrant LLM evaluation."""
         stripped = text.strip()
         if len(stripped) < 5:
             return True
-        normalized = stripped.lower().rstrip('。，.!?！？⋯…')
+        normalized = stripped.lower().rstrip("。，.!?！？⋯…")
         if normalized in self._FILLER_PATTERNS:
             return True
         import re
-        if re.fullmatch(r'[\s\W]+', stripped):
+
+        if re.fullmatch(r"[\s\W]+", stripped):
             return True
         return False
 
@@ -195,7 +255,9 @@ class AnswerEvaluationEngine:
         """
         try:
             if self._should_skip_utterance(utterance_text):
-                logger.info(f"Skipping trivial utterance for session={session_id}: '{utterance_text[:30]}'")
+                logger.info(
+                    f"Skipping trivial utterance for session={session_id}: '{utterance_text[:30]}'"
+                )
                 return []
 
             logger.info(
@@ -240,7 +302,9 @@ class AnswerEvaluationEngine:
             target_card_id = asked_card_id
             logger.info(f"Question routing: using frontend-provided askedCardId={asked_card_id}")
         else:
-            target_card_id = self._find_best_matching_card(db, session_id, section_id, utterance_text)
+            target_card_id = self._find_best_matching_card(
+                db, session_id, section_id, utterance_text
+            )
             logger.info(f"Question routing: router found target={target_card_id}")
 
         if not target_card_id:
@@ -248,17 +312,21 @@ class AnswerEvaluationEngine:
             return []
 
         # Load the card state
-        card_state = db.query(InterviewCardState).filter(
-            InterviewCardState.session_id == session_id,
-            InterviewCardState.question_card_id == target_card_id,
-        ).first()
+        card_state = (
+            db.query(InterviewCardState)
+            .filter(
+                InterviewCardState.session_id == session_id,
+                InterviewCardState.question_card_id == target_card_id,
+            )
+            .first()
+        )
 
         if not card_state:
             logger.info(f"Question routing: no card state for {target_card_id}")
             return []
 
         # Don't re-route already completed cards
-        if card_state.status in ('sufficient', 'covered', 'manually_checked'):
+        if card_state.status in ("sufficient", "covered", "manually_checked"):
             return []
 
         card = db.query(QuestionCard).filter(QuestionCard.id == target_card_id).first()
@@ -272,8 +340,8 @@ class AnswerEvaluationEngine:
 
         # Activate card (pending → listening) with activation only, no completion
         old_status = card_state.status
-        if old_status == 'pending':
-            card_state.status = 'listening'
+        if old_status == "pending":
+            card_state.status = "listening"
             card_state.activation_score = 1.0
             card_state.updated_at = datetime.utcnow()
 
@@ -300,19 +368,21 @@ class AnswerEvaluationEngine:
 
             logger.info(f"Question routed: {target_card_id} pending → listening")
 
-            return [{
-                'card_id': card.id,
-                'card_state_id': card_state.id,
-                'old_status': old_status,
-                'new_status': 'listening',
-                'confidence': 0,
-                'activation_score': 1.0,
-                'completion_score': 0.0,
-                'evidence': None,
-                'evidence_transcript': None,
-                'judgment': {'response_status': 'question_only', 'suggested_followup': ''},
-                'evaluation_seq': evaluation_seq,
-            }]
+            return [
+                {
+                    "card_id": card.id,
+                    "card_state_id": card_state.id,
+                    "old_status": old_status,
+                    "new_status": "listening",
+                    "confidence": 0,
+                    "activation_score": 1.0,
+                    "completion_score": 0.0,
+                    "evidence": None,
+                    "evidence_transcript": None,
+                    "judgment": {"response_status": "question_only", "suggested_followup": ""},
+                    "evaluation_seq": evaluation_seq,
+                }
+            ]
 
         # Card already active — just update hint, no state change needed
         if session:
@@ -328,8 +398,10 @@ class AnswerEvaluationEngine:
     ) -> Optional[str]:
         """Find which card a question is about using text similarity. No state bonus."""
         candidates = self._load_candidate_cards(
-            db, session_id, section_id,
-            statuses=['pending', 'listening', 'probably_sufficient', 'at_risk'],
+            db,
+            session_id,
+            section_id,
+            statuses=["pending", "listening", "probably_sufficient", "at_risk"],
         )
         if not candidates:
             return None
@@ -339,7 +411,7 @@ class AnswerEvaluationEngine:
         best_card_id = None
 
         for card_data in candidates:
-            card = card_data['card']
+            card = card_data["card"]
             score = 0.0
 
             # Focus text overlap (highest signal for routing)
@@ -355,10 +427,10 @@ class AnswerEvaluationEngine:
                     score += 2.0 * overlap
 
             # Keywords
-            coverage_rule = getattr(card, 'coverage_rule', None) or {}
+            coverage_rule = getattr(card, "coverage_rule", None) or {}
             keywords = (
-                coverage_rule.get('expectedKeywords', [])
-                or coverage_rule.get('expected_keywords', [])
+                coverage_rule.get("expectedKeywords", [])
+                or coverage_rule.get("expected_keywords", [])
                 or []
             )
             for kw in keywords:
@@ -367,8 +439,8 @@ class AnswerEvaluationEngine:
 
             # Semantic anchors
             anchors = (
-                coverage_rule.get('semanticAnchors', [])
-                or coverage_rule.get('semantic_anchors', [])
+                coverage_rule.get("semanticAnchors", [])
+                or coverage_rule.get("semantic_anchors", [])
                 or []
             )
             for anchor in anchors:
@@ -394,8 +466,10 @@ class AnswerEvaluationEngine:
     ) -> List[Dict[str, Any]]:
         """Public: find top-K candidate cards for a question. Returns scored list."""
         candidates = self._load_candidate_cards(
-            db, session_id, section_id,
-            statuses=['pending', 'listening', 'probably_sufficient', 'at_risk'],
+            db,
+            session_id,
+            section_id,
+            statuses=["pending", "listening", "probably_sufficient", "at_risk"],
         )
         if not candidates:
             return []
@@ -404,7 +478,7 @@ class AnswerEvaluationEngine:
         scored = []
 
         for card_data in candidates:
-            card = card_data['card']
+            card = card_data["card"]
             score = 0.0
 
             if card.focus_text:
@@ -417,10 +491,10 @@ class AnswerEvaluationEngine:
                 if overlap > 0.1:
                     score += 2.0 * overlap
 
-            coverage_rule = getattr(card, 'coverage_rule', None) or {}
+            coverage_rule = getattr(card, "coverage_rule", None) or {}
             keywords = (
-                coverage_rule.get('expectedKeywords', [])
-                or coverage_rule.get('expected_keywords', [])
+                coverage_rule.get("expectedKeywords", [])
+                or coverage_rule.get("expected_keywords", [])
                 or []
             )
             for kw in keywords:
@@ -428,8 +502,8 @@ class AnswerEvaluationEngine:
                     score += 3.0
 
             anchors = (
-                coverage_rule.get('semanticAnchors', [])
-                or coverage_rule.get('semantic_anchors', [])
+                coverage_rule.get("semanticAnchors", [])
+                or coverage_rule.get("semantic_anchors", [])
                 or []
             )
             for anchor in anchors:
@@ -443,11 +517,11 @@ class AnswerEvaluationEngine:
 
         return [
             {
-                "cardId": card_data['card'].id,
-                "questionText": card_data['card'].question_text,
-                "focusText": card_data['card'].focus_text or "",
+                "cardId": card_data["card"].id,
+                "questionText": card_data["card"].question_text,
+                "focusText": card_data["card"].focus_text or "",
                 "score": round(score, 2),
-                "status": card_data['state'].status if card_data.get('state') else "pending",
+                "status": card_data["state"].status if card_data.get("state") else "pending",
             }
             for score, card_data in scored[:top_k]
         ]
@@ -479,26 +553,31 @@ class AnswerEvaluationEngine:
             buffer.append(utterance_id)
             session.pending_answer_buffer = buffer
             db.commit()
-            logger.info(f"Buffered utterance {utterance_id} (waiting for card confirmation, buffer={len(buffer)})")
+            logger.info(
+                f"Buffered utterance {utterance_id} (waiting for card confirmation, buffer={len(buffer)})"
+            )
             return []
 
         # EXCLUSIVE MODE: when active_card_id is user-confirmed, only evaluate that card
-        is_exclusive = active_card_id and active_source in ('user_confirmed', 'manual_selected')
+        is_exclusive = active_card_id and active_source in ("user_confirmed", "manual_selected")
 
         if is_exclusive:
             # Only load and evaluate the active card
             candidate_cards = self._load_candidate_cards(
-                db, session_id, section_id,
+                db,
+                session_id,
+                section_id,
                 active_card_id=active_card_id,
-                statuses=['listening', 'probably_sufficient', 'at_risk'],
+                statuses=["listening", "probably_sufficient", "at_risk"],
             )
             if not candidate_cards:
                 logger.info(f"Active card {active_card_id} not in evaluable state; skipping")
                 return []
 
             filtered_candidates = [
-                c for c in candidate_cards
-                if question_rubric_service.get_rubric_if_cached(c['card']) is not None
+                c
+                for c in candidate_cards
+                if question_rubric_service.get_rubric_if_cached(c["card"]) is not None
             ]
             if not filtered_candidates:
                 return []
@@ -507,8 +586,10 @@ class AnswerEvaluationEngine:
         else:
             # NON-EXCLUSIVE: evaluate all candidates (legacy/no-active-card mode)
             candidate_cards = self._load_candidate_cards(
-                db, session_id, section_id,
-                statuses=['pending', 'listening', 'probably_sufficient', 'at_risk'],
+                db,
+                session_id,
+                section_id,
+                statuses=["pending", "listening", "probably_sufficient", "at_risk"],
             )
             if not candidate_cards:
                 logger.info("No candidate cards found for answer; skipping")
@@ -516,13 +597,18 @@ class AnswerEvaluationEngine:
 
             filtered_candidates = self._prefilter_candidates(utterance_text, candidate_cards)
             filtered_candidates = [
-                c for c in filtered_candidates
-                if question_rubric_service.get_rubric_if_cached(c['card']) is not None
+                c
+                for c in filtered_candidates
+                if question_rubric_service.get_rubric_if_cached(c["card"]) is not None
             ]
 
-            if active_hint_id and not any(c['card'].id == active_hint_id for c in filtered_candidates):
-                hint_card = next((c for c in candidate_cards if c['card'].id == active_hint_id), None)
-                if hint_card and question_rubric_service.get_rubric_if_cached(hint_card['card']):
+            if active_hint_id and not any(
+                c["card"].id == active_hint_id for c in filtered_candidates
+            ):
+                hint_card = next(
+                    (c for c in candidate_cards if c["card"].id == active_hint_id), None
+                )
+                if hint_card and question_rubric_service.get_rubric_if_cached(hint_card["card"]):
                     filtered_candidates.insert(0, hint_card)
 
             if not filtered_candidates:
@@ -532,26 +618,35 @@ class AnswerEvaluationEngine:
             logger.info(f"Non-exclusive mode: evaluating {len(filtered_candidates)} candidates")
 
         recent_context = self._build_structured_context(
-            db, session_id, section_id, utterance_text, filtered_candidates,
+            db,
+            session_id,
+            section_id,
+            utterance_text,
+            filtered_candidates,
         )
 
         judgments = self._batch_judge_answer_sufficiency(
-            recent_context, filtered_candidates,
-            session_id=session_id, model_override="gpt-5.4-mini", db=db,
+            recent_context,
+            filtered_candidates,
+            session_id=session_id,
+            model_override="gpt-5.4-mini",
+            db=db,
         )
 
         # In exclusive mode, no pending-card gating needed (only active card is evaluated)
         # In non-exclusive mode, one answer turn can advance at most one pending card
         has_advanced_pending = False
-        max_confidence = max((j.get('confidence', 0) for j in judgments), default=0) if not is_exclusive else 0
+        max_confidence = (
+            max((j.get("confidence", 0) for j in judgments), default=0) if not is_exclusive else 0
+        )
 
         updates = []
         for card_data, judgment in zip(filtered_candidates, judgments):
-            card = card_data['card']
-            card_state = card_data['state']
-            conf = judgment.get('confidence', 0)
+            card = card_data["card"]
+            card_state = card_data["state"]
+            conf = judgment.get("confidence", 0)
 
-            if not is_exclusive and conf > 0 and card_state.status == 'pending':
+            if not is_exclusive and conf > 0 and card_state.status == "pending":
                 if conf < max_confidence:
                     continue
                 if has_advanced_pending:
@@ -559,9 +654,14 @@ class AnswerEvaluationEngine:
                 has_advanced_pending = True
 
             update = self._update_card_state(
-                db=db, card_state=card_state, card=card,
-                utterance_id=utterance_id, utterance_text=utterance_text,
-                judgment=judgment, is_partial=False, model_used="gpt-5.4-mini",
+                db=db,
+                card_state=card_state,
+                card=card,
+                utterance_id=utterance_id,
+                utterance_text=utterance_text,
+                judgment=judgment,
+                is_partial=False,
+                model_used="gpt-5.4-mini",
             )
             if update:
                 updates.append(update)
@@ -606,35 +706,32 @@ class AnswerEvaluationEngine:
                 session_id,
                 section_id,
                 active_card_id=active_card_id,
-                statuses=['listening'],
+                statuses=["listening"],
             )
             if not candidate_cards:
                 logger.info("No active card found for partial transcript")
                 return []
 
             judgments = self._batch_judge_answer_sufficiency(
-                transcript_text,
-                candidate_cards,
-                session_id=session_id,
-                db=db
+                transcript_text, candidate_cards, session_id=session_id, db=db
             )
 
             # Phase 2: Cap partial transcript judgments at probably_sufficient
             # Partial transcripts cannot produce "sufficient" state
             for judgment in judgments:
-                if judgment.get('is_covered') or judgment.get('is_sufficient'):
-                    judgment['is_covered'] = False
-                    judgment['is_sufficient'] = False
+                if judgment.get("is_covered") or judgment.get("is_sufficient"):
+                    judgment["is_covered"] = False
+                    judgment["is_sufficient"] = False
                     # Cap confidence to prevent sufficient state
-                    if judgment.get('confidence', 0) >= 0.85:
-                        judgment['confidence'] = 0.80
+                    if judgment.get("confidence", 0) >= 0.85:
+                        judgment["confidence"] = 0.80
 
             updates = []
             for card_data, judgment in zip(candidate_cards, judgments):
                 update = self._update_card_state(
                     db=db,
-                    card_state=card_data['state'],
-                    card=card_data['card'],
+                    card_state=card_data["state"],
+                    card=card_data["card"],
                     utterance_id=temp_utterance_id,
                     utterance_text=transcript_text,
                     judgment=judgment,
@@ -657,7 +754,6 @@ class AnswerEvaluationEngine:
             db.rollback()
             return []
 
-
     def _chinese_overlap_score(self, text: str, reference: str, n: int = 2) -> float:
         """Calculate character n-gram overlap between text and reference.
 
@@ -673,24 +769,21 @@ class AnswerEvaluationEngine:
         """
         if not text or not reference:
             return 0.0
-        text_ngrams = set(text[i:i+n] for i in range(len(text) - n + 1))
-        ref_ngrams = set(reference[i:i+n] for i in range(len(reference) - n + 1))
+        text_ngrams = set(text[i : i + n] for i in range(len(text) - n + 1))
+        ref_ngrams = set(reference[i : i + n] for i in range(len(reference) - n + 1))
         if not ref_ngrams:
             return 0.0
         return len(text_ngrams & ref_ngrams) / len(ref_ngrams)
 
     _STATE_PRIORITY_BONUS = {
-        'listening': 5.0,
-        'at_risk': 4.0,
-        'probably_sufficient': 3.0,
-        'pending': 0.0,
+        "listening": 5.0,
+        "at_risk": 4.0,
+        "probably_sufficient": 3.0,
+        "pending": 0.0,
     }
 
     def _prefilter_candidates(
-        self,
-        utterance_text: str,
-        candidate_cards: list,
-        top_k: int = 5
+        self, utterance_text: str, candidate_cards: list, top_k: int = 5
     ) -> list:
         """Fast keyword-based prefilter to reduce candidates before LLM call.
 
@@ -703,8 +796,8 @@ class AnswerEvaluationEngine:
         text_lower = utterance_text.lower()
         scored = []
         for card_data in candidate_cards:
-            card = card_data['card']
-            state = card_data.get('state')
+            card = card_data["card"]
+            state = card_data.get("state")
             score = 0.0
 
             # State priority: already-active cards get significant boost
@@ -724,16 +817,16 @@ class AnswerEvaluationEngine:
                     score += 1.0 * overlap
 
             # Check expectedKeywords from coverage_rule (substring matching works fine)
-            coverage_rule = getattr(card, 'coverage_rule', None) or {}
-            keywords = coverage_rule.get('expectedKeywords', []) or []
+            coverage_rule = getattr(card, "coverage_rule", None) or {}
+            keywords = coverage_rule.get("expectedKeywords", []) or []
             for kw in keywords:
                 if kw and kw.lower() in text_lower:
                     score += 3.0
 
             # Check mustMentionElements (substring matching works fine)
-            elements = coverage_rule.get('mustMentionElements', []) or []
+            elements = coverage_rule.get("mustMentionElements", []) or []
             for elem in elements:
-                elem_text = elem.get('text', '') if isinstance(elem, dict) else str(elem)
+                elem_text = elem.get("text", "") if isinstance(elem, dict) else str(elem)
                 if elem_text and elem_text.lower() in text_lower:
                     score += 2.0
 
@@ -757,35 +850,44 @@ class AnswerEvaluationEngine:
         # Get all card states for cards in this section that are not yet sufficient
         from app.models.interview_session import InterviewSession
 
-        session = db.query(InterviewSession).filter(
-            InterviewSession.id == session_id
-        ).first()
+        session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
 
         if not session:
             return []
 
         from sqlalchemy import or_
+
         # Get question cards matching by theme_id or section_id
-        cards = db.query(QuestionCard).filter(
-            QuestionCard.document_id == session.document_id,
-            or_(
-                QuestionCard.interview_theme_id == section_id,
-                QuestionCard.section_id == section_id,
+        cards = (
+            db.query(QuestionCard)
+            .filter(
+                QuestionCard.document_id == session.document_id,
+                or_(
+                    QuestionCard.interview_theme_id == section_id,
+                    QuestionCard.section_id == section_id,
+                ),
             )
-        ).all()
+            .all()
+        )
         if active_card_id:
             cards = [card for card in cards if card.id == active_card_id]
         if not cards:
             return []
 
         # Get their states (exclude role-inapplicable cards)
-        excluded_statuses = {'not_applicable_for_role', 'needs_different_stakeholder'}
-        card_states = db.query(InterviewCardState).filter(
-            InterviewCardState.session_id == session_id,
-            InterviewCardState.question_card_id.in_([card.id for card in cards]),
-            InterviewCardState.status.in_(statuses or ['pending', 'listening', 'probably_sufficient', 'at_risk']),
-            ~InterviewCardState.status.in_(excluded_statuses),
-        ).all()
+        excluded_statuses = {"not_applicable_for_role", "needs_different_stakeholder"}
+        card_states = (
+            db.query(InterviewCardState)
+            .filter(
+                InterviewCardState.session_id == session_id,
+                InterviewCardState.question_card_id.in_([card.id for card in cards]),
+                InterviewCardState.status.in_(
+                    statuses or ["pending", "listening", "probably_sufficient", "at_risk"]
+                ),
+                ~InterviewCardState.status.in_(excluded_statuses),
+            )
+            .all()
+        )
 
         # Build candidate list
         state_by_card_id = {state.question_card_id: state for state in card_states}
@@ -793,10 +895,7 @@ class AnswerEvaluationEngine:
 
         for card in cards:
             if card.id in state_by_card_id:
-                candidates.append({
-                    'card': card,
-                    'state': state_by_card_id[card.id]
-                })
+                candidates.append({"card": card, "state": state_by_card_id[card.id]})
 
         return candidates
 
@@ -818,9 +917,14 @@ class AnswerEvaluationEngine:
         so we currently fetch all utterances for the session. Future enhancement
         could add theme_id filtering if the model is updated.
         """
-        all_utterances = db.query(LiveUtterance).filter(
-            LiveUtterance.session_id == session_id,
-        ).order_by(LiveUtterance.created_at.asc()).all()
+        all_utterances = (
+            db.query(LiveUtterance)
+            .filter(
+                LiveUtterance.session_id == session_id,
+            )
+            .order_by(LiveUtterance.created_at.asc())
+            .all()
+        )
 
         lines = []
         for utt in all_utterances:
@@ -855,6 +959,7 @@ class AnswerEvaluationEngine:
         pass model_override="gpt-5.4-mini". Final evaluation uses gpt-5.4-mini (default).
         """
         import json
+
         from app.services.openai_service import openai_service
 
         # Phase 3: Use nano for provisional (live) evaluation, mini for final
@@ -863,41 +968,47 @@ class AnswerEvaluationEngine:
         # Pre-load rubrics (cached only — no LLM calls, no fallback)
         rubrics = {}
         for card_data in candidate_cards:
-            card = card_data['card']
+            card = card_data["card"]
             rubric = question_rubric_service.get_rubric_if_cached(card)
             rubrics[card.id] = rubric or {"criteria": [], "answerTarget": card.question_text}
 
         cards_description = []
         for i, card_data in enumerate(candidate_cards):
-            card = card_data['card']
+            card = card_data["card"]
 
             rubric = rubrics[card.id]
-            criteria = rubric.get('criteria', [])
-            answer_target = rubric.get('answerTarget', card.question_text)
+            criteria = rubric.get("criteria", [])
+            answer_target = rubric.get("answerTarget", card.question_text)
 
             # Build criteria description for prompt
             criteria_lines = []
             for criterion in criteria:
-                crit_id = criterion.get('id', f'criterion_{len(criteria_lines)}')
-                desc = criterion.get('description', '')
-                crit_type = criterion.get('type', 'value_slot')
-                required = '必要' if criterion.get('required') else '選填'
+                crit_id = criterion.get("id", f"criterion_{len(criteria_lines)}")
+                desc = criterion.get("description", "")
+                crit_type = criterion.get("type", "value_slot")
+                required = "必要" if criterion.get("required") else "選填"
                 criteria_lines.append(f"  {crit_id}: {desc} (type={crit_type}, {required})")
 
             # Include current coverage progress
-            state = card_data.get('state')
-            current_status = state.status if state else 'pending'
-            existing_evidence = getattr(state, 'evidence', None) or {} if state else {}
-            already_satisfied = existing_evidence.get('satisfiedCriteria', []) or []
+            state = card_data.get("state")
+            current_status = state.status if state else "pending"
+            existing_evidence = getattr(state, "evidence", None) or {} if state else {}
+            already_satisfied = existing_evidence.get("satisfiedCriteria", []) or []
 
             cards_description.append(
-                "\n".join([
-                    f"{i}: question=\"{card.question_text}\"",
-                    f"focus=\"{card.focus_text or ''}\"",
-                    f"answer_target=\"{answer_target}\"",
-                    f"criteria:\n" + "\n".join(criteria_lines) if criteria_lines else "criteria: (none)",
-                    f"current_status=\"{current_status}\" already_satisfied={already_satisfied}",
-                ])
+                "\n".join(
+                    [
+                        f'{i}: question="{card.question_text}"',
+                        f"focus=\"{card.focus_text or ''}\"",
+                        f'answer_target="{answer_target}"',
+                        (
+                            f"criteria:\n" + "\n".join(criteria_lines)
+                            if criteria_lines
+                            else "criteria: (none)"
+                        ),
+                        f'current_status="{current_status}" already_satisfied={already_satisfied}',
+                    ]
+                )
             )
 
         cards_list = "\n".join(cards_description)
@@ -950,12 +1061,12 @@ class AnswerEvaluationEngine:
             "- unresolved：提了但沒解決\n"
             "- not_started：完全未開始或僅有提問\n\n"
             "回傳格式必須是 JSON：\n"
-            "{\"evaluations\": [{\"relation\": \"topic_mention\", \"response_status\": \"question_only\", "
-            "\"resolution_status\": \"not_started\", "
-            "\"criteria\": [{\"criterion_id\": \"criterion_0\", \"status\": \"not_addressed\", "
-            "\"normalized_value\": null, \"evidence_quotes\": [], "
-            "\"evaluator_confidence\": 0.95, \"reason\": \"僅有提問，尚無回答\"}], "
-            "\"suggested_followup\": null}]}\n\n"
+            '{"evaluations": [{"relation": "topic_mention", "response_status": "question_only", '
+            '"resolution_status": "not_started", '
+            '"criteria": [{"criterion_id": "criterion_0", "status": "not_addressed", '
+            '"normalized_value": null, "evidence_quotes": [], '
+            '"evaluator_confidence": 0.95, "reason": "僅有提問，尚無回答"}], '
+            '"suggested_followup": null}]}\n\n'
             "重要限制：\n"
             "- evaluations 陣列長度必須等於卡片數量，順序一一對應。\n"
             "- 禁止輸出 completion_score 或 is_sufficient（由程式計算）。\n"
@@ -973,7 +1084,6 @@ class AnswerEvaluationEngine:
             f"suggested_followup 必須問「對話中還沒提到的部分」，不要重複對話中已經回答過的內容。\n"
             f"只輸出 JSON。"
         )
-
 
         try:
             # Phase 3: Use model parameter from argument (nano for live, mini for final)
@@ -1003,7 +1113,9 @@ class AnswerEvaluationEngine:
                 else:
                     # Handle dict with index keys like {"0": {...}, "1": {...}}
                     if all(k.isdigit() for k in result.keys()):
-                        judgments_raw = [result[str(i)] for i in range(len(candidate_cards)) if str(i) in result]
+                        judgments_raw = [
+                            result[str(i)] for i in range(len(candidate_cards)) if str(i) in result
+                        ]
                     else:
                         judgments_raw = []
 
@@ -1011,12 +1123,12 @@ class AnswerEvaluationEngine:
             for i in range(len(candidate_cards)):
                 if i < len(judgments_raw):
                     item = judgments_raw[i]
-                    criterion_evals = item.get('criteria', []) or []
+                    criterion_evals = item.get("criteria", []) or []
 
                     # Reuse pre-loaded rubric (no LLM call)
-                    card = candidate_cards[i]['card']
+                    card = candidate_cards[i]["card"]
                     rubric = rubrics[card.id]
-                    rubric_criteria = rubric.get('criteria', [])
+                    rubric_criteria = rubric.get("criteria", [])
 
                     # Use deterministic scorer
                     completion_score = answer_completion_scorer.calculate_completion(
@@ -1026,10 +1138,10 @@ class AnswerEvaluationEngine:
                         rubric_criteria, criterion_evals, completion_score
                     )
 
-                    evidence_quote = ''
+                    evidence_quote = ""
                     for e in criterion_evals:
-                        if e.get('evidence_quotes'):
-                            evidence_quote = e['evidence_quotes'][0]
+                        if e.get("evidence_quotes"):
+                            evidence_quote = e["evidence_quotes"][0]
                             break
 
                     # Ensure card activation even when completion=0 but topic was touched
@@ -1041,37 +1153,52 @@ class AnswerEvaluationEngine:
                     if effective_confidence == 0 and response_status == "question_only":
                         effective_confidence = 0.01
 
-                    judgments.append({
-                        "confidence": effective_confidence,
-                        "is_covered": is_sufficient,
-                        "relation": relation,
-                        "response_status": response_status,
-                        "resolution_status": item.get("resolution_status", "not_started"),
-                        "criterion_evaluations": criterion_evals,
-                        "covered_element_ids": [
-                            e['criterion_id'] for e in criterion_evals
-                            if e.get('status') == 'satisfied'
-                        ],
-                        "missing_element_ids": [
-                            e['criterion_id'] for e in criterion_evals
-                            if e.get('status') in ('not_addressed', 'attempted_but_unresolved', 'partially_satisfied')
-                        ],
-                        "reason": "; ".join(e.get('reason', '') for e in criterion_evals if e.get('reason')),
-                        "suggested_followup": item.get("suggested_followup", "") or "",
-                        "evidence_quote": evidence_quote,
-                    })
+                    judgments.append(
+                        {
+                            "confidence": effective_confidence,
+                            "is_covered": is_sufficient,
+                            "relation": relation,
+                            "response_status": response_status,
+                            "resolution_status": item.get("resolution_status", "not_started"),
+                            "criterion_evaluations": criterion_evals,
+                            "covered_element_ids": [
+                                e["criterion_id"]
+                                for e in criterion_evals
+                                if e.get("status") == "satisfied"
+                            ],
+                            "missing_element_ids": [
+                                e["criterion_id"]
+                                for e in criterion_evals
+                                if e.get("status")
+                                in (
+                                    "not_addressed",
+                                    "attempted_but_unresolved",
+                                    "partially_satisfied",
+                                )
+                            ],
+                            "reason": "; ".join(
+                                e.get("reason", "") for e in criterion_evals if e.get("reason")
+                            ),
+                            "suggested_followup": item.get("suggested_followup", "") or "",
+                            "evidence_quote": evidence_quote,
+                        }
+                    )
                 else:
-                    judgments.append({
-                        "confidence": 0.0,
-                        "is_covered": False,
-                        "relation": "irrelevant",
-                        "response_status": "not_yet",
-                        "criterion_evaluations": [],
-                        "suggested_followup": "",
-                        "evidence_quote": "",
-                    })
+                    judgments.append(
+                        {
+                            "confidence": 0.0,
+                            "is_covered": False,
+                            "relation": "irrelevant",
+                            "response_status": "not_yet",
+                            "criterion_evaluations": [],
+                            "suggested_followup": "",
+                            "evidence_quote": "",
+                        }
+                    )
 
-            logger.info(f"Batch judgment for {len(candidate_cards)} cards: {[j['confidence'] for j in judgments]}")
+            logger.info(
+                f"Batch judgment for {len(candidate_cards)} cards: {[j['confidence'] for j in judgments]}"
+            )
             return judgments
 
         except Exception as e:
@@ -1096,21 +1223,21 @@ class AnswerEvaluationEngine:
         """
         old_status = card_state.status
         # Don't downgrade already completed cards
-        if old_status in ('sufficient', 'covered', 'manually_checked'):
+        if old_status in ("sufficient", "covered", "manually_checked"):
             return None
 
-        ai_confidence = judgment.get('sufficiency_score', None) or judgment.get('confidence', 0.0)
-        is_covered = judgment.get('is_sufficient', None) or judgment.get('is_covered', False)
+        ai_confidence = judgment.get("sufficiency_score", None) or judgment.get("confidence", 0.0)
+        is_covered = judgment.get("is_sufficient", None) or judgment.get("is_covered", False)
         current_activation = float(card_state.activation_score or 0)
         current_completion = float(card_state.completion_score or 0)
-        covered_element_ids = set(judgment.get('covered_element_ids', []) or [])
-        missing_element_ids = set(judgment.get('missing_element_ids', []) or [])
+        covered_element_ids = set(judgment.get("covered_element_ids", []) or [])
+        missing_element_ids = set(judgment.get("missing_element_ids", []) or [])
         if covered_element_ids or missing_element_ids:
             covered, missing = self._normalize_completion_element_ids(
                 card=card,
                 completion={
-                    'covered_element_ids': list(covered_element_ids),
-                    'missing_element_ids': list(missing_element_ids),
+                    "covered_element_ids": list(covered_element_ids),
+                    "missing_element_ids": list(missing_element_ids),
                 },
                 completion_percentage=ai_confidence * 100,
                 is_sufficient=bool(is_covered),
@@ -1120,9 +1247,7 @@ class AnswerEvaluationEngine:
 
         # Deterministic reducer with activation/completion separation
         new_status, new_activation, new_completion = self._reduce_state(
-            current_status=old_status,
-            judgment=judgment,
-            is_partial=is_partial
+            current_status=old_status, judgment=judgment, is_partial=is_partial
         )
         # Scores only accumulate upward (never decrease)
         new_activation = max(current_activation, new_activation)
@@ -1137,8 +1262,8 @@ class AnswerEvaluationEngine:
             covered, missing = self._normalize_completion_element_ids(
                 card=card,
                 completion={
-                    'covered_element_ids': list(covered_element_ids),
-                    'missing_element_ids': list(missing_element_ids),
+                    "covered_element_ids": list(covered_element_ids),
+                    "missing_element_ids": list(missing_element_ids),
                 },
                 completion_percentage=ai_confidence * 100,
                 is_sufficient=bool(is_covered),
@@ -1154,7 +1279,11 @@ class AnswerEvaluationEngine:
             confidence=new_confidence,
             covered_element_ids=covered or [],
             missing_element_ids=missing or [],
-            evidence=[{"evidence_quote": judgment.get("evidence_quote", "")}] if judgment.get("evidence_quote") else [],
+            evidence=(
+                [{"evidence_quote": judgment.get("evidence_quote", "")}]
+                if judgment.get("evidence_quote")
+                else []
+            ),
             evaluation_seq=evaluation_seq,
             model=model_used,
             prompt_version=None,
@@ -1164,8 +1293,8 @@ class AnswerEvaluationEngine:
 
         # Write criterion-level evidence to append-only ledger
         # Skip for question-only turns — they activate cards but don't create progress
-        response_status = judgment.get('response_status', 'not_yet')
-        criterion_evals = judgment.get('criterion_evaluations', [])
+        response_status = judgment.get("response_status", "not_yet")
+        criterion_evals = judgment.get("criterion_evaluations", [])
         is_question_only = response_status in self._QUESTION_ONLY_STATUSES
         if criterion_evals and not is_question_only:
             self._persist_criterion_evidence(
@@ -1180,9 +1309,11 @@ class AnswerEvaluationEngine:
             )
 
         # No meaningful progress — skip UI update but evaluation is still recorded
-        if (new_status == old_status
-                and new_activation <= current_activation
-                and new_completion <= current_completion):
+        if (
+            new_status == old_status
+            and new_activation <= current_activation
+            and new_completion <= current_completion
+        ):
             return None
 
         # Update card state
@@ -1194,24 +1325,28 @@ class AnswerEvaluationEngine:
         card_state.evidence_transcript = f"{existing_evidence}\n{utterance_text}".strip()
         judgment = self._preserve_existing_followup_when_empty(card_state.evidence, judgment)
         card_state.evidence = {
-            'judgment': judgment,
-            'utterance_id': utterance_id,
-            'accumulated_confidence': new_confidence,
-            'matchedTranscript': utterance_text,
-            'coveredElementIds': covered,
-            'missingElementIds': missing,
-            'satisfiedCriteria': [
-                e['criterion_id'] for e in judgment.get('criterion_evaluations', [])
-                if e.get('status') == 'satisfied'
+            "judgment": judgment,
+            "utterance_id": utterance_id,
+            "accumulated_confidence": new_confidence,
+            "matchedTranscript": utterance_text,
+            "coveredElementIds": covered,
+            "missingElementIds": missing,
+            "satisfiedCriteria": [
+                e["criterion_id"]
+                for e in judgment.get("criterion_evaluations", [])
+                if e.get("status") == "satisfied"
             ],
-            'criterionEvaluations': judgment.get('criterion_evaluations', []),
-            'coveredAspectIds': covered,
-            'timestamp': datetime.utcnow().isoformat()
+            "criterionEvaluations": judgment.get("criterion_evaluations", []),
+            "coveredAspectIds": covered,
+            "timestamp": datetime.utcnow().isoformat(),
         }
         card_state.updated_at = datetime.utcnow()
 
         # Set answered_at when becoming sufficient
-        if new_status in ["sufficient", "probably_sufficient"] and old_status not in ["sufficient", "probably_sufficient"]:
+        if new_status in ["sufficient", "probably_sufficient"] and old_status not in [
+            "sufficient",
+            "probably_sufficient",
+        ]:
             card_state.answered_at = datetime.utcnow()
 
         logger.info(
@@ -1220,28 +1355,30 @@ class AnswerEvaluationEngine:
         )
 
         return {
-            'card_id': card.id,
-            'card_state_id': card_state.id,
-            'old_status': old_status,
-            'new_status': new_status,
-            'confidence': new_confidence,
-            'activation_score': new_activation,
-            'completion_score': new_completion,
-            'evidence': card_state.evidence,
-            'evidence_transcript': card_state.evidence_transcript,
-            'judgment': judgment,
-            'evaluation_seq': evaluation_seq,
+            "card_id": card.id,
+            "card_state_id": card_state.id,
+            "old_status": old_status,
+            "new_status": new_status,
+            "confidence": new_confidence,
+            "activation_score": new_activation,
+            "completion_score": new_completion,
+            "evidence": card_state.evidence,
+            "evidence_transcript": card_state.evidence_transcript,
+            "judgment": judgment,
+            "evaluation_seq": evaluation_seq,
         }
 
-    _QUESTION_ONLY_STATUSES = frozenset([
-        'question_only', 'not_yet', 'not_started', 'clarification_question',
-    ])
+    _QUESTION_ONLY_STATUSES = frozenset(
+        [
+            "question_only",
+            "not_yet",
+            "not_started",
+            "clarification_question",
+        ]
+    )
 
     def _reduce_state(
-        self,
-        current_status: str,
-        judgment: dict,
-        is_partial: bool = False
+        self, current_status: str, judgment: dict, is_partial: bool = False
     ) -> tuple[str, float, float]:
         """Deterministic state reducer using activation/completion separation.
 
@@ -1256,18 +1393,18 @@ class AnswerEvaluationEngine:
         - activation>0, completion>0 → probably_sufficient (progress bar)
         - all gates met → sufficient
         """
-        raw_confidence = judgment.get('sufficiency_score', None) or judgment.get('confidence', 0.0)
-        is_covered = judgment.get('is_sufficient', None) or judgment.get('is_covered', False)
-        has_evidence = bool(judgment.get('evidence_quote'))
-        missing = judgment.get('missing_element_ids', [])
-        response_status = judgment.get('response_status', 'not_yet')
-        relation = judgment.get('relation', 'irrelevant')
+        raw_confidence = judgment.get("sufficiency_score", None) or judgment.get("confidence", 0.0)
+        is_covered = judgment.get("is_sufficient", None) or judgment.get("is_covered", False)
+        has_evidence = bool(judgment.get("evidence_quote"))
+        missing = judgment.get("missing_element_ids", [])
+        response_status = judgment.get("response_status", "not_yet")
+        relation = judgment.get("relation", "irrelevant")
 
         # Determine activation (topic detected?)
         is_activated = (
             raw_confidence > 0
-            or relation in ('answer', 'tangential', 'topic_mention')
-            or response_status == 'question_only'
+            or relation in ("answer", "tangential", "topic_mention")
+            or response_status == "question_only"
         )
         activation_score = 1.0 if is_activated else 0.0
 
@@ -1280,26 +1417,26 @@ class AnswerEvaluationEngine:
 
         # Determine target state from activation + completion
         if completion_score <= 0 and activation_score <= 0:
-            target = 'pending'
+            target = "pending"
         elif completion_score <= 0:
-            target = 'listening'
+            target = "listening"
         elif completion_score < 0.7:
-            target = 'probably_sufficient'
+            target = "probably_sufficient"
         elif is_covered and has_evidence and not missing:
-            target = 'sufficient'
+            target = "sufficient"
         else:
-            target = 'probably_sufficient'
+            target = "probably_sufficient"
 
         # Constraints
-        if is_partial and target == 'sufficient':
-            target = 'probably_sufficient'
+        if is_partial and target == "sufficient":
+            target = "probably_sufficient"
             completion_score = min(completion_score, 0.80)
 
-        if not has_evidence and target == 'sufficient':
-            target = 'probably_sufficient'
+        if not has_evidence and target == "sufficient":
+            target = "probably_sufficient"
 
         # State can only move forward
-        STATE_ORDER = {'pending': 0, 'listening': 1, 'probably_sufficient': 2, 'sufficient': 3}
+        STATE_ORDER = {"pending": 0, "listening": 1, "probably_sufficient": 2, "sufficient": 3}
         current_order = STATE_ORDER.get(current_status, 0)
         target_order = STATE_ORDER.get(target, 0)
 
@@ -1315,9 +1452,7 @@ class AnswerEvaluationEngine:
     ) -> Dict[str, Any]:
         """Keep the last useful follow-up when a later judgment returns an empty one."""
         next_followup = (
-            judgment.get("suggested_followup")
-            or judgment.get("suggestedFollowup")
-            or ""
+            judgment.get("suggested_followup") or judgment.get("suggestedFollowup") or ""
         )
         if isinstance(next_followup, str) and next_followup.strip():
             return judgment
@@ -1360,23 +1495,23 @@ class AnswerEvaluationEngine:
         """Write criterion-level evidence to the append-only ledger."""
         from app.models.card_criterion_evidence import CardCriterionEvidence
 
-        skip_statuses = {'not_addressed'}
+        skip_statuses = {"not_addressed"}
         for crit_eval in criterion_evaluations:
-            status = crit_eval.get('status', 'not_addressed')
+            status = crit_eval.get("status", "not_addressed")
             if status in skip_statuses:
                 continue
             evidence = CardCriterionEvidence(
                 id=f"cev_{uuid.uuid4().hex[:12]}",
                 session_id=session_id,
                 card_id=card_id,
-                criterion_id=crit_eval.get('criterion_id', ''),
-                utterance_id=utterance_id if not utterance_id.startswith('partial_') else None,
+                criterion_id=crit_eval.get("criterion_id", ""),
+                utterance_id=utterance_id if not utterance_id.startswith("partial_") else None,
                 evaluation_turn_text=utterance_text[:500] if utterance_text else None,
                 status=status,
-                evidence_quote=(crit_eval.get('evidence_quotes') or [None])[0],
-                normalized_value=crit_eval.get('normalized_value'),
-                evaluator_confidence=crit_eval.get('evaluator_confidence'),
-                reason=crit_eval.get('reason'),
+                evidence_quote=(crit_eval.get("evidence_quotes") or [None])[0],
+                normalized_value=crit_eval.get("normalized_value"),
+                evaluator_confidence=crit_eval.get("evaluator_confidence"),
+                reason=crit_eval.get("reason"),
                 model=model,
                 evaluation_seq=evaluation_seq,
                 created_at=datetime.utcnow(),
@@ -1392,18 +1527,23 @@ class AnswerEvaluationEngine:
         """Load best evidence status per criterion from ledger. Returns {criterion_id: best_status}."""
         from app.models.card_criterion_evidence import CardCriterionEvidence
 
-        rows = db.query(CardCriterionEvidence).filter(
-            CardCriterionEvidence.session_id == session_id,
-            CardCriterionEvidence.card_id == card_id,
-        ).order_by(CardCriterionEvidence.evaluation_seq.desc()).all()
+        rows = (
+            db.query(CardCriterionEvidence)
+            .filter(
+                CardCriterionEvidence.session_id == session_id,
+                CardCriterionEvidence.card_id == card_id,
+            )
+            .order_by(CardCriterionEvidence.evaluation_seq.desc())
+            .all()
+        )
 
         STATUS_RANK = {
-            'satisfied': 5,
-            'partially_satisfied': 4,
-            'attempted_but_unresolved': 3,
-            'contradicted': 2,
-            'not_applicable': 1,
-            'not_addressed': 0,
+            "satisfied": 5,
+            "partially_satisfied": 4,
+            "attempted_but_unresolved": 3,
+            "contradicted": 2,
+            "not_applicable": 1,
+            "not_addressed": 0,
         }
 
         best: Dict[str, str] = {}
@@ -1430,18 +1570,20 @@ class AnswerEvaluationEngine:
         """
         evidence_statuses = self._load_existing_evidence(db, session_id, card_id)
         if not evidence_statuses:
-            return ('pending', 0.0)
+            return ("pending", 0.0)
 
         # Build criterion_evaluations structure for the scorer
         criterion_evaluations = []
         for crit in rubric_criteria:
-            crit_id = crit.get('id', '')
-            status = evidence_statuses.get(crit_id, 'not_addressed')
-            criterion_evaluations.append({
-                'criterion_id': crit_id,
-                'status': status,
-                'evidence_quotes': ['(from ledger)'] if status == 'satisfied' else [],
-            })
+            crit_id = crit.get("id", "")
+            status = evidence_statuses.get(crit_id, "not_addressed")
+            criterion_evaluations.append(
+                {
+                    "criterion_id": crit_id,
+                    "status": status,
+                    "evidence_quotes": ["(from ledger)"] if status == "satisfied" else [],
+                }
+            )
 
         completion_score = answer_completion_scorer.calculate_completion(
             rubric_criteria, criterion_evaluations
@@ -1450,8 +1592,7 @@ class AnswerEvaluationEngine:
             rubric_criteria, criterion_evaluations, completion_score
         )
         has_response = any(
-            e['status'] not in ('not_addressed', 'not_applicable')
-            for e in criterion_evaluations
+            e["status"] not in ("not_addressed", "not_applicable") for e in criterion_evaluations
         )
 
         state = answer_completion_scorer.determine_state(
@@ -1479,10 +1620,10 @@ class AnswerEvaluationEngine:
         Returns:
             List of final coverage evaluation results
         """
-        from app.models.interview_session import InterviewSession
         from app.models.final_utterance import FinalUtterance
-        from app.models.question_card import QuestionCard
+        from app.models.interview_session import InterviewSession
         from app.models.interview_theme import InterviewTheme
+        from app.models.question_card import QuestionCard
 
         logger.info(f"Running final coverage evaluation for session {session_id}")
 
@@ -1493,32 +1634,49 @@ class AnswerEvaluationEngine:
             return []
 
         # Load all final utterances for this revision
-        final_utterances = db.query(FinalUtterance).filter(
-            FinalUtterance.session_id == session_id,
-            FinalUtterance.transcript_revision_id == transcript_revision_id,
-        ).order_by(FinalUtterance.sequence_index).all()
+        final_utterances = (
+            db.query(FinalUtterance)
+            .filter(
+                FinalUtterance.session_id == session_id,
+                FinalUtterance.transcript_revision_id == transcript_revision_id,
+            )
+            .order_by(FinalUtterance.sequence_index)
+            .all()
+        )
 
         if not final_utterances:
             logger.warning(f"No final utterances found for session {session_id}")
             return []
 
         # Load all question cards for this document
-        themes = db.query(InterviewTheme).filter(
-            InterviewTheme.document_id == session.document_id,
-            InterviewTheme.is_enabled == True,
-        ).order_by(InterviewTheme.order_index).all()
+        themes = (
+            db.query(InterviewTheme)
+            .filter(
+                InterviewTheme.document_id == session.document_id,
+                InterviewTheme.is_enabled == True,
+            )
+            .order_by(InterviewTheme.order_index)
+            .all()
+        )
 
         all_cards = []
         for theme in themes:
-            cards = db.query(QuestionCard).filter(
-                QuestionCard.interview_theme_id == theme.id,
-            ).order_by(QuestionCard.order_index).all()
+            cards = (
+                db.query(QuestionCard)
+                .filter(
+                    QuestionCard.interview_theme_id == theme.id,
+                )
+                .order_by(QuestionCard.order_index)
+                .all()
+            )
             for card in cards:
-                all_cards.append({
-                    'card': card,
-                    'theme_id': theme.id,
-                    'theme_title': theme.title,
-                })
+                all_cards.append(
+                    {
+                        "card": card,
+                        "theme_id": theme.id,
+                        "theme_title": theme.title,
+                    }
+                )
 
         if not all_cards:
             logger.warning(f"No question cards found for session {session_id}")
@@ -1535,29 +1693,28 @@ class AnswerEvaluationEngine:
 
         # Run batch judgment with all cards
         judgments = self._batch_judge_answer_sufficiency(
-            full_transcript,
-            all_cards,
-            session_id=session_id,
-            db=db
+            full_transcript, all_cards, session_id=session_id, db=db
         )
 
         # Write CardCoverageEvaluation records with basis_type='final'
         results = []
         for card_data, judgment in zip(all_cards, judgments):
-            card = card_data['card']
+            card = card_data["card"]
 
             # Determine state based on judgment
-            ai_confidence = judgment.get('sufficiency_score', None) or judgment.get('confidence', 0.0)
-            is_covered = judgment.get('is_sufficient', None) or judgment.get('is_covered', False)
-            covered_element_ids = judgment.get('covered_element_ids', []) or []
-            missing_element_ids = judgment.get('missing_element_ids', []) or []
+            ai_confidence = judgment.get("sufficiency_score", None) or judgment.get(
+                "confidence", 0.0
+            )
+            is_covered = judgment.get("is_sufficient", None) or judgment.get("is_covered", False)
+            covered_element_ids = judgment.get("covered_element_ids", []) or []
+            missing_element_ids = judgment.get("missing_element_ids", []) or []
 
             if covered_element_ids or missing_element_ids:
                 covered, missing = self._normalize_completion_element_ids(
                     card=card,
                     completion={
-                        'covered_element_ids': list(covered_element_ids),
-                        'missing_element_ids': list(missing_element_ids),
+                        "covered_element_ids": list(covered_element_ids),
+                        "missing_element_ids": list(missing_element_ids),
                     },
                     completion_percentage=ai_confidence * 100,
                     is_sufficient=bool(is_covered),
@@ -1567,15 +1724,15 @@ class AnswerEvaluationEngine:
 
             # Determine state using the same _reduce_state() method for consistency
             state, _ = self._reduce_state(
-                current_status='pending',
+                current_status="pending",
                 judgment={
-                    'confidence': ai_confidence,
-                    'is_covered': is_covered,
-                    'evidence_quote': judgment.get('evidence_quote', ''),
-                    'missing_element_ids': missing,
-                    'covered_element_ids': covered,
+                    "confidence": ai_confidence,
+                    "is_covered": is_covered,
+                    "evidence_quote": judgment.get("evidence_quote", ""),
+                    "missing_element_ids": missing,
+                    "covered_element_ids": covered,
                 },
-                is_partial=False
+                is_partial=False,
             )
 
             # Get next evaluation_seq
@@ -1600,14 +1757,16 @@ class AnswerEvaluationEngine:
             )
             db.add(coverage_eval)
 
-            results.append({
-                'card_id': card.id,
-                'state': state,
-                'confidence': ai_confidence,
-                'covered_element_ids': covered,
-                'missing_element_ids': missing,
-                'evaluation_seq': evaluation_seq,
-            })
+            results.append(
+                {
+                    "card_id": card.id,
+                    "state": state,
+                    "confidence": ai_confidence,
+                    "covered_element_ids": covered,
+                    "missing_element_ids": missing,
+                    "evaluation_seq": evaluation_seq,
+                }
+            )
 
         db.commit()
         logger.info(f"Final coverage complete: wrote {len(results)} evaluations")

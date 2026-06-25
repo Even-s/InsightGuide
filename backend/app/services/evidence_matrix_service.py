@@ -1,14 +1,15 @@
 """Evidence Matrix Service - cross-interview requirement consolidation."""
 
-import uuid
-import logging
 import json
+import logging
+import uuid
 from datetime import datetime
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
+
 from sqlalchemy.orm import Session
 
-from app.models.requirement_evidence_matrix import RequirementEvidenceMatrix, EvidenceMatrixEntry
 from app.models.interview_insight_memo import InterviewInsightMemo
+from app.models.requirement_evidence_matrix import EvidenceMatrixEntry, RequirementEvidenceMatrix
 from app.models.stakeholder_profile import StakeholderProfile
 
 logger = logging.getLogger(__name__)
@@ -18,9 +19,11 @@ class EvidenceMatrixService:
 
     def get_or_create_matrix(self, db: Session, project_id: str) -> RequirementEvidenceMatrix:
         """Get existing matrix or create a new one."""
-        matrix = db.query(RequirementEvidenceMatrix).filter(
-            RequirementEvidenceMatrix.project_id == project_id
-        ).first()
+        matrix = (
+            db.query(RequirementEvidenceMatrix)
+            .filter(RequirementEvidenceMatrix.project_id == project_id)
+            .first()
+        )
 
         if not matrix:
             matrix = RequirementEvidenceMatrix(
@@ -41,10 +44,15 @@ class EvidenceMatrixService:
         db.flush()
 
         # Load all completed memos for this project
-        memos = db.query(InterviewInsightMemo).filter(
-            InterviewInsightMemo.project_id == project_id,
-            InterviewInsightMemo.status == "completed",
-        ).order_by(InterviewInsightMemo.interview_date).all()
+        memos = (
+            db.query(InterviewInsightMemo)
+            .filter(
+                InterviewInsightMemo.project_id == project_id,
+                InterviewInsightMemo.status == "completed",
+            )
+            .order_by(InterviewInsightMemo.interview_date)
+            .all()
+        )
 
         if not memos:
             matrix.status = "draft"
@@ -57,29 +65,33 @@ class EvidenceMatrixService:
         for memo in memos:
             stakeholder = None
             if memo.stakeholder_profile_id:
-                stakeholder = db.query(StakeholderProfile).filter(
-                    StakeholderProfile.id == memo.stakeholder_profile_id
-                ).first()
+                stakeholder = (
+                    db.query(StakeholderProfile)
+                    .filter(StakeholderProfile.id == memo.stakeholder_profile_id)
+                    .first()
+                )
 
-            for candidate in (memo.requirement_candidates or []):
-                all_candidates.append({
-                    "memo_id": memo.id,
-                    "stakeholder_role": stakeholder.stakeholder_type if stakeholder else "unknown",
-                    "stakeholder_name": stakeholder.name if stakeholder else "未知",
-                    "description": candidate.get("description", ""),
-                    "source": candidate.get("source", "inferred"),
-                    "confidence": candidate.get("confidence", "medium"),
-                    "evidence_quote": candidate.get("evidence_quote", ""),
-                    "needs_validation_from": candidate.get("needs_validation_from", []),
-                })
+            for candidate in memo.requirement_candidates or []:
+                all_candidates.append(
+                    {
+                        "memo_id": memo.id,
+                        "stakeholder_role": (
+                            stakeholder.stakeholder_type if stakeholder else "unknown"
+                        ),
+                        "stakeholder_name": stakeholder.name if stakeholder else "未知",
+                        "description": candidate.get("description", ""),
+                        "source": candidate.get("source", "inferred"),
+                        "confidence": candidate.get("confidence", "medium"),
+                        "evidence_quote": candidate.get("evidence_quote", ""),
+                        "needs_validation_from": candidate.get("needs_validation_from", []),
+                    }
+                )
 
         # Deduplicate and merge candidates into entries
         merged_entries = self._deduplicate_and_merge(all_candidates)
 
         # Clear existing entries and rebuild
-        db.query(EvidenceMatrixEntry).filter(
-            EvidenceMatrixEntry.matrix_id == matrix.id
-        ).delete()
+        db.query(EvidenceMatrixEntry).filter(EvidenceMatrixEntry.matrix_id == matrix.id).delete()
         db.flush()
 
         for entry_data in merged_entries:
@@ -111,6 +123,7 @@ class EvidenceMatrixService:
         # Update stakeholder plan based on evidence gaps
         try:
             from app.services.stakeholder_plan_service import stakeholder_plan_service
+
             stakeholder_plan_service._update_slot_statuses(db, project_id)
         except Exception as e:
             logger.warning(f"Failed to update plan from evidence matrix: {e}")
@@ -186,7 +199,7 @@ class EvidenceMatrixService:
             entries = []
             for item in merged_raw:
                 indices = item.get("source_indices", [])
-                source_candidates = [candidates[i-1] for i in indices if 0 < i <= len(candidates)]
+                source_candidates = [candidates[i - 1] for i in indices if 0 < i <= len(candidates)]
                 if not source_candidates:
                     continue
 
@@ -211,18 +224,24 @@ class EvidenceMatrixService:
                 # Remove roles we already have evidence from
                 all_missing -= set(source_roles)
 
-                entries.append({
-                    "requirement_candidate": item["requirement_candidate"],
-                    "category": item.get("category"),
-                    "source_roles": source_roles,
-                    "source_memo_ids": source_memo_ids,
-                    "supporting_evidence": supporting_evidence,
-                    "conflicts": item.get("conflicts", []),
-                    "validation_status": self._compute_validation_status(source_roles, list(all_missing), item.get("conflicts", [])),
-                    "missing_validation_from": list(all_missing),
-                    "mention_count": len(source_candidates),
-                    "stakeholder_agreement_level": self._compute_agreement_level(source_roles, item.get("conflicts", [])),
-                })
+                entries.append(
+                    {
+                        "requirement_candidate": item["requirement_candidate"],
+                        "category": item.get("category"),
+                        "source_roles": source_roles,
+                        "source_memo_ids": source_memo_ids,
+                        "supporting_evidence": supporting_evidence,
+                        "conflicts": item.get("conflicts", []),
+                        "validation_status": self._compute_validation_status(
+                            source_roles, list(all_missing), item.get("conflicts", [])
+                        ),
+                        "missing_validation_from": list(all_missing),
+                        "mention_count": len(source_candidates),
+                        "stakeholder_agreement_level": self._compute_agreement_level(
+                            source_roles, item.get("conflicts", [])
+                        ),
+                    }
+                )
 
             return entries if entries else None
 
@@ -234,28 +253,34 @@ class EvidenceMatrixService:
         """Fallback: treat each candidate as its own entry."""
         entries = []
         for c in candidates:
-            entries.append({
-                "requirement_candidate": c["description"],
-                "category": None,
-                "source_roles": [c["stakeholder_role"]],
-                "source_memo_ids": [c["memo_id"]],
-                "supporting_evidence": [{
-                    "memo_id": c["memo_id"],
-                    "stakeholder_role": c["stakeholder_role"],
-                    "stakeholder_name": c["stakeholder_name"],
-                    "evidence_quote": c["evidence_quote"],
-                    "source_type": c["source"],
-                    "confidence": c["confidence"],
-                }],
-                "conflicts": [],
-                "validation_status": "candidate",
-                "missing_validation_from": c.get("needs_validation_from", []),
-                "mention_count": 1,
-                "stakeholder_agreement_level": "single_source",
-            })
+            entries.append(
+                {
+                    "requirement_candidate": c["description"],
+                    "category": None,
+                    "source_roles": [c["stakeholder_role"]],
+                    "source_memo_ids": [c["memo_id"]],
+                    "supporting_evidence": [
+                        {
+                            "memo_id": c["memo_id"],
+                            "stakeholder_role": c["stakeholder_role"],
+                            "stakeholder_name": c["stakeholder_name"],
+                            "evidence_quote": c["evidence_quote"],
+                            "source_type": c["source"],
+                            "confidence": c["confidence"],
+                        }
+                    ],
+                    "conflicts": [],
+                    "validation_status": "candidate",
+                    "missing_validation_from": c.get("needs_validation_from", []),
+                    "mention_count": 1,
+                    "stakeholder_agreement_level": "single_source",
+                }
+            )
         return entries
 
-    def _compute_validation_status(self, source_roles: List[str], missing: List[str], conflicts: List) -> str:
+    def _compute_validation_status(
+        self, source_roles: List[str], missing: List[str], conflicts: List
+    ) -> str:
         if conflicts:
             return "conflicted"
         if len(source_roles) >= 2 and not missing:
@@ -275,16 +300,18 @@ class EvidenceMatrixService:
 
     def get_matrix_summary(self, db: Session, project_id: str) -> Dict[str, Any]:
         """Get matrix summary statistics."""
-        matrix = db.query(RequirementEvidenceMatrix).filter(
-            RequirementEvidenceMatrix.project_id == project_id
-        ).first()
+        matrix = (
+            db.query(RequirementEvidenceMatrix)
+            .filter(RequirementEvidenceMatrix.project_id == project_id)
+            .first()
+        )
 
         if not matrix:
             return {"total_candidates": 0, "status": "empty"}
 
-        entries = db.query(EvidenceMatrixEntry).filter(
-            EvidenceMatrixEntry.matrix_id == matrix.id
-        ).all()
+        entries = (
+            db.query(EvidenceMatrixEntry).filter(EvidenceMatrixEntry.matrix_id == matrix.id).all()
+        )
 
         status_counts = {}
         all_roles = set()
@@ -305,14 +332,16 @@ class EvidenceMatrixService:
             "roles_missing": sorted(missing_roles - all_roles),
             "memo_count": matrix.memo_count,
             "status": matrix.status,
-            "last_updated_at": matrix.last_updated_at.isoformat() if matrix.last_updated_at else None,
+            "last_updated_at": (
+                matrix.last_updated_at.isoformat() if matrix.last_updated_at else None
+            ),
         }
 
-    def update_entry(self, db: Session, entry_id: str, data: Dict[str, Any]) -> Optional[EvidenceMatrixEntry]:
+    def update_entry(
+        self, db: Session, entry_id: str, data: Dict[str, Any]
+    ) -> Optional[EvidenceMatrixEntry]:
         """Manually update a matrix entry (e.g. mark as rejected)."""
-        entry = db.query(EvidenceMatrixEntry).filter(
-            EvidenceMatrixEntry.id == entry_id
-        ).first()
+        entry = db.query(EvidenceMatrixEntry).filter(EvidenceMatrixEntry.id == entry_id).first()
         if not entry:
             return None
 
@@ -339,8 +368,12 @@ class EvidenceMatrixService:
                 "needs_more_evidence": "待補證",
                 "candidate": "候選",
             }
-            status = status_map.get(entry.get("validation_status", ""), entry.get("validation_status", ""))
-            lines.append(f"| {i} | {entry['requirement_candidate'][:40]} | {roles} | {entry['mention_count']} | {status} | {missing} |")
+            status = status_map.get(
+                entry.get("validation_status", ""), entry.get("validation_status", "")
+            )
+            lines.append(
+                f"| {i} | {entry['requirement_candidate'][:40]} | {roles} | {entry['mention_count']} | {status} | {missing} |"
+            )
 
         return "\n".join(lines)
 

@@ -1,11 +1,12 @@
 """Project and Stakeholder Pydantic schemas."""
 
-from typing import Optional, List, Dict, Any
 from datetime import datetime
+from typing import Any, Dict, List, Optional
+
 from pydantic import BaseModel, Field
 
-
 # --- Project ---
+
 
 class ProjectCreate(BaseModel):
     title: str
@@ -40,6 +41,7 @@ class ProjectListResponse(BaseModel):
 
 
 # --- Stakeholder Slot ---
+
 
 class StakeholderSlotCreate(BaseModel):
     role_category: str
@@ -86,6 +88,7 @@ class StakeholderSlotSchema(BaseModel):
 
 
 # --- Stakeholder Profile ---
+
 
 class StakeholderProfileCreate(BaseModel):
     slot_id: Optional[str] = None
@@ -138,6 +141,7 @@ class StakeholderProfileSchema(BaseModel):
 
 # --- Stakeholder Plan (composite response) ---
 
+
 class StakeholderPlanResponse(BaseModel):
     slots: List[StakeholderSlotSchema]
     profiles: List[StakeholderProfileSchema]
@@ -145,6 +149,7 @@ class StakeholderPlanResponse(BaseModel):
 
 
 # --- Project Dashboard ---
+
 
 class ProjectDashboardResponse(BaseModel):
     project: ProjectSchema

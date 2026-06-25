@@ -1,7 +1,8 @@
 """User model."""
 
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime
+
+from sqlalchemy import Column, DateTime, String
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base
@@ -21,6 +22,8 @@ class User(Base):
     # Relationships
     documents = relationship("Document", back_populates="user", cascade="all, delete-orphan")
     prep_sessions = relationship("PrepSession", back_populates="user", cascade="all, delete-orphan")
-    interview_sessions = relationship("InterviewSession", back_populates="user", cascade="all, delete-orphan")
+    interview_sessions = relationship(
+        "InterviewSession", back_populates="user", cascade="all, delete-orphan"
+    )
     brd_drafts = relationship("BRDDraft", back_populates="user", cascade="all, delete-orphan")
     projects = relationship("Project", back_populates="user", cascade="all, delete-orphan")

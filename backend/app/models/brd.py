@@ -1,15 +1,19 @@
 """BRD (Business Requirements Document) models."""
 
-from datetime import datetime
-from sqlalchemy import Column, String, DateTime, ForeignKey, Text, JSON, Enum as SQLEnum
-from sqlalchemy.orm import relationship
 import enum
+from datetime import datetime
+
+from sqlalchemy import JSON, Column, DateTime
+from sqlalchemy import Enum as SQLEnum
+from sqlalchemy import ForeignKey, String, Text
+from sqlalchemy.orm import relationship
 
 from app.db.session import Base
 
 
 class BRDStatus(str, enum.Enum):
     """BRD generation status."""
+
     GENERATING = "generating"
     COMPLETED = "completed"
     FAILED = "failed"
@@ -18,6 +22,7 @@ class BRDStatus(str, enum.Enum):
 
 class RequirementType(str, enum.Enum):
     """Requirement classification."""
+
     FUNCTIONAL = "functional"
     NON_FUNCTIONAL = "non_functional"
     BUSINESS = "business"
@@ -27,6 +32,7 @@ class RequirementType(str, enum.Enum):
 
 class RequirementPriority(str, enum.Enum):
     """Requirement priority level."""
+
     MUST_HAVE = "must_have"
     SHOULD_HAVE = "should_have"
     NICE_TO_HAVE = "nice_to_have"
@@ -38,7 +44,9 @@ class BRDDraft(Base):
     __tablename__ = "brd_drafts"
 
     id = Column(String, primary_key=True)
-    interview_session_id = Column(String, ForeignKey("interview_sessions.id"), nullable=False, unique=True, index=True)
+    interview_session_id = Column(
+        String, ForeignKey("interview_sessions.id"), nullable=False, unique=True, index=True
+    )
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     status = Column(SQLEnum(BRDStatus), nullable=False, default=BRDStatus.GENERATING, index=True)
 
@@ -69,7 +77,9 @@ class BRDDraft(Base):
     # Relationships
     user = relationship("User", back_populates="brd_drafts")
     interview_session = relationship("InterviewSession", back_populates="brd_draft")
-    requirements = relationship("Requirement", back_populates="brd_draft", cascade="all, delete-orphan")
+    requirements = relationship(
+        "Requirement", back_populates="brd_draft", cascade="all, delete-orphan"
+    )
 
 
 class Requirement(Base):
@@ -84,10 +94,17 @@ class Requirement(Base):
     title = Column(String, nullable=False)
     description = Column(Text, nullable=False)
     type = Column(SQLEnum(RequirementType), nullable=False, index=True)
-    priority = Column(SQLEnum(RequirementPriority), nullable=False, default=RequirementPriority.SHOULD_HAVE, index=True)
+    priority = Column(
+        SQLEnum(RequirementPriority),
+        nullable=False,
+        default=RequirementPriority.SHOULD_HAVE,
+        index=True,
+    )
 
     # Traceability
-    source_question_card_id = Column(String, ForeignKey("question_cards.id"), nullable=True, index=True)
+    source_question_card_id = Column(
+        String, ForeignKey("question_cards.id"), nullable=True, index=True
+    )
     source_utterance_ids = Column(JSON, nullable=True)  # List of utterance IDs
     confidence = Column(String, nullable=True)  # Confidence score from AI
 

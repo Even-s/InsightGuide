@@ -8,9 +8,8 @@ Phase 5: BRD Readiness Report
 - Creates brd_readiness_reports table (gatekeeper before BRD generation)
 """
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = '015_add_readiness_reports'
 down_revision = '014_add_evidence_matrix'

@@ -1,14 +1,15 @@
 """Question Card service for managing question card operations."""
 
 import logging
-from typing import List, Dict, Any, Optional
-from copy import deepcopy
 import re
+import uuid
+from copy import deepcopy
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from fastapi import HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-from fastapi import HTTPException, status
-from datetime import datetime
-import uuid
 
 from app.models.question_card import QuestionCard
 from app.models.section import Section
@@ -37,8 +38,7 @@ class QuestionCardService:
         ).strip()
 
     def normalize_coverage_rule_for_important_elements(
-        self,
-        coverage_rule: Dict[str, Any] | None
+        self, coverage_rule: Dict[str, Any] | None
     ) -> Dict[str, Any]:
         """
         Keep semantic anchors as matching hints, but make important elements the
@@ -46,7 +46,7 @@ class QuestionCardService:
 
         Answer elements represent the key information expected in the interviewee's response.
         """
-        if hasattr(coverage_rule, 'model_dump'):
+        if hasattr(coverage_rule, "model_dump"):
             coverage_rule = coverage_rule.model_dump()
         rule = deepcopy(coverage_rule or {})
         semantic_anchors = [
@@ -61,40 +61,48 @@ class QuestionCardService:
             if not text:
                 continue
             if isinstance(element, dict):
-                raw_elements.append({
-                    "text": self._clean_numbered_point(text),
-                    "required": bool(element.get("required", True)),
-                    "aliases": element.get("aliases") if isinstance(element.get("aliases"), list) else [],
-                    "subpoints": [
-                        self._clean_numbered_point(subpoint)
-                        for subpoint in element.get("subpoints", [])
-                        if self._clean_numbered_point(subpoint)
-                    ] if isinstance(element.get("subpoints"), list) else [],
-                })
+                raw_elements.append(
+                    {
+                        "text": self._clean_numbered_point(text),
+                        "required": bool(element.get("required", True)),
+                        "aliases": (
+                            element.get("aliases")
+                            if isinstance(element.get("aliases"), list)
+                            else []
+                        ),
+                        "subpoints": (
+                            [
+                                self._clean_numbered_point(subpoint)
+                                for subpoint in element.get("subpoints", [])
+                                if self._clean_numbered_point(subpoint)
+                            ]
+                            if isinstance(element.get("subpoints"), list)
+                            else []
+                        ),
+                    }
+                )
             else:
-                raw_elements.append({
-                    "text": self._clean_numbered_point(text),
-                    "required": True,
-                    "aliases": [],
-                    "subpoints": [],
-                })
+                raw_elements.append(
+                    {
+                        "text": self._clean_numbered_point(text),
+                        "required": True,
+                        "aliases": [],
+                        "subpoints": [],
+                    }
+                )
 
         # Keep only the most important elements (limit to MAX_IMPORTANT_ELEMENTS)
-        normalized_elements = raw_elements[:self.MAX_IMPORTANT_ELEMENTS]
+        normalized_elements = raw_elements[: self.MAX_IMPORTANT_ELEMENTS]
 
         rule["semanticAnchors"] = semantic_anchors
         rule["mustMentionElements"] = normalized_elements
         rule["expectedKeywords"] = rule.get("expectedKeywords") or []
         rule["negativeSignals"] = rule.get("negativeSignals") or []
-        rule.setdefault("thresholds", {
-            "probablySufficient": 0.62,
-            "sufficient": 0.78
-        })
-        rule.setdefault("scoringWeights", {
-            "semanticSimilarity": 0.55,
-            "keywordCoverage": 0.25,
-            "elementCoverage": 0.20
-        })
+        rule.setdefault("thresholds", {"probablySufficient": 0.62, "sufficient": 0.78})
+        rule.setdefault(
+            "scoringWeights",
+            {"semanticSimilarity": 0.55, "keywordCoverage": 0.25, "elementCoverage": 0.20},
+        )
 
         return rule
 
@@ -103,33 +111,27 @@ class QuestionCardService:
         card = db.query(QuestionCard).filter(QuestionCard.id == card_id).first()
         if not card:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Question card {card_id} not found"
+                status_code=status.HTTP_404_NOT_FOUND, detail=f"Question card {card_id} not found"
             )
         return card
 
-    def get_question_cards_by_document(
-        self,
-        db: Session,
-        document_id: str
-    ) -> List[QuestionCard]:
+    def get_question_cards_by_document(self, db: Session, document_id: str) -> List[QuestionCard]:
         """Get all question cards for a document, ordered by section number and order index."""
-        return db.query(QuestionCard).filter(
-            QuestionCard.document_id == document_id
-        ).order_by(
-            QuestionCard.section_number,
-            QuestionCard.order_index
-        ).all()
+        return (
+            db.query(QuestionCard)
+            .filter(QuestionCard.document_id == document_id)
+            .order_by(QuestionCard.section_number, QuestionCard.order_index)
+            .all()
+        )
 
-    def get_question_cards_by_section(
-        self,
-        db: Session,
-        section_id: str
-    ) -> List[QuestionCard]:
+    def get_question_cards_by_section(self, db: Session, section_id: str) -> List[QuestionCard]:
         """Get all question cards for a section, ordered by order index."""
-        return db.query(QuestionCard).filter(
-            QuestionCard.section_id == section_id
-        ).order_by(QuestionCard.order_index).all()
+        return (
+            db.query(QuestionCard)
+            .filter(QuestionCard.section_id == section_id)
+            .order_by(QuestionCard.order_index)
+            .all()
+        )
 
     def create_question_card(
         self,
@@ -138,21 +140,38 @@ class QuestionCardService:
         section_id: str,
         section_number: int,
         card_data: QuestionCardCreate,
-        created_by: str = "user"
+        created_by: str = "user",
     ) -> QuestionCard:
         """Create a new question card."""
         card_id = f"qcard_{uuid.uuid4().hex[:12]}"
 
         # Get next order index for this section
-        max_order = db.query(func.max(QuestionCard.order_index)).filter(
-            QuestionCard.section_id == section_id
-        ).scalar() or -1
+        max_order = (
+            db.query(func.max(QuestionCard.order_index))
+            .filter(QuestionCard.section_id == section_id)
+            .scalar()
+            or -1
+        )
         order_index = max_order + 1
 
         # Resolve fields (supports both frontend and internal naming)
-        question_text = getattr(card_data, 'resolved_question_text', None) or card_data.questionText or card_data.title or "Untitled"
-        question_type = getattr(card_data, 'resolved_question_type', None) or card_data.questionType or "clarification"
-        suggested_followup = getattr(card_data, 'resolved_followup', None) or card_data.suggestedFollowup or card_data.suggestedScript or ""
+        question_text = (
+            getattr(card_data, "resolved_question_text", None)
+            or card_data.questionText
+            or card_data.title
+            or "Untitled"
+        )
+        question_type = (
+            getattr(card_data, "resolved_question_type", None)
+            or card_data.questionType
+            or "clarification"
+        )
+        suggested_followup = (
+            getattr(card_data, "resolved_followup", None)
+            or card_data.suggestedFollowup
+            or card_data.suggestedScript
+            or ""
+        )
 
         # If AI needs to generate coverage rule
         coverage_rule = card_data.coverageRule
@@ -162,15 +181,12 @@ class QuestionCardService:
                 "expectedKeywords": [],
                 "mustMentionElements": [],
                 "negativeSignals": [],
-                "thresholds": {
-                    "probablySufficient": 0.62,
-                    "sufficient": 0.78
-                },
+                "thresholds": {"probablySufficient": 0.62, "sufficient": 0.78},
                 "scoringWeights": {
                     "semanticSimilarity": 0.55,
                     "keywordCoverage": 0.25,
-                    "elementCoverage": 0.20
-                }
+                    "elementCoverage": 0.20,
+                },
             }
 
         # Normalize coverage rule
@@ -195,7 +211,7 @@ class QuestionCardService:
             ui={"color": "default", "isVisible": True, "isPinned": False, "displayMode": "full"},
             created_by=created_by,
             created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            updated_at=datetime.utcnow(),
         )
 
         db.add(card)
@@ -206,10 +222,7 @@ class QuestionCardService:
         return card
 
     def update_question_card(
-        self,
-        db: Session,
-        card_id: str,
-        card_update: QuestionCardUpdate
+        self, db: Session, card_id: str, card_update: QuestionCardUpdate
     ) -> QuestionCard:
         """Update a question card."""
         card = self.get_question_card(db, card_id)
@@ -236,11 +249,7 @@ class QuestionCardService:
         db.commit()
         logger.info(f"Deleted question card {card_id}")
 
-    def reorder_question_cards(
-        self,
-        db: Session,
-        card_ids: List[str]
-    ) -> List[QuestionCard]:
+    def reorder_question_cards(self, db: Session, card_ids: List[str]) -> List[QuestionCard]:
         """Reorder question cards by their IDs."""
         cards = []
         for index, card_id in enumerate(card_ids):

@@ -6,18 +6,19 @@ Generates interview question cards for a specific stakeholder based on:
 - StakeholderSlot recommendations (if linked)
 """
 
-import uuid
 import logging
-from typing import List, Dict, Any, Optional
+import uuid
+from typing import Any, Dict, List, Optional
+
 from sqlalchemy.orm import Session
 
+from app.models.document import Document
+from app.models.interview_theme import InterviewTheme
+from app.models.prep_session import PrepSession
 from app.models.project import Project
+from app.models.question_card import QuestionCard
 from app.models.stakeholder_profile import StakeholderProfile
 from app.models.stakeholder_slot import StakeholderSlot
-from app.models.document import Document
-from app.models.prep_session import PrepSession
-from app.models.interview_theme import InterviewTheme
-from app.models.question_card import QuestionCard
 from app.services.openai_service import openai_service
 
 logger = logging.getLogger(__name__)
@@ -56,18 +57,20 @@ class StakeholderCardGenerator:
         if not project:
             raise ValueError(f"Project {project_id} not found")
 
-        stakeholder = db.query(StakeholderProfile).filter(
-            StakeholderProfile.id == stakeholder_profile_id
-        ).first()
+        stakeholder = (
+            db.query(StakeholderProfile)
+            .filter(StakeholderProfile.id == stakeholder_profile_id)
+            .first()
+        )
         if not stakeholder:
             raise ValueError(f"Stakeholder {stakeholder_profile_id} not found")
 
         # Get slot info if linked
         slot = None
         if stakeholder.slot_id:
-            slot = db.query(StakeholderSlot).filter(
-                StakeholderSlot.id == stakeholder.slot_id
-            ).first()
+            slot = (
+                db.query(StakeholderSlot).filter(StakeholderSlot.id == stakeholder.slot_id).first()
+            )
 
         # Step 1: Get or create virtual document
         document = self._get_or_create_virtual_document(db, project, stakeholder)
@@ -76,19 +79,21 @@ class StakeholderCardGenerator:
         prep_session = self._get_or_create_prep_session(db, document, project.user_id)
 
         # Step 2.5: Clean up any existing themes/cards (for regeneration)
-        existing_cards = db.query(QuestionCard).filter(
-            QuestionCard.document_id == document.id
-        ).all()
-        existing_themes = db.query(InterviewTheme).filter(
-            InterviewTheme.document_id == document.id
-        ).all()
+        existing_cards = (
+            db.query(QuestionCard).filter(QuestionCard.document_id == document.id).all()
+        )
+        existing_themes = (
+            db.query(InterviewTheme).filter(InterviewTheme.document_id == document.id).all()
+        )
         if existing_themes or existing_cards:
             for c in existing_cards:
                 db.delete(c)
             for t in existing_themes:
                 db.delete(t)
             db.flush()
-            logger.info(f"Cleaned up {len(existing_themes)} themes and {len(existing_cards)} cards for regeneration")
+            logger.info(
+                f"Cleaned up {len(existing_themes)} themes and {len(existing_cards)} cards for regeneration"
+            )
 
         # Step 3: Generate themes using AI
         themes_data = self._generate_themes(project, stakeholder, slot)
@@ -118,9 +123,7 @@ class StakeholderCardGenerator:
         all_cards = []
         for theme in themes:
             try:
-                cards_data = self._generate_cards_for_theme(
-                    project, stakeholder, slot, theme
-                )
+                cards_data = self._generate_cards_for_theme(project, stakeholder, slot, theme)
             except Exception as e:
                 logger.warning(f"Card generation failed for theme '{theme.title}': {e}")
                 cards_data = self._fallback_cards_for_theme(theme)
@@ -178,10 +181,7 @@ class StakeholderCardGenerator:
         }
 
     def get_interview_guide_status(
-        self,
-        db: Session,
-        project_id: str,
-        stakeholder_profile_id: str
+        self, db: Session, project_id: str, stakeholder_profile_id: str
     ) -> Optional[Dict[str, Any]]:
         """Get existing interview guide status for a stakeholder.
 
@@ -191,39 +191,44 @@ class StakeholderCardGenerator:
         if not project:
             return None
 
-        stakeholder = db.query(StakeholderProfile).filter(
-            StakeholderProfile.id == stakeholder_profile_id
-        ).first()
+        stakeholder = (
+            db.query(StakeholderProfile)
+            .filter(StakeholderProfile.id == stakeholder_profile_id)
+            .first()
+        )
         if not stakeholder:
             return None
 
         # Look for existing virtual document
         document_title = f"{project.title} - {stakeholder.name} 訪談大綱"
-        document = db.query(Document).filter(
-            Document.project_id == project_id,
-            Document.title == document_title,
-            Document.source_file_url == "generated"
-        ).first()
+        document = (
+            db.query(Document)
+            .filter(
+                Document.project_id == project_id,
+                Document.title == document_title,
+                Document.source_file_url == "generated",
+            )
+            .first()
+        )
 
         if not document:
             return None
 
         # Get prep session
-        prep_session = db.query(PrepSession).filter(
-            PrepSession.document_id == document.id
-        ).first()
+        prep_session = db.query(PrepSession).filter(PrepSession.document_id == document.id).first()
 
         if not prep_session:
             return None
 
         # Get themes and cards
-        themes = db.query(InterviewTheme).filter(
-            InterviewTheme.document_id == document.id
-        ).order_by(InterviewTheme.order_index).all()
+        themes = (
+            db.query(InterviewTheme)
+            .filter(InterviewTheme.document_id == document.id)
+            .order_by(InterviewTheme.order_index)
+            .all()
+        )
 
-        cards = db.query(QuestionCard).filter(
-            QuestionCard.document_id == document.id
-        ).all()
+        cards = db.query(QuestionCard).filter(QuestionCard.document_id == document.id).all()
 
         return {
             "document_id": document.id,
@@ -242,20 +247,21 @@ class StakeholderCardGenerator:
         }
 
     def _get_or_create_virtual_document(
-        self,
-        db: Session,
-        project: Project,
-        stakeholder: StakeholderProfile
+        self, db: Session, project: Project, stakeholder: StakeholderProfile
     ) -> Document:
         """Get or create a virtual document for the stakeholder."""
         document_title = f"{project.title} - {stakeholder.name} 訪談大綱"
 
         # Check if already exists
-        existing = db.query(Document).filter(
-            Document.project_id == project.id,
-            Document.title == document_title,
-            Document.source_file_url == "generated"
-        ).first()
+        existing = (
+            db.query(Document)
+            .filter(
+                Document.project_id == project.id,
+                Document.title == document_title,
+                Document.source_file_url == "generated",
+            )
+            .first()
+        )
 
         if existing:
             return existing
@@ -277,16 +283,11 @@ class StakeholderCardGenerator:
         return document
 
     def _get_or_create_prep_session(
-        self,
-        db: Session,
-        document: Document,
-        user_id: str
+        self, db: Session, document: Document, user_id: str
     ) -> PrepSession:
         """Get or create prep session for the document."""
         # Check if already exists
-        existing = db.query(PrepSession).filter(
-            PrepSession.document_id == document.id
-        ).first()
+        existing = db.query(PrepSession).filter(PrepSession.document_id == document.id).first()
 
         if existing:
             return existing
@@ -306,10 +307,7 @@ class StakeholderCardGenerator:
         return prep_session
 
     def _generate_themes(
-        self,
-        project: Project,
-        stakeholder: StakeholderProfile,
-        slot: Optional[StakeholderSlot]
+        self, project: Project, stakeholder: StakeholderProfile, slot: Optional[StakeholderSlot]
     ) -> List[Dict[str, Any]]:
         """Use AI to generate interview themes for this stakeholder."""
         brd_scope = project.brd_scope or {}
@@ -324,18 +322,20 @@ class StakeholderCardGenerator:
             context_parts.append(f"業務領域：{brd_scope['business_domain']}")
 
         if brd_scope.get("key_objectives"):
-            objectives = '\n'.join(f"- {obj}" for obj in brd_scope['key_objectives'])
+            objectives = "\n".join(f"- {obj}" for obj in brd_scope["key_objectives"])
             context_parts.append(f"主要目標：\n{objectives}")
 
         if brd_scope.get("out_of_scope"):
-            out_of_scope = '\n'.join(f"- {item}" for item in brd_scope['out_of_scope'])
+            out_of_scope = "\n".join(f"- {item}" for item in brd_scope["out_of_scope"])
             context_parts.append(f"不在範圍內：\n{out_of_scope}")
 
-        context_parts.extend([
-            f"\n受訪者：{stakeholder.name}",
-            f"職稱：{stakeholder.role_title or '未提供'}",
-            f"角色類型：{stakeholder.stakeholder_type}",
-        ])
+        context_parts.extend(
+            [
+                f"\n受訪者：{stakeholder.name}",
+                f"職稱：{stakeholder.role_title or '未提供'}",
+                f"角色類型：{stakeholder.stakeholder_type}",
+            ]
+        )
 
         if stakeholder.expertise_tags:
             context_parts.append(f"專長領域：{', '.join(stakeholder.expertise_tags)}")
@@ -345,14 +345,14 @@ class StakeholderCardGenerator:
 
         if slot:
             if slot.expected_contributions:
-                contributions = '\n'.join(f"- {c}" for c in slot.expected_contributions)
+                contributions = "\n".join(f"- {c}" for c in slot.expected_contributions)
                 context_parts.append(f"預期提供資訊：\n{contributions}")
 
             if slot.key_questions_to_cover:
-                questions = '\n'.join(f"- {q}" for q in slot.key_questions_to_cover)
+                questions = "\n".join(f"- {q}" for q in slot.key_questions_to_cover)
                 context_parts.append(f"建議關鍵問題：\n{questions}")
 
-        context = '\n'.join(context_parts)
+        context = "\n".join(context_parts)
 
         # Inject generation options into context
         opts = self._generation_options
@@ -366,15 +366,21 @@ class StakeholderCardGenerator:
         if opts.get("exclude_topics"):
             options_parts.append(f"排除主題（不要問）：{opts['exclude_topics']}")
         if opts.get("interview_style"):
-            style_label = {"exploratory": "探索型（開放、廣泛）", "structured": "結構化（精確、逐項確認）", "validation": "驗證型（確認已知假設）"}.get(opts["interview_style"], opts["interview_style"])
+            style_label = {
+                "exploratory": "探索型（開放、廣泛）",
+                "structured": "結構化（精確、逐項確認）",
+                "validation": "驗證型（確認已知假設）",
+            }.get(opts["interview_style"], opts["interview_style"])
             options_parts.append(f"訪談風格：{style_label}")
         if opts.get("must_cover_topics"):
             options_parts.append(f"必須涵蓋的主題：{', '.join(opts['must_cover_topics'])}")
         if opts.get("reference_questions"):
-            options_parts.append(f"參考問題風格：\n" + '\n'.join(f"- {q}" for q in opts['reference_questions']))
+            options_parts.append(
+                f"參考問題風格：\n" + "\n".join(f"- {q}" for q in opts["reference_questions"])
+            )
 
         if options_parts:
-            context += "\n\n## 訪談設定\n" + '\n'.join(options_parts)
+            context += "\n\n## 訪談設定\n" + "\n".join(options_parts)
 
         # Determine target theme count based on duration
         duration = opts.get("duration_minutes", 30)
@@ -457,9 +463,7 @@ class StakeholderCardGenerator:
         return self._default_themes(stakeholder, slot)
 
     def _default_themes(
-        self,
-        stakeholder: StakeholderProfile,
-        slot: Optional[StakeholderSlot]
+        self, stakeholder: StakeholderProfile, slot: Optional[StakeholderSlot]
     ) -> List[Dict[str, Any]]:
         """Fallback themes if AI generation fails."""
         return [
@@ -510,7 +514,7 @@ class StakeholderCardGenerator:
         project: Project,
         stakeholder: StakeholderProfile,
         slot: Optional[StakeholderSlot],
-        theme: InterviewTheme
+        theme: InterviewTheme,
     ) -> List[Dict[str, Any]]:
         """Generate question cards for a specific theme."""
         brd_scope = project.brd_scope or {}

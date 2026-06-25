@@ -1,31 +1,32 @@
 """Prep session routes."""
 
-import logging
 import asyncio
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+import logging
+from typing import List, Optional
+
+import redis.asyncio as async_redis
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from typing import List, Optional
-import redis.asyncio as async_redis
 
+from app.core.config import settings
 from app.db.session import get_db
-from app.services.prep_session_service import prep_session_service
-from app.services.interview_service import interview_service
+from app.schemas.interview import (
+    InterviewSessionCreate,
+    InterviewSessionSchema,
+    InterviewSessionWithDocument,
+)
+from app.schemas.prep_session import (
+    PrepSessionCreate,
+    PrepSessionListResponse,
+    PrepSessionSchema,
+    PrepSessionUpdate,
+    PrepSessionWithDocument,
+)
 from app.services.billing_service import billing_service
 from app.services.event_service import event_service
-from app.core.config import settings
-from app.schemas.prep_session import (
-    PrepSessionSchema,
-    PrepSessionCreate,
-    PrepSessionUpdate,
-    PrepSessionListResponse,
-    PrepSessionWithDocument
-)
-from app.schemas.interview import (
-    InterviewSessionSchema,
-    InterviewSessionCreate,
-    InterviewSessionWithDocument
-)
+from app.services.interview_service import interview_service
+from app.services.prep_session_service import prep_session_service
 
 logger = logging.getLogger(__name__)
 
@@ -41,13 +42,17 @@ def convert_prep_session_to_schema(prep_session) -> PrepSessionSchema:
         title=prep_session.title,
         status=prep_session.status,
         createdAt=prep_session.created_at,
-        updatedAt=prep_session.updated_at
+        updatedAt=prep_session.updated_at,
     )
 
 
-def convert_interview_session_to_schema(session, db: Optional[Session] = None) -> InterviewSessionSchema:
+def convert_interview_session_to_schema(
+    session, db: Optional[Session] = None
+) -> InterviewSessionSchema:
     """Convert interview session model to schema."""
-    usage = billing_service.summarize_session(db, session.id) if db else billing_service.empty_summary()
+    usage = (
+        billing_service.summarize_session(db, session.id) if db else billing_service.empty_summary()
+    )
     return InterviewSessionSchema(
         id=session.id,
         prepSessionId=session.prep_session_id,
@@ -61,7 +66,7 @@ def convert_interview_session_to_schema(session, db: Optional[Session] = None) -
         pausedDurationSeconds=session.paused_duration_seconds or 0,
         createdAt=session.created_at,
         costUsd=usage["totalCostUsd"],
-        aiUsage=usage
+        aiUsage=usage,
     )
 
 
@@ -73,7 +78,7 @@ async def list_prep_sessions(
     offset: int = Query(0, ge=0),
     sort_by: str = Query("createdAt", alias="sortBy", regex="^(createdAt|updatedAt|status)$"),
     order: str = Query("desc", regex="^(asc|desc)$"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
     """
     List all prep sessions with pagination, sorting, and filtering.
@@ -86,7 +91,9 @@ async def list_prep_sessions(
     - sortBy: Field to sort by (createdAt, updatedAt, status)
     - order: Sort order (asc or desc, default desc)
     """
-    logger.info(f"Listing prep sessions: status={status_filter}, document_id={document_id}, limit={limit}, offset={offset}")
+    logger.info(
+        f"Listing prep sessions: status={status_filter}, document_id={document_id}, limit={limit}, offset={offset}"
+    )
 
     # For MVP, use default user
     user_id = "user_default"
@@ -99,17 +106,14 @@ async def list_prep_sessions(
         limit=limit,
         offset=offset,
         sort_by=sort_by,
-        order=order
+        order=order,
     )
 
     return result
 
 
 @router.post("/", status_code=status.HTTP_201_CREATED, response_model=PrepSessionSchema)
-async def create_prep_session(
-    prep_session_data: PrepSessionCreate,
-    db: Session = Depends(get_db)
-):
+async def create_prep_session(prep_session_data: PrepSessionCreate, db: Session = Depends(get_db)):
     """
     Create a new prep session for a document.
 
@@ -124,20 +128,21 @@ async def create_prep_session(
 
     # Publish global event for prep session creation
     try:
-        event_service.publish_sync(f"prep_sessions_global", {
-            'type': 'PREP_SESSION_CREATED',
-            'prepSessionId': prep_session.id,
-            'documentId': prep_session.document_id,
-            'status': prep_session.status,
-            'title': prep_session.title
-        })
+        event_service.publish_sync(
+            f"prep_sessions_global",
+            {
+                "type": "PREP_SESSION_CREATED",
+                "prepSessionId": prep_session.id,
+                "documentId": prep_session.document_id,
+                "status": prep_session.status,
+                "title": prep_session.title,
+            },
+        )
         logger.info(f"📤 Published PREP_SESSION_CREATED event for {prep_session.id}")
     except Exception as e:
         logger.warning(f"Failed to publish prep session created event: {e}")
 
     return convert_prep_session_to_schema(prep_session)
-
-
 
 
 @router.get("/events")
@@ -149,6 +154,7 @@ async def prep_sessions_global_events_stream():
     - PREP_SESSION_CREATED: New prep session created
     - PREP_SESSION_DELETED: Prep session deleted
     """
+
     async def event_generator():
         """Generate SSE events for all prep sessions."""
         queue = await event_service.subscribe(f"prep_sessions_global")
@@ -158,15 +164,14 @@ async def prep_sessions_global_events_stream():
 
         try:
             # Send initial connected event
-            yield f"event: connected\ndata: {{\"status\": \"connected\"}}\n\n"
+            yield f'event: connected\ndata: {{"status": "connected"}}\n\n'
 
             # Stream events from queue
             while True:
                 try:
-                    redis_message_task = asyncio.create_task(pubsub.get_message(
-                        ignore_subscribe_messages=True,
-                        timeout=30.0
-                    ))
+                    redis_message_task = asyncio.create_task(
+                        pubsub.get_message(ignore_subscribe_messages=True, timeout=30.0)
+                    )
                     local_message_task = asyncio.create_task(queue.get())
 
                     done, pending = await asyncio.wait(
@@ -191,7 +196,9 @@ async def prep_sessions_global_events_stream():
                         event_data = message
 
                     if event_data:
-                        yield event_data if str(event_data).endswith("\n\n") else f"{event_data}\n\n"
+                        yield (
+                            event_data if str(event_data).endswith("\n\n") else f"{event_data}\n\n"
+                        )
 
                 except asyncio.TimeoutError:
                     yield ": keepalive\n\n"
@@ -212,8 +219,9 @@ async def prep_sessions_global_events_stream():
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
-        }
+        },
     )
+
 
 @router.get("/{prep_session_id}", response_model=PrepSessionSchema)
 async def get_prep_session(prep_session_id: str, db: Session = Depends(get_db)):
@@ -225,9 +233,7 @@ async def get_prep_session(prep_session_id: str, db: Session = Depends(get_db)):
 
 @router.patch("/{prep_session_id}", response_model=PrepSessionSchema)
 async def update_prep_session(
-    prep_session_id: str,
-    update_data: PrepSessionUpdate,
-    db: Session = Depends(get_db)
+    prep_session_id: str, update_data: PrepSessionUpdate, db: Session = Depends(get_db)
 ):
     """Update prep session title or status."""
     logger.info(f"Updating prep session {prep_session_id}")
@@ -245,23 +251,23 @@ async def fix_stuck_prep_sessions(db: Session = Depends(get_db)):
 
     Returns a list of fixed prep session IDs.
     """
-    from app.models.prep_session import PrepSession
-    from app.models.document import Document
-    from app.models.question_card import QuestionCard
-    from sqlalchemy import and_
     from datetime import datetime
+
+    from sqlalchemy import and_
+
+    from app.models.document import Document
+    from app.models.prep_session import PrepSession
+    from app.models.question_card import QuestionCard
 
     logger.info("Starting stuck prep sessions repair")
 
     # Find all prep sessions in 'preparing' status with analyzed decks
-    stuck_sessions = db.query(PrepSession, Document).join(
-        Document, PrepSession.document_id == Document.id
-    ).filter(
-        and_(
-            PrepSession.status == "preparing",
-            Document.status == "analyzed"
-        )
-    ).all()
+    stuck_sessions = (
+        db.query(PrepSession, Document)
+        .join(Document, PrepSession.document_id == Document.id)
+        .filter(and_(PrepSession.status == "preparing", Document.status == "analyzed"))
+        .all()
+    )
 
     if not stuck_sessions:
         logger.info("No stuck prep sessions found")
@@ -272,9 +278,7 @@ async def fix_stuck_prep_sessions(db: Session = Depends(get_db)):
     fixed_ids = []
     for prep_session, deck in stuck_sessions:
         # Count topic cards to verify analysis is complete
-        card_count = db.query(QuestionCard).filter(
-            QuestionCard.document_id == deck.id
-        ).count()
+        card_count = db.query(QuestionCard).filter(QuestionCard.document_id == deck.id).count()
 
         logger.info(
             f"Fixing PrepSession {prep_session.id}: document={deck.id}, "
@@ -286,12 +290,15 @@ async def fix_stuck_prep_sessions(db: Session = Depends(get_db)):
 
         # Publish SSE event
         try:
-            event_service.publish_sync(f"prep_{prep_session.id}", {
-                'type': 'PREP_STATUS_CHANGED',
-                'prepSessionId': prep_session.id,
-                'status': 'ready',
-                'documentId': deck.id
-            })
+            event_service.publish_sync(
+                f"prep_{prep_session.id}",
+                {
+                    "type": "PREP_STATUS_CHANGED",
+                    "prepSessionId": prep_session.id,
+                    "status": "ready",
+                    "documentId": deck.id,
+                },
+            )
             logger.info(f"Published PREP_STATUS_CHANGED event for {prep_session.id}")
         except Exception as e:
             logger.warning(f"Failed to publish event for {prep_session.id}: {e}")
@@ -347,10 +354,10 @@ async def delete_prep_session(prep_session_id: str, db: Session = Depends(get_db
 
     # Publish global event for prep session deletion
     try:
-        event_service.publish_sync(f"prep_sessions_global", {
-            'type': 'PREP_SESSION_DELETED',
-            'prepSessionId': prep_session_id
-        })
+        event_service.publish_sync(
+            f"prep_sessions_global",
+            {"type": "PREP_SESSION_DELETED", "prepSessionId": prep_session_id},
+        )
         logger.info(f"📤 Published PREP_SESSION_DELETED event for {prep_session_id}")
     except Exception as e:
         logger.warning(f"Failed to publish prep session deleted event: {e}")
@@ -359,10 +366,7 @@ async def delete_prep_session(prep_session_id: str, db: Session = Depends(get_db
 
 
 @router.get("/{prep_session_id}/interview-sessions", response_model=List[InterviewSessionSchema])
-async def get_prep_session_interview_sessions(
-    prep_session_id: str,
-    db: Session = Depends(get_db)
-):
+async def get_prep_session_interview_sessions(prep_session_id: str, db: Session = Depends(get_db)):
     """Get all interview sessions for a prep session."""
     logger.info(f"Retrieving interview sessions for prep session {prep_session_id}")
     sessions = prep_session_service.get_prep_session_interview_sessions(db, prep_session_id)
@@ -372,12 +376,9 @@ async def get_prep_session_interview_sessions(
 @router.post(
     "/{prep_session_id}/interview-sessions",
     status_code=status.HTTP_201_CREATED,
-    response_model=InterviewSessionSchema
+    response_model=InterviewSessionSchema,
 )
-async def create_interview_session_for_prep(
-    prep_session_id: str,
-    db: Session = Depends(get_db)
-):
+async def create_interview_session_for_prep(prep_session_id: str, db: Session = Depends(get_db)):
     """
     Create a new interview session under a prep session.
 
@@ -393,8 +394,7 @@ async def create_interview_session_for_prep(
 
     # Create session data
     session_data = InterviewSessionCreate(
-        prepSessionId=prep_session_id,
-        documentId=prep_session.document_id
+        prepSessionId=prep_session_id, documentId=prep_session.document_id
     )
 
     session = interview_service.create_session(db, user_id, session_data)
@@ -422,15 +422,14 @@ async def prep_session_events_stream(prep_session_id: str, db: Session = Depends
 
         try:
             # Send initial connected event
-            yield f"event: connected\ndata: {{\"status\": \"connected\", \"prepSessionId\": \"{prep_session_id}\"}}\n\n"
+            yield f'event: connected\ndata: {{"status": "connected", "prepSessionId": "{prep_session_id}"}}\n\n'
 
             # Stream events from queue
             while True:
                 try:
-                    redis_message_task = asyncio.create_task(pubsub.get_message(
-                        ignore_subscribe_messages=True,
-                        timeout=30.0
-                    ))
+                    redis_message_task = asyncio.create_task(
+                        pubsub.get_message(ignore_subscribe_messages=True, timeout=30.0)
+                    )
                     local_message_task = asyncio.create_task(queue.get())
 
                     done, pending = await asyncio.wait(
@@ -455,7 +454,9 @@ async def prep_session_events_stream(prep_session_id: str, db: Session = Depends
                         event_data = message
 
                     if event_data:
-                        yield event_data if str(event_data).endswith("\n\n") else f"{event_data}\n\n"
+                        yield (
+                            event_data if str(event_data).endswith("\n\n") else f"{event_data}\n\n"
+                        )
 
                 except asyncio.TimeoutError:
                     # Send keepalive comment to prevent connection timeout
@@ -477,5 +478,5 @@ async def prep_session_events_stream(prep_session_id: str, db: Session = Depends
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",  # Disable buffering in nginx
-        }
+        },
     )

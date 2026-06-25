@@ -5,13 +5,14 @@ All endpoints return stub responses — real authentication is not
 enforced in the current single-user development setup.
 """
 
+from typing import Annotated
+
 from fastapi import APIRouter, Depends
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
-from typing import Annotated
 
-from app.db.session import get_db
 from app.core.security import create_access_token
+from app.db.session import get_db
 
 router = APIRouter()
 
@@ -28,8 +29,7 @@ async def register(db: Session = Depends(get_db)):
 
 @router.post("/login")
 async def login(
-    form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
-    db: Session = Depends(get_db)
+    form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db: Session = Depends(get_db)
 ):
     """Login and get access token. (Development stub - always succeeds)"""
     access_token = create_access_token(subject=DEV_USER_ID)
@@ -37,6 +37,8 @@ async def login(
 
 
 @router.get("/me")
-async def get_current_user(token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)):
+async def get_current_user(
+    token: Annotated[str, Depends(oauth2_scheme)], db: Session = Depends(get_db)
+):
     """Get current user information. (Development stub)"""
     return {"id": DEV_USER_ID, "email": "dev@insightguide.local"}

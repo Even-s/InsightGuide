@@ -3,13 +3,14 @@ Unit tests for Answer Evaluation Engine
 Tests core answer evaluation logic and sufficiency scoring.
 """
 
-import pytest
-from unittest.mock import Mock, patch, MagicMock
 from datetime import datetime, timedelta
+from unittest.mock import MagicMock, Mock, patch
 
-from app.services.answer_evaluation_engine import answer_evaluation_engine
+import pytest
+
+from app.models.interview_session import InterviewCardState, InterviewSession
 from app.models.question_card import QuestionCard
-from app.models.interview_session import InterviewSession, InterviewCardState
+from app.services.answer_evaluation_engine import answer_evaluation_engine
 
 
 class TestAnswerEvaluationEngine:
@@ -22,7 +23,9 @@ class TestAnswerEvaluationEngine:
         db.commit = Mock()
         db.rollback = Mock()
         # _get_next_evaluation_seq queries for max evaluation_seq — return None (first eval)
-        db.query.return_value.filter.return_value.with_entities.return_value.order_by.return_value.first.return_value = None
+        db.query.return_value.filter.return_value.with_entities.return_value.order_by.return_value.first.return_value = (
+            None
+        )
         db.add = Mock()
         return db
 
@@ -38,8 +41,8 @@ class TestAnswerEvaluationEngine:
             expected_answer_elements=["Increase revenue", "Improve efficiency", "Expand market"],
             coverage_rule={
                 "mustMentionElements": ["revenue target", "efficiency goal", "market expansion"],
-                "semanticAnchors": []
-            }
+                "semanticAnchors": [],
+            },
         )
 
     @pytest.fixture
@@ -50,7 +53,7 @@ class TestAnswerEvaluationEngine:
             document_id="doc-456",
             user_id="user-789",
             status="interviewing",
-            started_at=datetime.utcnow()
+            started_at=datetime.utcnow(),
         )
 
     @pytest.fixture
@@ -65,7 +68,7 @@ class TestAnswerEvaluationEngine:
             activation_score=0.0,
             completion_score=0.0,
             created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow()
+            updated_at=datetime.utcnow(),
         )
 
     def test_get_required_element_ids_with_must_mention(self, sample_question_card):
@@ -85,10 +88,7 @@ class TestAnswerEvaluationEngine:
             document_id="doc-1",
             section_id="section-1",
             question_text="Test question",
-            coverage_rule={
-                "semanticAnchors": ["anchor1", "anchor2"],
-                "mustMentionElements": []
-            }
+            coverage_rule={"semanticAnchors": ["anchor1", "anchor2"], "mustMentionElements": []},
         )
 
         element_ids = answer_evaluation_engine._get_required_element_ids(card)
@@ -104,7 +104,7 @@ class TestAnswerEvaluationEngine:
             document_id="doc-1",
             section_id="section-1",
             question_text="Test question",
-            coverage_rule={}
+            coverage_rule={},
         )
 
         element_ids = answer_evaluation_engine._get_required_element_ids(card)
@@ -115,8 +115,7 @@ class TestAnswerEvaluationEngine:
         element_ids = {"element_0", "element_1", "anchor_0"}
 
         canonical = answer_evaluation_engine._canonicalize_element_ids(
-            sample_question_card,
-            element_ids
+            sample_question_card, element_ids
         )
 
         assert "element_0" in canonical
@@ -126,14 +125,11 @@ class TestAnswerEvaluationEngine:
         """Test normalization does NOT auto-fill — only explicit coverage counts."""
         completion = {
             "covered_element_ids": ["element_0", "element_1"],
-            "missing_element_ids": ["element_2"]
+            "missing_element_ids": ["element_2"],
         }
 
         covered, missing = answer_evaluation_engine._normalize_completion_element_ids(
-            sample_question_card,
-            completion,
-            completion_percentage=90.0,
-            is_sufficient=True
+            sample_question_card, completion, completion_percentage=90.0, is_sufficient=True
         )
 
         # Only explicitly covered elements count — no auto-fill
@@ -147,14 +143,11 @@ class TestAnswerEvaluationEngine:
         """Test normalization when answer is insufficient."""
         completion = {
             "covered_element_ids": ["element_0"],
-            "missing_element_ids": ["element_1", "element_2"]
+            "missing_element_ids": ["element_1", "element_2"],
         }
 
         covered, missing = answer_evaluation_engine._normalize_completion_element_ids(
-            sample_question_card,
-            completion,
-            completion_percentage=33.0,
-            is_sufficient=False
+            sample_question_card, completion, completion_percentage=33.0, is_sufficient=False
         )
 
         assert len(covered) == 1
@@ -169,13 +162,13 @@ class TestAnswerEvaluationEngine:
             utterance_id="utt-123",
             utterance_text="Can you tell me about the objectives?",
             section_id="section-789",
-            speaker="interviewer"
+            speaker="interviewer",
         )
 
         assert len(updates) == 0
         mock_db.commit.assert_not_called()
 
-    @patch('app.services.answer_evaluation_engine.answer_evaluation_engine._load_candidate_cards')
+    @patch("app.services.answer_evaluation_engine.answer_evaluation_engine._load_candidate_cards")
     def test_process_utterance_no_candidates(self, mock_load, mock_db):
         """Test processing when no candidate cards exist."""
         mock_load.return_value = []
@@ -186,12 +179,12 @@ class TestAnswerEvaluationEngine:
             utterance_id="utt-123",
             utterance_text="Test utterance",
             section_id="section-789",
-            speaker="interviewee"
+            speaker="interviewee",
         )
 
         assert len(updates) == 0
 
-    @patch('app.services.answer_evaluation_engine.answer_evaluation_engine._load_candidate_cards')
+    @patch("app.services.answer_evaluation_engine.answer_evaluation_engine._load_candidate_cards")
     def test_process_utterance_error_handling(self, mock_load, mock_db):
         """Test error handling during utterance processing."""
         mock_load.side_effect = Exception("Database error")
@@ -202,7 +195,7 @@ class TestAnswerEvaluationEngine:
             utterance_id="utt-123",
             utterance_text="Test utterance",
             section_id="section-789",
-            speaker="interviewee"
+            speaker="interviewee",
         )
 
         assert len(updates) == 0
@@ -214,7 +207,7 @@ class TestAnswerEvaluationEngine:
             id="state-1",
             session_id=sample_interview_session.id,
             question_card_id=sample_question_card.id,
-            status="listening"
+            status="listening",
         )
 
         # Build a mock that responds differently based on query sequence
@@ -224,30 +217,26 @@ class TestAnswerEvaluationEngine:
         mock_query.first.return_value = sample_interview_session
         mock_query.all.side_effect = [
             [sample_question_card],  # QuestionCard query
-            [card_state]             # InterviewCardState query
+            [card_state],  # InterviewCardState query
         ]
         mock_db.query.return_value = mock_query
 
         # Execute
         candidates = answer_evaluation_engine._load_candidate_cards(
-            mock_db,
-            sample_interview_session.id,
-            "section-789"
+            mock_db, sample_interview_session.id, "section-789"
         )
 
         # Verify
         assert len(candidates) == 1
-        assert candidates[0]['card'] == sample_question_card
-        assert candidates[0]['state'] == card_state
+        assert candidates[0]["card"] == sample_question_card
+        assert candidates[0]["state"] == card_state
 
     def test_load_candidate_cards_session_not_found(self, mock_db):
         """Test loading candidates when session doesn't exist."""
         mock_db.query().filter().first.return_value = None
 
         candidates = answer_evaluation_engine._load_candidate_cards(
-            mock_db,
-            "nonexistent-session",
-            "section-789"
+            mock_db, "nonexistent-session", "section-789"
         )
 
         assert candidates == []
@@ -260,19 +249,19 @@ class TestAnswerEvaluationEngine:
     ):
         """Test that a later complete judgment does not clear the follow-up prompt."""
         sample_card_state.evidence = {
-            'judgment': {
-                'suggested_followup': 'Can you clarify the timeline?',
-                'reason': 'Timeline is missing.',
+            "judgment": {
+                "suggested_followup": "Can you clarify the timeline?",
+                "reason": "Timeline is missing.",
             }
         }
 
         judgment = {
-            'sufficiency_score': 0.7,
-            'is_sufficient': False,
-            'completion_percentage': 70,
-            'reason': 'Scope is clearer now.',
-            'suggested_followup': '',
-            'response_status': 'responded',
+            "sufficiency_score": 0.7,
+            "is_sufficient": False,
+            "completion_percentage": 70,
+            "reason": "Scope is clearer now.",
+            "suggested_followup": "",
+            "response_status": "responded",
         }
 
         update = answer_evaluation_engine._update_card_state(
@@ -286,24 +275,19 @@ class TestAnswerEvaluationEngine:
 
         assert update is not None
         assert (
-            update['evidence']['judgment']['suggested_followup']
-            == 'Can you clarify the timeline?'
+            update["evidence"]["judgment"]["suggested_followup"] == "Can you clarify the timeline?"
         )
         assert (
-            sample_card_state.evidence['judgment']['suggested_followup']
-            == 'Can you clarify the timeline?'
+            sample_card_state.evidence["judgment"]["suggested_followup"]
+            == "Can you clarify the timeline?"
         )
-        assert sample_card_state.evidence['judgment']['reason'] == 'Scope is clearer now.'
+        assert sample_card_state.evidence["judgment"]["reason"] == "Scope is clearer now."
 
     def test_update_card_state_no_change(self, mock_db, sample_card_state, sample_question_card):
         """Test that no update is returned when status doesn't change."""
         sample_card_state.status = "listening"
 
-        judgment = {
-            'sufficiency_score': 0.3,
-            'is_sufficient': False,
-            'completion_percentage': 30
-        }
+        judgment = {"sufficiency_score": 0.3, "is_sufficient": False, "completion_percentage": 30}
 
         update = answer_evaluation_engine._update_card_state(
             db=mock_db,
@@ -311,7 +295,7 @@ class TestAnswerEvaluationEngine:
             card=sample_question_card,
             utterance_id="utt-123",
             utterance_text="Weak answer",
-            judgment=judgment
+            judgment=judgment,
         )
 
         # Should transition from pending to listening, so update should exist
@@ -331,11 +315,11 @@ class TestAnswerEvaluationEngine:
         )
 
         judgment = {
-            'confidence': 0.1,
-            'is_covered': False,
-            'evidence_quote': '',
-            'covered_element_ids': [],
-            'missing_element_ids': ['criterion_0'],
+            "confidence": 0.1,
+            "is_covered": False,
+            "evidence_quote": "",
+            "covered_element_ids": [],
+            "missing_element_ids": ["criterion_0"],
         }
 
         update = answer_evaluation_engine._update_card_state(
@@ -344,25 +328,25 @@ class TestAnswerEvaluationEngine:
             card=sample_question_card,
             utterance_id="utt-123",
             utterance_text="Starting to answer",
-            judgment=judgment
+            judgment=judgment,
         )
 
         assert update is not None
-        assert update['old_status'] == 'pending'
-        assert update['new_status'] == 'listening'
-        assert card_state.status == 'listening'
+        assert update["old_status"] == "pending"
+        assert update["new_status"] == "listening"
+        assert card_state.status == "listening"
 
     def test_process_partial_transcript(self, mock_db):
         """Test processing partial transcript (streaming)."""
-        candidate = {'card': Mock(id='card-123'), 'state': Mock(id='state-123')}
+        candidate = {"card": Mock(id="card-123"), "state": Mock(id="state-123")}
         with (
-            patch.object(answer_evaluation_engine, '_load_candidate_cards') as mock_load,
-            patch.object(answer_evaluation_engine, '_batch_judge_answer_sufficiency') as mock_judge,
-            patch.object(answer_evaluation_engine, '_update_card_state') as mock_update,
+            patch.object(answer_evaluation_engine, "_load_candidate_cards") as mock_load,
+            patch.object(answer_evaluation_engine, "_batch_judge_answer_sufficiency") as mock_judge,
+            patch.object(answer_evaluation_engine, "_update_card_state") as mock_update,
         ):
             mock_load.return_value = [candidate]
-            mock_judge.return_value = [{'confidence': 0.5, 'is_covered': False}]
-            mock_update.return_value = {'card_id': 'card-123', 'new_status': 'listening'}
+            mock_judge.return_value = [{"confidence": 0.5, "is_covered": False}]
+            mock_update.return_value = {"card_id": "card-123", "new_status": "listening"}
 
             updates = answer_evaluation_engine.process_partial_transcript(
                 db=mock_db,
@@ -379,7 +363,7 @@ class TestAnswerEvaluationEngine:
                 "session-123",
                 "section-789",
                 active_card_id="card-123",
-                statuses=['listening'],
+                statuses=["listening"],
             )
             mock_judge.assert_called_once()
             mock_update.assert_called_once()
@@ -392,7 +376,7 @@ class TestAnswerEvaluationEngine:
             session_id="session-123",
             transcript_text="short",
             section_id="section-789",
-            speaker="interviewee"
+            speaker="interviewee",
         )
 
         assert len(updates) == 0
@@ -404,14 +388,14 @@ class TestAnswerEvaluationEngine:
             session_id="session-123",
             transcript_text="Can you elaborate on that?",
             section_id="section-789",
-            speaker="interviewer"
+            speaker="interviewer",
         )
 
         assert len(updates) == 0
 
     def test_process_partial_transcript_error_handling(self, mock_db):
         """Test error handling in partial transcript processing."""
-        with patch.object(answer_evaluation_engine, '_load_candidate_cards') as mock_load:
+        with patch.object(answer_evaluation_engine, "_load_candidate_cards") as mock_load:
             mock_load.side_effect = Exception("Processing error")
 
             updates = answer_evaluation_engine.process_partial_transcript(
@@ -419,7 +403,7 @@ class TestAnswerEvaluationEngine:
                 session_id="session-123",
                 transcript_text="This will cause an error",
                 section_id="section-789",
-                speaker="interviewee"
+                speaker="interviewee",
             )
 
             assert len(updates) == 0
@@ -429,7 +413,10 @@ class TestQuestionGuardAndReduceState:
     """Tests for question-like utterance detection and state reduction with response_status."""
 
     def test_is_question_like_chinese_question_mark(self):
-        assert answer_evaluation_engine._is_question_like("你有哪些情境是需要馬上有人幫忙的呢？") is True
+        assert (
+            answer_evaluation_engine._is_question_like("你有哪些情境是需要馬上有人幫忙的呢？")
+            is True
+        )
 
     def test_is_question_like_english_question_mark(self):
         assert answer_evaluation_engine._is_question_like("What scenarios need help?") is True
@@ -444,7 +431,10 @@ class TestQuestionGuardAndReduceState:
         assert answer_evaluation_engine._is_question_like("請問什麼時候會發生這個問題") is True
 
     def test_is_question_like_answer_not_detected(self):
-        assert answer_evaluation_engine._is_question_like("我們主要用 PostgreSQL 處理這個流程") is False
+        assert (
+            answer_evaluation_engine._is_question_like("我們主要用 PostgreSQL 處理這個流程")
+            is False
+        )
 
     def test_is_question_like_partial_answer_not_detected(self):
         assert answer_evaluation_engine._is_question_like("最常遇到的情境是客戶突然改需求") is False
@@ -452,55 +442,55 @@ class TestQuestionGuardAndReduceState:
     def test_reduce_state_question_only_caps_at_listening(self):
         """question_only response_status must not produce probably_sufficient."""
         judgment = {
-            'confidence': 0.5,
-            'is_covered': False,
-            'evidence_quote': '',
-            'missing_element_ids': ['criterion_0'],
-            'covered_element_ids': [],
-            'response_status': 'question_only',
+            "confidence": 0.5,
+            "is_covered": False,
+            "evidence_quote": "",
+            "missing_element_ids": ["criterion_0"],
+            "covered_element_ids": [],
+            "response_status": "question_only",
         }
-        state, _act, _comp = answer_evaluation_engine._reduce_state('pending', judgment)
-        assert state == 'listening'
+        state, _act, _comp = answer_evaluation_engine._reduce_state("pending", judgment)
+        assert state == "listening"
         assert _comp == 0.0
 
     def test_reduce_state_not_yet_caps_at_listening(self):
         """not_yet response_status must not produce probably_sufficient."""
         judgment = {
-            'confidence': 0.5,
-            'is_covered': False,
-            'evidence_quote': '',
-            'missing_element_ids': [],
-            'covered_element_ids': [],
-            'response_status': 'not_yet',
+            "confidence": 0.5,
+            "is_covered": False,
+            "evidence_quote": "",
+            "missing_element_ids": [],
+            "covered_element_ids": [],
+            "response_status": "not_yet",
         }
-        state, _act, _comp = answer_evaluation_engine._reduce_state('pending', judgment)
-        assert state == 'listening'
+        state, _act, _comp = answer_evaluation_engine._reduce_state("pending", judgment)
+        assert state == "listening"
 
     def test_reduce_state_responded_allows_probably_sufficient(self):
         """responded status should allow probably_sufficient progression."""
         judgment = {
-            'confidence': 0.5,
-            'is_covered': False,
-            'evidence_quote': 'some evidence',
-            'missing_element_ids': ['criterion_0'],
-            'covered_element_ids': [],
-            'response_status': 'responded',
+            "confidence": 0.5,
+            "is_covered": False,
+            "evidence_quote": "some evidence",
+            "missing_element_ids": ["criterion_0"],
+            "covered_element_ids": [],
+            "response_status": "responded",
         }
-        state, _act, _comp = answer_evaluation_engine._reduce_state('pending', judgment)
-        assert state == 'probably_sufficient'
+        state, _act, _comp = answer_evaluation_engine._reduce_state("pending", judgment)
+        assert state == "probably_sufficient"
 
     def test_reduce_state_question_only_does_not_create_50_percent_progress(self):
         """A question-only turn must not create 50% completion."""
         judgment = {
-            'confidence': 0.5,
-            'is_covered': False,
-            'evidence_quote': '你有哪些情境是需要馬上有人幫忙的呢？',
-            'missing_element_ids': [],
-            'covered_element_ids': ['criterion_0'],
-            'response_status': 'question_only',
+            "confidence": 0.5,
+            "is_covered": False,
+            "evidence_quote": "你有哪些情境是需要馬上有人幫忙的呢？",
+            "missing_element_ids": [],
+            "covered_element_ids": ["criterion_0"],
+            "response_status": "question_only",
         }
-        state, _act, _comp = answer_evaluation_engine._reduce_state('pending', judgment)
-        assert state == 'listening'
+        state, _act, _comp = answer_evaluation_engine._reduce_state("pending", judgment)
+        assert state == "listening"
         assert _comp == 0.0
 
     def test_mislabeled_interviewer_question_does_not_advance(self):
@@ -514,28 +504,32 @@ class TestQuestionGuardAndReduceState:
 
         # Simulate what GPT might return (incorrectly)
         judgment_from_gpt = {
-            'confidence': 0.5,
-            'is_covered': False,
-            'evidence_quote': '需要馬上有人幫忙',
-            'missing_element_ids': [],
-            'covered_element_ids': ['criterion_0'],
-            'response_status': 'responded',  # GPT incorrectly says responded
-            'criterion_evaluations': [
-                {'criterion_id': 'criterion_0', 'status': 'partially_satisfied', 'evidence_quotes': ['需要馬上有人幫忙']}
+            "confidence": 0.5,
+            "is_covered": False,
+            "evidence_quote": "需要馬上有人幫忙",
+            "missing_element_ids": [],
+            "covered_element_ids": ["criterion_0"],
+            "response_status": "responded",  # GPT incorrectly says responded
+            "criterion_evaluations": [
+                {
+                    "criterion_id": "criterion_0",
+                    "status": "partially_satisfied",
+                    "evidence_quotes": ["需要馬上有人幫忙"],
+                }
             ],
         }
 
         # After question guard in process_utterance, response_status should be overridden
         # because no criterion has status=satisfied and text is question-like
         has_satisfied = any(
-            ce.get('status') == 'satisfied'
-            for ce in judgment_from_gpt.get('criterion_evaluations', [])
+            ce.get("status") == "satisfied"
+            for ce in judgment_from_gpt.get("criterion_evaluations", [])
         )
         if not has_satisfied:
-            judgment_from_gpt['response_status'] = 'question_only'
+            judgment_from_gpt["response_status"] = "question_only"
 
-        state, _act, _comp = answer_evaluation_engine._reduce_state('pending', judgment_from_gpt)
-        assert state == 'listening'
+        state, _act, _comp = answer_evaluation_engine._reduce_state("pending", judgment_from_gpt)
+        assert state == "listening"
         assert _comp == 0.0
 
     def test_real_partial_answer_still_advances(self):
@@ -544,15 +538,15 @@ class TestQuestionGuardAndReduceState:
         assert answer_evaluation_engine._is_question_like(text) is False
 
         judgment = {
-            'confidence': 0.5,
-            'is_covered': False,
-            'evidence_quote': '客戶突然改需求',
-            'missing_element_ids': [],
-            'covered_element_ids': ['criterion_0'],
-            'response_status': 'responded',
+            "confidence": 0.5,
+            "is_covered": False,
+            "evidence_quote": "客戶突然改需求",
+            "missing_element_ids": [],
+            "covered_element_ids": ["criterion_0"],
+            "response_status": "responded",
         }
-        state, _act, _comp = answer_evaluation_engine._reduce_state('pending', judgment)
-        assert state == 'probably_sufficient'
+        state, _act, _comp = answer_evaluation_engine._reduce_state("pending", judgment)
+        assert state == "probably_sufficient"
 
 
 class TestActivationCompletionSeparation:
@@ -565,50 +559,53 @@ class TestActivationCompletionSeparation:
         assert answer_evaluation_engine._is_question_like(text) is True
 
         judgment = {
-            'confidence': 0.5,
-            'is_covered': False,
-            'evidence_quote': '最常需要有人幫忙',
-            'missing_element_ids': [],
-            'covered_element_ids': ['criterion_0'],
-            'response_status': 'question_only',
-            'relation': 'topic_mention',
+            "confidence": 0.5,
+            "is_covered": False,
+            "evidence_quote": "最常需要有人幫忙",
+            "missing_element_ids": [],
+            "covered_element_ids": ["criterion_0"],
+            "response_status": "question_only",
+            "relation": "topic_mention",
         }
-        state, act, comp = answer_evaluation_engine._reduce_state('pending', judgment)
-        assert state == 'listening'
+        state, act, comp = answer_evaluation_engine._reduce_state("pending", judgment)
+        assert state == "listening"
         assert act == 1.0
         assert comp == 0.0
 
     def test_question_only_never_creates_partially_satisfied_evidence(self):
         """Question-only turns must not produce durable partially_satisfied evidence."""
         judgment = {
-            'confidence': 0.5,
-            'is_covered': False,
-            'evidence_quote': '需要馬上有人幫忙',
-            'response_status': 'question_only',
-            'relation': 'topic_mention',
-            'criterion_evaluations': [
-                {'criterion_id': 'criterion_0', 'status': 'partially_satisfied',
-                 'evidence_quotes': ['需要馬上有人幫忙']}
+            "confidence": 0.5,
+            "is_covered": False,
+            "evidence_quote": "需要馬上有人幫忙",
+            "response_status": "question_only",
+            "relation": "topic_mention",
+            "criterion_evaluations": [
+                {
+                    "criterion_id": "criterion_0",
+                    "status": "partially_satisfied",
+                    "evidence_quotes": ["需要馬上有人幫忙"],
+                }
             ],
         }
         # The _QUESTION_ONLY_STATUSES check in _update_card_state skips evidence write
-        assert judgment['response_status'] in answer_evaluation_engine._QUESTION_ONLY_STATUSES
+        assert judgment["response_status"] in answer_evaluation_engine._QUESTION_ONLY_STATUSES
 
     def test_question_only_does_not_move_to_probably_sufficient(self):
         """A question-only turn must never move a card to probably_sufficient,
         regardless of the completion_score GPT returns."""
         # GPT incorrectly returns high confidence for a question
         judgment = {
-            'confidence': 0.8,
-            'is_covered': False,
-            'evidence_quote': '有哪些情境',
-            'missing_element_ids': [],
-            'covered_element_ids': ['criterion_0'],
-            'response_status': 'question_only',
-            'relation': 'topic_mention',
+            "confidence": 0.8,
+            "is_covered": False,
+            "evidence_quote": "有哪些情境",
+            "missing_element_ids": [],
+            "covered_element_ids": ["criterion_0"],
+            "response_status": "question_only",
+            "relation": "topic_mention",
         }
-        state, act, comp = answer_evaluation_engine._reduce_state('pending', judgment)
-        assert state == 'listening'
+        state, act, comp = answer_evaluation_engine._reduce_state("pending", judgment)
+        assert state == "listening"
         assert comp == 0.0
         assert act == 1.0
 
@@ -618,32 +615,32 @@ class TestActivationCompletionSeparation:
         assert answer_evaluation_engine._is_question_like(text) is False
 
         judgment = {
-            'confidence': 0.6,
-            'is_covered': False,
-            'evidence_quote': '客戶現場要我馬上確認折扣',
-            'missing_element_ids': ['criterion_1'],
-            'covered_element_ids': ['criterion_0'],
-            'response_status': 'responded',
-            'relation': 'answer',
+            "confidence": 0.6,
+            "is_covered": False,
+            "evidence_quote": "客戶現場要我馬上確認折扣",
+            "missing_element_ids": ["criterion_1"],
+            "covered_element_ids": ["criterion_0"],
+            "response_status": "responded",
+            "relation": "answer",
         }
-        state, act, comp = answer_evaluation_engine._reduce_state('pending', judgment)
-        assert state == 'probably_sufficient'
+        state, act, comp = answer_evaluation_engine._reduce_state("pending", judgment)
+        assert state == "probably_sufficient"
         assert act == 1.0
         assert comp == 0.6
 
     def test_topic_mention_relation_activates_card(self):
         """relation=topic_mention should activate (listening) without progress."""
         judgment = {
-            'confidence': 0.0,
-            'is_covered': False,
-            'evidence_quote': '',
-            'missing_element_ids': [],
-            'covered_element_ids': [],
-            'response_status': 'question_only',
-            'relation': 'topic_mention',
+            "confidence": 0.0,
+            "is_covered": False,
+            "evidence_quote": "",
+            "missing_element_ids": [],
+            "covered_element_ids": [],
+            "response_status": "question_only",
+            "relation": "topic_mention",
         }
-        state, act, comp = answer_evaluation_engine._reduce_state('pending', judgment)
-        assert state == 'listening'
+        state, act, comp = answer_evaluation_engine._reduce_state("pending", judgment)
+        assert state == "listening"
         assert act == 1.0
         assert comp == 0.0
 
@@ -667,7 +664,9 @@ class TestExclusiveActiveCardMode:
         db.commit = Mock()
         db.rollback = Mock()
         db.add = Mock()
-        db.query.return_value.filter.return_value.with_entities.return_value.order_by.return_value.first.return_value = None
+        db.query.return_value.filter.return_value.with_entities.return_value.order_by.return_value.first.return_value = (
+            None
+        )
         return db
 
     def test_exclusive_mode_only_evaluates_active_card(self, mock_db):
@@ -686,20 +685,29 @@ class TestExclusiveActiveCardMode:
         mock_db.query.return_value.filter.return_value.first.return_value = mock_session
 
         with (
-            patch.object(answer_evaluation_engine, '_load_candidate_cards') as mock_load,
-            patch.object(answer_evaluation_engine, '_batch_judge_answer_sufficiency') as mock_judge,
-            patch.object(answer_evaluation_engine, '_build_structured_context') as mock_ctx,
-            patch.object(answer_evaluation_engine, '_update_card_state') as mock_update,
-            patch('app.services.answer_evaluation_engine.question_rubric_service') as mock_rubric,
+            patch.object(answer_evaluation_engine, "_load_candidate_cards") as mock_load,
+            patch.object(answer_evaluation_engine, "_batch_judge_answer_sufficiency") as mock_judge,
+            patch.object(answer_evaluation_engine, "_build_structured_context") as mock_ctx,
+            patch.object(answer_evaluation_engine, "_update_card_state") as mock_update,
+            patch("app.services.answer_evaluation_engine.question_rubric_service") as mock_rubric,
         ):
             mock_rubric.get_rubric_if_cached.return_value = {"criteria": []}
 
-            active_card = Mock(id="qcard_active", question_text="Q1", focus_text="F1", coverage_rule={})
-            active_state = Mock(id="s1", status="listening", session_id="session_1", question_card_id="qcard_active")
-            mock_load.return_value = [{'card': active_card, 'state': active_state}]
+            active_card = Mock(
+                id="qcard_active", question_text="Q1", focus_text="F1", coverage_rule={}
+            )
+            active_state = Mock(
+                id="s1", status="listening", session_id="session_1", question_card_id="qcard_active"
+            )
+            mock_load.return_value = [{"card": active_card, "state": active_state}]
             mock_ctx.return_value = "context"
-            mock_judge.return_value = [{'confidence': 0.5, 'is_covered': False, 'response_status': 'responded'}]
-            mock_update.return_value = {'card_id': 'qcard_active', 'new_status': 'probably_sufficient'}
+            mock_judge.return_value = [
+                {"confidence": 0.5, "is_covered": False, "response_status": "responded"}
+            ]
+            mock_update.return_value = {
+                "card_id": "qcard_active",
+                "new_status": "probably_sufficient",
+            }
 
             updates = answer_evaluation_engine._evaluate_answer(
                 mock_db, "session_1", "utt_1", "回答內容", "theme_1", "interviewee"
@@ -707,12 +715,14 @@ class TestExclusiveActiveCardMode:
 
             # _load_candidate_cards should be called with active_card_id filter
             mock_load.assert_called_once_with(
-                mock_db, "session_1", "theme_1",
+                mock_db,
+                "session_1",
+                "theme_1",
                 active_card_id="qcard_active",
-                statuses=['listening', 'probably_sufficient', 'at_risk'],
+                statuses=["listening", "probably_sufficient", "at_risk"],
             )
             assert len(updates) == 1
-            assert updates[0]['card_id'] == 'qcard_active'
+            assert updates[0]["card_id"] == "qcard_active"
 
     def test_exclusive_mode_does_not_evaluate_other_cards(self, mock_db):
         """Other pending cards should not receive any completion in exclusive mode."""
@@ -726,9 +736,7 @@ class TestExclusiveActiveCardMode:
 
         mock_db.query.return_value.filter.return_value.first.return_value = mock_session
 
-        with (
-            patch.object(answer_evaluation_engine, '_load_candidate_cards') as mock_load,
-        ):
+        with (patch.object(answer_evaluation_engine, "_load_candidate_cards") as mock_load,):
             # Active card not in evaluable state (e.g., already sufficient)
             mock_load.return_value = []
 
@@ -752,28 +760,38 @@ class TestExclusiveActiveCardMode:
         mock_db.query.return_value.filter.return_value.first.return_value = mock_session
 
         with (
-            patch.object(answer_evaluation_engine, '_load_candidate_cards') as mock_load,
-            patch.object(answer_evaluation_engine, '_prefilter_candidates') as mock_filter,
-            patch.object(answer_evaluation_engine, '_batch_judge_answer_sufficiency') as mock_judge,
-            patch.object(answer_evaluation_engine, '_build_structured_context') as mock_ctx,
-            patch.object(answer_evaluation_engine, '_update_card_state') as mock_update,
-            patch('app.services.answer_evaluation_engine.question_rubric_service') as mock_rubric,
+            patch.object(answer_evaluation_engine, "_load_candidate_cards") as mock_load,
+            patch.object(answer_evaluation_engine, "_prefilter_candidates") as mock_filter,
+            patch.object(answer_evaluation_engine, "_batch_judge_answer_sufficiency") as mock_judge,
+            patch.object(answer_evaluation_engine, "_build_structured_context") as mock_ctx,
+            patch.object(answer_evaluation_engine, "_update_card_state") as mock_update,
+            patch("app.services.answer_evaluation_engine.question_rubric_service") as mock_rubric,
         ):
             mock_rubric.get_rubric_if_cached.return_value = {"criteria": []}
             card1 = Mock(id="qcard_1", question_text="Q1", focus_text="F1", coverage_rule={})
-            state1 = Mock(id="s1", status="pending", session_id="session_1", question_card_id="qcard_1")
+            state1 = Mock(
+                id="s1", status="pending", session_id="session_1", question_card_id="qcard_1"
+            )
             card2 = Mock(id="qcard_2", question_text="Q2", focus_text="F2", coverage_rule={})
-            state2 = Mock(id="s2", status="pending", session_id="session_1", question_card_id="qcard_2")
+            state2 = Mock(
+                id="s2", status="pending", session_id="session_1", question_card_id="qcard_2"
+            )
 
-            mock_load.return_value = [{'card': card1, 'state': state1}, {'card': card2, 'state': state2}]
-            mock_filter.return_value = [{'card': card1, 'state': state1}, {'card': card2, 'state': state2}]
+            mock_load.return_value = [
+                {"card": card1, "state": state1},
+                {"card": card2, "state": state2},
+            ]
+            mock_filter.return_value = [
+                {"card": card1, "state": state1},
+                {"card": card2, "state": state2},
+            ]
             mock_ctx.return_value = "context"
             mock_judge.return_value = [
-                {'confidence': 0.5, 'is_covered': False, 'response_status': 'responded'},
-                {'confidence': 0.3, 'is_covered': False, 'response_status': 'responded'},
+                {"confidence": 0.5, "is_covered": False, "response_status": "responded"},
+                {"confidence": 0.3, "is_covered": False, "response_status": "responded"},
             ]
             mock_update.side_effect = [
-                {'card_id': 'qcard_1', 'new_status': 'probably_sufficient'},
+                {"card_id": "qcard_1", "new_status": "probably_sufficient"},
                 None,  # second card blocked by one-pending rule
             ]
 
@@ -798,11 +816,11 @@ class TestExclusiveActiveCardMode:
         mock_db.query.return_value.filter.return_value.first.return_value = mock_session
 
         with (
-            patch.object(answer_evaluation_engine, '_load_candidate_cards') as mock_load,
-            patch.object(answer_evaluation_engine, '_prefilter_candidates') as mock_filter,
-            patch.object(answer_evaluation_engine, '_batch_judge_answer_sufficiency') as mock_judge,
-            patch.object(answer_evaluation_engine, '_build_structured_context') as mock_ctx,
-            patch('app.services.answer_evaluation_engine.question_rubric_service') as mock_rubric,
+            patch.object(answer_evaluation_engine, "_load_candidate_cards") as mock_load,
+            patch.object(answer_evaluation_engine, "_prefilter_candidates") as mock_filter,
+            patch.object(answer_evaluation_engine, "_batch_judge_answer_sufficiency") as mock_judge,
+            patch.object(answer_evaluation_engine, "_build_structured_context") as mock_ctx,
+            patch("app.services.answer_evaluation_engine.question_rubric_service") as mock_rubric,
         ):
             mock_rubric.get_rubric_if_cached.return_value = {"criteria": []}
             mock_load.return_value = []
@@ -814,6 +832,8 @@ class TestExclusiveActiveCardMode:
 
             # Should use non-exclusive path (load all candidates, prefilter)
             mock_load.assert_called_once_with(
-                mock_db, "session_1", "theme_1",
-                statuses=['pending', 'listening', 'probably_sufficient', 'at_risk'],
+                mock_db,
+                "session_1",
+                "theme_1",
+                statuses=["pending", "listening", "probably_sufficient", "at_risk"],
             )

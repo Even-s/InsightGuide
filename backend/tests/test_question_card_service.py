@@ -3,14 +3,15 @@ Unit tests for Question Card Service
 Tests question card management and coverage rule normalization.
 """
 
-import pytest
-from unittest.mock import Mock, patch
 from datetime import datetime
+from unittest.mock import Mock, patch
 
-from app.services.question_card_service import question_card_service, QuestionCardService
+import pytest
+
 from app.models.question_card import QuestionCard
 from app.models.section import Section
 from app.schemas.question_card import QuestionCardCreate, QuestionCardUpdate
+from app.services.question_card_service import QuestionCardService, question_card_service
 
 
 class TestQuestionCardService:
@@ -42,10 +43,10 @@ class TestQuestionCardService:
                 "semanticAnchors": ["goal", "target"],
                 "mustMentionElements": [
                     {"text": "Revenue growth", "required": True},
-                    {"text": "Market expansion", "required": True}
-                ]
+                    {"text": "Market expansion", "required": True},
+                ],
             },
-            created_at=datetime.utcnow()
+            created_at=datetime.utcnow(),
         )
 
     def test_service_initialization(self):
@@ -53,10 +54,6 @@ class TestQuestionCardService:
         assert question_card_service is not None
         assert isinstance(question_card_service, QuestionCardService)
         assert question_card_service.MAX_IMPORTANT_ELEMENTS == 3
-
-
-
-
 
     def test_element_text_dict(self):
         """Test extracting text from dict element."""
@@ -103,7 +100,7 @@ class TestQuestionCardService:
         """Test basic coverage rule normalization."""
         coverage_rule = {
             "semanticAnchors": ["goal", "target", "objective"],
-            "mustMentionElements": ["Revenue growth", "Market expansion"]
+            "mustMentionElements": ["Revenue growth", "Market expansion"],
         }
 
         normalized = question_card_service.normalize_coverage_rule_for_important_elements(
@@ -120,8 +117,8 @@ class TestQuestionCardService:
             "semanticAnchors": [],
             "mustMentionElements": [
                 {"text": "1. Revenue growth", "required": True},
-                {"text": "2. Market expansion", "required": False}
-            ]
+                {"text": "2. Market expansion", "required": False},
+            ],
         }
 
         normalized = question_card_service.normalize_coverage_rule_for_important_elements(
@@ -135,13 +132,7 @@ class TestQuestionCardService:
     def test_normalize_coverage_rule_max_elements(self):
         """Test that normalization respects MAX_IMPORTANT_ELEMENTS."""
         coverage_rule = {
-            "mustMentionElements": [
-                "Element 1",
-                "Element 2",
-                "Element 3",
-                "Element 4",
-                "Element 5"
-            ]
+            "mustMentionElements": ["Element 1", "Element 2", "Element 3", "Element 4", "Element 5"]
         }
 
         normalized = question_card_service.normalize_coverage_rule_for_important_elements(
@@ -161,10 +152,7 @@ class TestQuestionCardService:
 
     def test_normalize_coverage_rule_no_elements(self):
         """Test normalization with no must mention elements."""
-        coverage_rule = {
-            "semanticAnchors": ["test"],
-            "mustMentionElements": []
-        }
+        coverage_rule = {"semanticAnchors": ["test"], "mustMentionElements": []}
 
         normalized = question_card_service.normalize_coverage_rule_for_important_elements(
             coverage_rule
@@ -178,8 +166,8 @@ class TestQuestionCardService:
             "mustMentionElements": [
                 "Revenue growth",
                 "1. Revenue growth",  # Duplicate with numbering
-                "revenue growth",      # Duplicate case variation
-                "Market expansion"
+                "revenue growth",  # Duplicate case variation
+                "Market expansion",
             ]
         }
 
@@ -199,7 +187,7 @@ class TestQuestionCardService:
                 {
                     "text": "Revenue",
                     "aliases": ["income", "earnings"],
-                    "subpoints": ["Q1 target", "Q2 target"]
+                    "subpoints": ["Q1 target", "Q2 target"],
                 }
             ]
         }
@@ -216,7 +204,7 @@ class TestQuestionCardService:
         coverage_rule = {
             "mustMentionElements": [
                 {"text": "Required element", "required": True},
-                {"text": "Optional element", "required": False}
+                {"text": "Optional element", "required": False},
             ]
         }
 
@@ -231,7 +219,7 @@ class TestQuestionCardService:
         """Test using semantic anchors when no mustMentionElements."""
         coverage_rule = {
             "semanticAnchors": ["goal", "objective", "target"],
-            "mustMentionElements": []
+            "mustMentionElements": [],
         }
 
         normalized = question_card_service.normalize_coverage_rule_for_important_elements(
@@ -244,15 +232,7 @@ class TestQuestionCardService:
 
     def test_normalize_coverage_rule_filters_empty_elements(self):
         """Test that empty elements are filtered out."""
-        coverage_rule = {
-            "mustMentionElements": [
-                "Valid element",
-                "",
-                "   ",
-                None,
-                "Another valid"
-            ]
-        }
+        coverage_rule = {"mustMentionElements": ["Valid element", "", "   ", None, "Another valid"]}
 
         normalized = question_card_service.normalize_coverage_rule_for_important_elements(
             coverage_rule
@@ -268,7 +248,7 @@ class TestQuestionCardService:
             "mustMentionElements": [
                 "Element with (parentheses)",
                 "Element with [brackets]",
-                "Element with 「quotes」"
+                "Element with 「quotes」",
             ]
         }
 
@@ -285,7 +265,7 @@ class TestQuestionCardService:
             "mustMentionElements": [
                 "String element",
                 {"text": "Dict element", "required": True},
-                "Another string"
+                "Another string",
             ]
         }
 
@@ -295,7 +275,6 @@ class TestQuestionCardService:
 
         elements = normalized.get("mustMentionElements", [])
         assert len(elements) == 3
-
 
     def test_element_text_with_empty_dict(self):
         """Test extracting text from dict without text key."""

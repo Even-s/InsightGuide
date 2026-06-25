@@ -4,6 +4,7 @@ Tests the deterministic state machine for card state transitions.
 """
 
 import pytest
+
 from app.services.answer_evaluation_engine import AnswerEvaluationEngine
 
 
@@ -13,7 +14,14 @@ class TestReduceState:
     def setup_method(self):
         self.engine = AnswerEvaluationEngine()
 
-    def _judgment(self, confidence=0.0, is_covered=False, evidence_quote="", missing=None, response_status="responded"):
+    def _judgment(
+        self,
+        confidence=0.0,
+        is_covered=False,
+        evidence_quote="",
+        missing=None,
+        response_status="responded",
+    ):
         return {
             "confidence": confidence,
             "is_covered": is_covered,
@@ -50,7 +58,7 @@ class TestReduceState:
     def test_high_confidence_with_all_conditions_sufficient(self):
         state, _act, _comp = self.engine._reduce_state(
             "pending",
-            self._judgment(confidence=0.8, is_covered=True, evidence_quote="原文", missing=[])
+            self._judgment(confidence=0.8, is_covered=True, evidence_quote="原文", missing=[]),
         )
         assert state == "sufficient"
 
@@ -59,28 +67,30 @@ class TestReduceState:
     def test_high_confidence_without_evidence_not_sufficient(self):
         state, _act, _comp = self.engine._reduce_state(
             "pending",
-            self._judgment(confidence=0.9, is_covered=True, evidence_quote="", missing=[])
+            self._judgment(confidence=0.9, is_covered=True, evidence_quote="", missing=[]),
         )
         assert state == "probably_sufficient"
 
     def test_high_confidence_without_is_covered_not_sufficient(self):
         state, _act, _comp = self.engine._reduce_state(
             "pending",
-            self._judgment(confidence=0.9, is_covered=False, evidence_quote="有證據", missing=[])
+            self._judgment(confidence=0.9, is_covered=False, evidence_quote="有證據", missing=[]),
         )
         assert state == "probably_sufficient"
 
     def test_high_confidence_with_missing_elements_not_sufficient(self):
         state, _act, _comp = self.engine._reduce_state(
             "pending",
-            self._judgment(confidence=0.9, is_covered=True, evidence_quote="有證據", missing=["c1"])
+            self._judgment(
+                confidence=0.9, is_covered=True, evidence_quote="有證據", missing=["c1"]
+            ),
         )
         assert state == "probably_sufficient"
 
     def test_confidence_below_07_not_sufficient(self):
         state, _act, _comp = self.engine._reduce_state(
             "pending",
-            self._judgment(confidence=0.65, is_covered=True, evidence_quote="有", missing=[])
+            self._judgment(confidence=0.65, is_covered=True, evidence_quote="有", missing=[]),
         )
         assert state == "probably_sufficient"
 
@@ -90,16 +100,14 @@ class TestReduceState:
         state, _act, _comp = self.engine._reduce_state(
             "pending",
             self._judgment(confidence=0.9, is_covered=True, evidence_quote="有", missing=[]),
-            is_partial=True
+            is_partial=True,
         )
         assert state == "probably_sufficient"
         assert _comp <= 0.80
 
     def test_partial_can_reach_probably_sufficient(self):
         state, _act, _comp = self.engine._reduce_state(
-            "pending",
-            self._judgment(confidence=0.5),
-            is_partial=True
+            "pending", self._judgment(confidence=0.5), is_partial=True
         )
         assert state == "probably_sufficient"
 
@@ -110,7 +118,9 @@ class TestReduceState:
         assert state == "listening"
 
     def test_cannot_go_back_from_probably_to_listening(self):
-        state, _act, _comp = self.engine._reduce_state("probably_sufficient", self._judgment(confidence=0.1))
+        state, _act, _comp = self.engine._reduce_state(
+            "probably_sufficient", self._judgment(confidence=0.1)
+        )
         assert state == "probably_sufficient"
 
     def test_cannot_go_back_from_sufficient(self):
@@ -120,7 +130,7 @@ class TestReduceState:
     def test_probably_sufficient_can_advance_to_sufficient(self):
         state, _act, _comp = self.engine._reduce_state(
             "probably_sufficient",
-            self._judgment(confidence=0.9, is_covered=True, evidence_quote="有", missing=[])
+            self._judgment(confidence=0.9, is_covered=True, evidence_quote="有", missing=[]),
         )
         assert state == "sufficient"
 
@@ -138,7 +148,7 @@ class TestReduceState:
     def test_confidence_exactly_07_with_all_conditions_sufficient(self):
         state, _act, _comp = self.engine._reduce_state(
             "pending",
-            self._judgment(confidence=0.7, is_covered=True, evidence_quote="有", missing=[])
+            self._judgment(confidence=0.7, is_covered=True, evidence_quote="有", missing=[]),
         )
         assert state == "sufficient"
 
@@ -159,7 +169,7 @@ class TestReduceStateAccumulation:
                 "missing_element_ids": ["c1"],
                 "covered_element_ids": ["c0"],
                 "response_status": "responded",
-            }
+            },
         )
         assert state == "probably_sufficient"
 
@@ -173,6 +183,6 @@ class TestReduceStateAccumulation:
                 "missing_element_ids": ["c0"],
                 "covered_element_ids": [],
                 "response_status": "responded",
-            }
+            },
         )
         assert state == "probably_sufficient"

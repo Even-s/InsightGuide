@@ -3,12 +3,13 @@ Unit tests for BRD PDF Export Service
 Tests PDF generation functionality using ReportLab.
 """
 
-import pytest
 from datetime import datetime
 from io import BytesIO
 
+import pytest
+
+from app.models.brd import BRDDraft, BRDStatus, Requirement, RequirementPriority, RequirementType
 from app.services.brd_pdf_export_service import brd_pdf_export_service
-from app.models.brd import BRDDraft, Requirement, BRDStatus, RequirementType, RequirementPriority
 
 
 class TestBRDPDFExportService:
@@ -28,35 +29,35 @@ class TestBRDPDFExportService:
             business_objectives=[
                 "Increase conversion rate by 20%",
                 "Reduce page load time by 50%",
-                "Support mobile-first design"
+                "Support mobile-first design",
             ],
             success_criteria=[
                 "95% customer satisfaction score",
                 "Page load time under 2 seconds",
-                "Mobile traffic increases by 30%"
+                "Mobile traffic increases by 30%",
             ],
             stakeholders=[
                 {"role": "Product Owner", "name": "Jane Smith"},
-                {"role": "Tech Lead", "name": "John Doe"}
+                {"role": "Tech Lead", "name": "John Doe"},
             ],
             assumptions=[
                 "Budget approved for Q3",
                 "Team available for 3 months",
-                "Third-party API access confirmed"
+                "Third-party API access confirmed",
             ],
             constraints=[
                 "Must maintain backward compatibility",
                 "Limited to current tech stack",
-                "Go-live deadline: Dec 31"
+                "Go-live deadline: Dec 31",
             ],
             risks=[
                 {
                     "description": "Third-party API downtime",
-                    "mitigation": "Implement fallback mechanism and caching"
+                    "mitigation": "Implement fallback mechanism and caching",
                 }
             ],
             generated_at=datetime(2026, 6, 10, 10, 0, 0),
-            generation_duration_seconds=45
+            generation_duration_seconds=45,
         )
         return brd
 
@@ -75,8 +76,8 @@ class TestBRDPDFExportService:
                 acceptance_criteria=[
                     "Users can log in with email/password",
                     "OAuth2 providers supported (Google, Facebook)",
-                    "Session timeout after 30 minutes"
-                ]
+                    "Session timeout after 30 minutes",
+                ],
             ),
             Requirement(
                 id="req-2",
@@ -86,11 +87,7 @@ class TestBRDPDFExportService:
                 type=RequirementType.FUNCTIONAL,
                 priority=RequirementPriority.MUST_HAVE,
                 user_story="As a shopper, I want to manage my cart easily so that I can adjust my order",
-                acceptance_criteria=[
-                    "Add items to cart",
-                    "Update quantities",
-                    "Remove items"
-                ]
+                acceptance_criteria=["Add items to cart", "Update quantities", "Remove items"],
             ),
             Requirement(
                 id="req-3",
@@ -101,16 +98,16 @@ class TestBRDPDFExportService:
                 priority=RequirementPriority.SHOULD_HAVE,
                 acceptance_criteria=[
                     "95th percentile load time under 2s",
-                    "CDN configured for static assets"
-                ]
-            )
+                    "CDN configured for static assets",
+                ],
+            ),
         ]
 
     def test_service_initialization(self):
         """Test that the service initializes correctly."""
         assert brd_pdf_export_service is not None
-        assert hasattr(brd_pdf_export_service, 'generate_pdf')
-        assert hasattr(brd_pdf_export_service, 'styles')
+        assert hasattr(brd_pdf_export_service, "generate_pdf")
+        assert hasattr(brd_pdf_export_service, "styles")
 
     def test_generate_pdf_returns_bytesio(self, sample_brd):
         """Test that PDF generation returns a BytesIO object."""
@@ -122,7 +119,7 @@ class TestBRDPDFExportService:
         # Check that buffer contains data
         content = result.read()
         assert len(content) > 0
-        assert content.startswith(b'%PDF')  # PDF magic number
+        assert content.startswith(b"%PDF")  # PDF magic number
 
     def test_generate_pdf_with_requirements(self, sample_brd, sample_requirements):
         """Test PDF generation with requirements."""
@@ -135,7 +132,7 @@ class TestBRDPDFExportService:
         assert len(content) > 0
 
         # Verify it's a valid PDF
-        assert content.startswith(b'%PDF')
+        assert content.startswith(b"%PDF")
 
     def test_generate_pdf_with_minimal_data(self):
         """Test PDF generation with minimal required data."""
@@ -145,7 +142,7 @@ class TestBRDPDFExportService:
             user_id="user-min",
             status=BRDStatus.COMPLETED,
             title="Minimal BRD",
-            requirements=[]
+            requirements=[],
         )
 
         result = brd_pdf_export_service.generate_pdf(minimal_brd)
@@ -153,7 +150,7 @@ class TestBRDPDFExportService:
         assert isinstance(result, BytesIO)
         content = result.read()
         assert len(content) > 0
-        assert content.startswith(b'%PDF')
+        assert content.startswith(b"%PDF")
 
     def test_generate_pdf_all_sections(self, sample_brd, sample_requirements):
         """Test that all BRD sections are included when data is present."""
@@ -169,7 +166,7 @@ class TestBRDPDFExportService:
     def test_pdf_with_special_characters(self, sample_brd):
         """Test PDF generation with special characters in text."""
         sample_brd.title = "BRD with Special Chars: <>&\"'"
-        sample_brd.executive_summary = "Summary with special chars: <tag> & \"quote\""
+        sample_brd.executive_summary = 'Summary with special chars: <tag> & "quote"'
 
         result = brd_pdf_export_service.generate_pdf(sample_brd)
 
@@ -200,7 +197,7 @@ class TestBRDPDFExportService:
                 title=f"Requirement {i}",
                 description=f"Description for requirement {i}",
                 type=RequirementType.FUNCTIONAL,
-                priority=RequirementPriority.SHOULD_HAVE
+                priority=RequirementPriority.SHOULD_HAVE,
             )
             requirements.append(req)
 
@@ -239,7 +236,7 @@ class TestBRDPDFExportService:
             executive_summary=None,
             project_overview=None,
             generated_at=None,
-            requirements=[]
+            requirements=[],
         )
 
         result = brd_pdf_export_service.generate_pdf(brd)
@@ -271,7 +268,7 @@ class TestBRDPDFExportService:
             RequirementType.NON_FUNCTIONAL,
             RequirementType.BUSINESS,
             RequirementType.USER,
-            RequirementType.TECHNICAL
+            RequirementType.TECHNICAL,
         ]
 
         for i, req_type in enumerate(types):
@@ -281,7 +278,7 @@ class TestBRDPDFExportService:
                 title=f"{req_type.value} Requirement",
                 description=f"Description for {req_type.value}",
                 type=req_type,
-                priority=RequirementPriority.MUST_HAVE
+                priority=RequirementPriority.MUST_HAVE,
             )
             requirements.append(req)
 
@@ -312,8 +309,8 @@ class TestBRDPDFExportService:
         """Test that custom paragraph styles are defined."""
         styles = brd_pdf_export_service.styles
 
-        assert 'CustomTitle' in styles
-        assert 'CustomHeading1' in styles
-        assert 'CustomHeading2' in styles
-        assert 'CustomBody' in styles
-        assert 'CustomBullet' in styles
+        assert "CustomTitle" in styles
+        assert "CustomHeading1" in styles
+        assert "CustomHeading2" in styles
+        assert "CustomBody" in styles
+        assert "CustomBullet" in styles

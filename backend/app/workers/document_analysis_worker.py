@@ -1,24 +1,26 @@
 """Worker for AI-powered document analysis and question card generation."""
 
-from app.workers.celery_app import celery_app
+import logging
+import re
+from datetime import datetime
+
 from app.db.session import SessionLocal
 from app.models.document import Document
 from app.models.section import Section
 from app.services.openai_service import openai_service
-# from app.services.document_service import document_service  # Circular import - not used
-from app.services.section_service import section_service
 from app.services.question_card_service import question_card_service
 from app.services.s3_service import s3_service
-from datetime import datetime
-import logging
-import re
+
+# from app.services.document_service import document_service  # Circular import - not used
+from app.services.section_service import section_service
+from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
 
 
 def _snake_to_camel(name: str) -> str:
-    components = name.split('_')
-    return components[0] + ''.join(x.title() for x in components[1:])
+    components = name.split("_")
+    return components[0] + "".join(x.title() for x in components[1:])
 
 
 def _convert_keys_to_camel(obj):
@@ -44,10 +46,11 @@ def analyze_document(self, document_id: str):
     db = SessionLocal()
 
     try:
-        from app.services.event_service import event_service
+        import uuid
+
         from app.models.interview_theme import InterviewTheme
         from app.models.question_card import QuestionCard
-        import uuid
+        from app.services.event_service import event_service
 
         # 1. Load document
         document = db.query(Document).filter(Document.id == document_id).first()
@@ -83,11 +86,14 @@ def analyze_document(self, document_id: str):
         # 3. Phase 1: Generate interview themes from full document
         logger.info("Phase 1: Generating interview themes...")
         try:
-            event_service.publish_sync(document_id, {
-                'type': 'ANALYSIS_PROGRESS',
-                'message': '正在分析文件，產生訪談單元...',
-                'phase': 'themes',
-            })
+            event_service.publish_sync(
+                document_id,
+                {
+                    "type": "ANALYSIS_PROGRESS",
+                    "message": "正在分析文件，產生訪談單元...",
+                    "phase": "themes",
+                },
+            )
         except Exception:
             pass
 
@@ -139,10 +145,13 @@ def analyze_document(self, document_id: str):
         logger.info(f"Created {len(created_themes)} interview themes")
 
         try:
-            event_service.publish_sync(document_id, {
-                'type': 'THEMES_CREATED',
-                'theme_count': len(created_themes),
-            })
+            event_service.publish_sync(
+                document_id,
+                {
+                    "type": "THEMES_CREATED",
+                    "theme_count": len(created_themes),
+                },
+            )
         except Exception:
             pass
 
@@ -157,25 +166,30 @@ def analyze_document(self, document_id: str):
                 logger.info(f"Generating cards for theme {theme.theme_number}: {theme.title}")
 
                 try:
-                    event_service.publish_sync(document_id, {
-                        'type': 'ANALYSIS_PROGRESS',
-                        'message': f'正在為「{theme.title}」產生提問重點...',
-                        'phase': 'cards',
-                        'current_theme': theme_index + 1,
-                        'total_themes': total_themes,
-                        'percentage': int((theme_index + 1) / total_themes * 100),
-                    })
+                    event_service.publish_sync(
+                        document_id,
+                        {
+                            "type": "ANALYSIS_PROGRESS",
+                            "message": f"正在為「{theme.title}」產生提問重點...",
+                            "phase": "cards",
+                            "current_theme": theme_index + 1,
+                            "total_themes": total_themes,
+                            "percentage": int((theme_index + 1) / total_themes * 100),
+                        },
+                    )
                 except Exception:
                     pass
 
                 # Collect source section text
                 source_text_parts = []
-                for sec_id in (theme.source_section_ids or []):
+                for sec_id in theme.source_section_ids or []:
                     sec = db.query(Section).filter(Section.id == sec_id).first()
                     if sec and sec.extracted_text:
                         source_text_parts.append(f"### {sec.title or ''}\n{sec.extracted_text}")
 
-                source_sections_text = "\n\n".join(source_text_parts) if source_text_parts else full_text[:4000]
+                source_sections_text = (
+                    "\n\n".join(source_text_parts) if source_text_parts else full_text[:4000]
+                )
 
                 # Call OpenAI to generate cards for this theme
                 cards_result = openai_service.generate_theme_question_cards(
@@ -195,15 +209,21 @@ def analyze_document(self, document_id: str):
                 for card_index, card_data in enumerate(cards_data):
                     try:
                         raw_importance = card_data.get("importance", "should")
-                        importance = "must" if raw_importance in ("must", "high", "critical") else "should"
+                        importance = (
+                            "must" if raw_importance in ("must", "high", "critical") else "should"
+                        )
 
                         raw_coverage = card_data.get("coverage_rule")
-                        coverage_rule = _convert_keys_to_camel(raw_coverage) if raw_coverage else {
-                            "semanticAnchors": [],
-                            "expectedKeywords": [],
-                            "mustMentionElements": [],
-                            "thresholds": {"probablySufficient": 0.65, "sufficient": 0.80}
-                        }
+                        coverage_rule = (
+                            _convert_keys_to_camel(raw_coverage)
+                            if raw_coverage
+                            else {
+                                "semanticAnchors": [],
+                                "expectedKeywords": [],
+                                "mustMentionElements": [],
+                                "thresholds": {"probablySufficient": 0.65, "sufficient": 0.80},
+                            }
+                        )
 
                         card_id = f"qcard_{uuid.uuid4().hex[:12]}"
                         card = QuestionCard(
@@ -213,7 +233,8 @@ def analyze_document(self, document_id: str):
                             section_id=first_source_section_id,
                             section_number=theme.theme_number,
                             focus_text=card_data.get("focus_text", ""),
-                            question_text=(card_data.get("question_text", "") or "")[:200] or "Untitled",
+                            question_text=(card_data.get("question_text", "") or "")[:200]
+                            or "Untitled",
                             question_type=card_data.get("question_type", "clarification"),
                             importance=importance,
                             coverage_rule=coverage_rule,
@@ -223,7 +244,12 @@ def analyze_document(self, document_id: str):
                             estimated_seconds=90,
                             order_index=card_index,
                             status="pending",
-                            ui={"color": "default", "isVisible": True, "isPinned": False, "displayMode": "full"},
+                            ui={
+                                "color": "default",
+                                "isVisible": True,
+                                "isPinned": False,
+                                "displayMode": "full",
+                            },
                             created_by="ai",
                             created_at=datetime.utcnow(),
                             updated_at=datetime.utcnow(),
@@ -232,25 +258,32 @@ def analyze_document(self, document_id: str):
                         total_cards += 1
 
                     except Exception as card_err:
-                        logger.error(f"Failed to create card for theme {theme.id}: {card_err}", exc_info=True)
+                        logger.error(
+                            f"Failed to create card for theme {theme.id}: {card_err}", exc_info=True
+                        )
                         continue
 
                 db.commit()
                 logger.info(f"Created {len(cards_data)} cards for theme {theme.title}")
 
                 try:
-                    event_service.publish_sync(document_id, {
-                        'type': 'THEME_CARDS_CREATED',
-                        'theme_id': theme.id,
-                        'theme_title': theme.title,
-                        'card_count': len(cards_data),
-                        'total_cards': total_cards,
-                    })
+                    event_service.publish_sync(
+                        document_id,
+                        {
+                            "type": "THEME_CARDS_CREATED",
+                            "theme_id": theme.id,
+                            "theme_title": theme.title,
+                            "card_count": len(cards_data),
+                            "total_cards": total_cards,
+                        },
+                    )
                 except Exception:
                     pass
 
             except Exception as theme_err:
-                logger.error(f"Failed to generate cards for theme {theme.id}: {theme_err}", exc_info=True)
+                logger.error(
+                    f"Failed to generate cards for theme {theme.id}: {theme_err}", exc_info=True
+                )
                 continue
 
         # 5. Finalize
@@ -261,6 +294,7 @@ def analyze_document(self, document_id: str):
         # Update prep session to ready
         try:
             from app.models.prep_session import PrepSession
+
             prep_session = db.query(PrepSession).filter(PrepSession.id == document_id).first()
             if prep_session and prep_session.status == "preparing":
                 prep_session.status = "ready"
@@ -276,12 +310,15 @@ def analyze_document(self, document_id: str):
         )
 
         try:
-            event_service.publish_sync(document_id, {
-                'type': 'ANALYSIS_COMPLETE',
-                'document_id': document_id,
-                'total_themes': len(created_themes),
-                'total_cards': total_cards,
-            })
+            event_service.publish_sync(
+                document_id,
+                {
+                    "type": "ANALYSIS_COMPLETE",
+                    "document_id": document_id,
+                    "total_themes": len(created_themes),
+                    "total_cards": total_cards,
+                },
+            )
         except Exception:
             pass
 
@@ -309,7 +346,9 @@ def analyze_document(self, document_id: str):
         db.close()
 
 
-def build_section_analysis_prompt(section_title: str, section_text: str, document_title: str) -> str:
+def build_section_analysis_prompt(
+    section_title: str, section_text: str, document_title: str
+) -> str:
     """
     Build a prompt for OpenAI to analyze a document section.
 
@@ -374,7 +413,7 @@ def analyze_section_with_retry(section_id: str, max_retries: int = 3) -> dict:
                     section_text=section.extracted_text,
                     section_title=section.title,
                     document_title=section.document.title if section.document else "Unknown",
-                    section_number=section.section_number
+                    section_number=section.section_number,
                 )
                 return {"status": "success", "result": analysis_result}
 
@@ -397,7 +436,11 @@ def _extract_sections_from_file(db, document: Document) -> list:
     from io import BytesIO
 
     try:
-        object_key = document.source_file_url.split("/insightguide-uploads/")[-1] if "insightguide-uploads/" in document.source_file_url else document.source_file_url
+        object_key = (
+            document.source_file_url.split("/insightguide-uploads/")[-1]
+            if "insightguide-uploads/" in document.source_file_url
+            else document.source_file_url
+        )
         file_content = s3_service.download_file(object_key)
 
         if isinstance(file_content, BytesIO):
@@ -448,7 +491,7 @@ def _parse_markdown_sections(text: str) -> list:
     current_lines = []
 
     for line in lines:
-        heading_match = re.match(r'^(#{1,3})\s+(.+)$', line)
+        heading_match = re.match(r"^(#{1,3})\s+(.+)$", line)
         if heading_match:
             if current_title and current_lines:
                 content = "\n".join(current_lines).strip()

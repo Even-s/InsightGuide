@@ -9,9 +9,8 @@ Phase 1: Card Role Targeting
 - Enables role-aware card filtering during interviews
 """
 
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 revision = '011_add_card_role_targeting'
 down_revision = '010_add_project_stakeholder_plan'

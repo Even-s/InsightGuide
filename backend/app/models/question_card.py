@@ -1,7 +1,8 @@
 """Question Card model."""
 
 from datetime import datetime
-from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, Text, JSON, Numeric, ARRAY
+
+from sqlalchemy import ARRAY, JSON, Column, DateTime, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base
@@ -14,7 +15,9 @@ class QuestionCard(Base):
 
     id = Column(String, primary_key=True)
     document_id = Column(String, ForeignKey("documents.id"), nullable=False, index=True)
-    interview_theme_id = Column(String, ForeignKey("interview_themes.id"), nullable=True, index=True)
+    interview_theme_id = Column(
+        String, ForeignKey("interview_themes.id"), nullable=True, index=True
+    )
     section_id = Column(String, ForeignKey("sections.id"), nullable=True, index=True)
     section_number = Column(Integer, nullable=True)
 
@@ -45,6 +48,18 @@ class QuestionCard(Base):
     # Relationships
     document = relationship("Document", back_populates="question_cards")
     section = relationship("Section", back_populates="question_cards")
-    interview_theme = relationship("InterviewTheme", back_populates="question_cards", foreign_keys=[interview_theme_id])
-    card_states = relationship("InterviewCardState", back_populates="question_card", cascade="all, delete-orphan", passive_deletes=True)
-    requirements = relationship("Requirement", back_populates="question_card", cascade="all, delete-orphan", passive_deletes=True)
+    interview_theme = relationship(
+        "InterviewTheme", back_populates="question_cards", foreign_keys=[interview_theme_id]
+    )
+    card_states = relationship(
+        "InterviewCardState",
+        back_populates="question_card",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    requirements = relationship(
+        "Requirement",
+        back_populates="question_card",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )

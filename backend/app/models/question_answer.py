@@ -1,7 +1,8 @@
 """Question Answer model - records actual answers provided during interview."""
 
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, Float, ForeignKey, Text, JSON
+
+from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, String, Text
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base
@@ -18,7 +19,9 @@ class QuestionAnswer(Base):
 
     id = Column(String, primary_key=True)
     session_id = Column(String, ForeignKey("interview_sessions.id"), nullable=False, index=True)
-    question_instance_id = Column(String, ForeignKey("question_instances.id"), nullable=False, index=True)
+    question_instance_id = Column(
+        String, ForeignKey("question_instances.id"), nullable=False, index=True
+    )
 
     answer_text = Column(Text, nullable=True)
     answer_summary = Column(Text, nullable=True)

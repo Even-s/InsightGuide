@@ -1,7 +1,8 @@
 """Question Instance model - records actual questions asked during interview."""
 
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, Integer, Float, ForeignKey, Text
+
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base
@@ -42,4 +43,6 @@ class QuestionInstance(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     # Relationships
-    answers = relationship("QuestionAnswer", back_populates="question_instance", cascade="all, delete-orphan")
+    answers = relationship(
+        "QuestionAnswer", back_populates="question_instance", cascade="all, delete-orphan"
+    )
