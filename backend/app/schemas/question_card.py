@@ -30,6 +30,17 @@ class SufficiencyThresholds(BaseModel):
     sufficient: float = 0.78
 
 
+class RubricCriterion(BaseModel):
+    """A single evaluation criterion compiled from coverage rule elements."""
+
+    id: str
+    description: str
+    type: str = "value_slot"
+    required: bool = True
+    critical: bool = False
+    weight: float = 1.0
+
+
 class CoverageRule(BaseModel):
     """Rules for determining if a question has been answered sufficiently."""
 
@@ -39,6 +50,9 @@ class CoverageRule(BaseModel):
     negativeSignals: List[str] = Field(default_factory=list)
     thresholds: SufficiencyThresholds = Field(default_factory=SufficiencyThresholds)
     scoringWeights: ScoringWeights = Field(default_factory=ScoringWeights)
+    rubricVersion: Optional[str] = None
+    answerTarget: Optional[str] = None
+    criteria: Optional[List[RubricCriterion]] = None
 
 
 class SufficiencyEvidence(BaseModel):
