@@ -196,25 +196,10 @@ class StakeholderCardGenerator:
 
         Returns None if no guide exists yet.
         """
-        project = db.query(Project).filter(Project.id == project_id).first()
-        if not project:
-            return None
-
-        stakeholder = (
-            db.query(StakeholderProfile)
-            .filter(StakeholderProfile.id == stakeholder_profile_id)
-            .first()
-        )
-        if not stakeholder:
-            return None
-
-        # Look for existing virtual document
-        document_title = f"{project.title} - {stakeholder.name} 訪談大綱"
         document = (
             db.query(Document)
             .filter(
-                Document.project_id == project_id,
-                Document.title == document_title,
+                Document.stakeholder_profile_id == stakeholder_profile_id,
                 Document.source_file_url == "generated",
             )
             .first()
@@ -259,14 +244,10 @@ class StakeholderCardGenerator:
         self, db: Session, project: Project, stakeholder: StakeholderProfile
     ) -> Document:
         """Get or create a virtual document for the stakeholder."""
-        document_title = f"{project.title} - {stakeholder.name} 訪談大綱"
-
-        # Check if already exists
         existing = (
             db.query(Document)
             .filter(
-                Document.project_id == project.id,
-                Document.title == document_title,
+                Document.stakeholder_profile_id == stakeholder.id,
                 Document.source_file_url == "generated",
             )
             .first()
@@ -275,11 +256,12 @@ class StakeholderCardGenerator:
         if existing:
             return existing
 
-        # Create new virtual document
+        document_title = f"{project.title} - {stakeholder.name} 訪談大綱"
         document = Document(
             id=f"doc_{uuid.uuid4().hex[:12]}",
             user_id=project.user_id,
             project_id=project.id,
+            stakeholder_profile_id=stakeholder.id,
             title=document_title,
             source_file_url="generated",
             file_type="generated",

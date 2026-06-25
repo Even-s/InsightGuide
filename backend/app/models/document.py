@@ -16,6 +16,9 @@ class Document(Base):
     id = Column(String, primary_key=True)
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     project_id = Column(String, ForeignKey("projects.id"), nullable=True, index=True)
+    stakeholder_profile_id = Column(
+        String, ForeignKey("stakeholder_profiles.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     title = Column(String, nullable=False)
     source_file_url = Column(Text, nullable=False)
     file_type = Column(String, nullable=False)  # pdf, docx, md, txt

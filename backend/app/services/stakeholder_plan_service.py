@@ -319,16 +319,10 @@ class StakeholderPlanService:
         from app.models.document import Document
         from app.services.document_service import DocumentService
 
-        project = db.query(Project).filter(Project.id == profile.project_id).first()
-        if not project:
-            return
-
-        document_title = f"{project.title} - {profile.name} 訪談大綱"
         document = (
             db.query(Document)
             .filter(
-                Document.project_id == project.id,
-                Document.title == document_title,
+                Document.stakeholder_profile_id == profile.id,
                 Document.source_file_url == "generated",
             )
             .first()
