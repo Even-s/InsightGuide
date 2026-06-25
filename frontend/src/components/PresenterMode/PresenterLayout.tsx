@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { apiClient } from '@/api/client'
-import { interviewAPI } from '@/api/interview'
 import { useInterviewSession } from '@/hooks/useInterviewSession'
 import { useResponsiveLayout } from '@/hooks/useResponsiveLayout'
 import { usePresenterSessionRefs } from '@/hooks/usePresenterSessionRefs'
@@ -12,6 +11,7 @@ import SessionHeader from './SessionHeader'
 import TranscriptDisplay from './TranscriptDisplay'
 import FollowupPromptPanel from './FollowupPromptPanel'
 import ThemeCardsList from './ThemeCardsList'
+import CandidateSuggestionBar from './CandidateSuggestionBar'
 import { formatThemeTitle } from '@/utils/interviewCopy'
 
 interface PresenterLayoutProps {
@@ -295,41 +295,14 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
             </button>
 
             <div className="min-h-0 flex-1 overflow-y-auto bg-cream-100 px-14 py-5">
-              {candidateCards.length > 0 && (
-                <div className="mx-auto max-w-3xl mb-4 rounded-xl border border-wood-200 bg-wood-50 p-3 shadow-natural animate-themeFadeIn">
-                  <p className="text-xs font-medium text-wood-500 mb-2">系統建議正在問的問題：</p>
-                  <div className="space-y-1.5">
-                    {candidateCards.map((c) => (
-                      <button
-                        key={c.cardId}
-                        onClick={() => {
-                          interviewAPI.confirmActiveCard(sessionId, c.cardId)
-                          setActiveCardId(c.cardId)
-                          setCandidateCards([])
-                          setBufferedAnswerCount(0)
-                        }}
-                        className="w-full text-left px-3 py-2 rounded-xl border border-wood-100 bg-white hover:bg-wood-50 hover:border-wood-300 transition-colors text-sm"
-                      >
-                        <span className="text-natural-700">{c.focusText || c.questionText}</span>
-                        <span className="ml-2 text-xs text-wood-400">{Math.round(c.score * 100)}%</span>
-                      </button>
-                    ))}
-                  </div>
-                  <div className="mt-2 flex items-center justify-between">
-                    <button
-                      onClick={() => { setCandidateCards([]); setBufferedAnswerCount(0) }}
-                      className="text-xs text-natural-400 hover:text-natural-600"
-                    >
-                      忽略
-                    </button>
-                    {bufferedAnswerCount > 0 && (
-                      <span className="text-xs text-wood-400">
-                        {bufferedAnswerCount} 句回答已暫存，選擇問題卡後將自動記錄
-                      </span>
-                    )}
-                  </div>
-                </div>
-              )}
+              <CandidateSuggestionBar
+                sessionId={sessionId}
+                candidateCards={candidateCards}
+                bufferedAnswerCount={bufferedAnswerCount}
+                setActiveCardId={setActiveCardId}
+                setCandidateCards={setCandidateCards}
+                setBufferedAnswerCount={setBufferedAnswerCount}
+              />
 
               {currentTheme ? (
                 <ThemeCardsList

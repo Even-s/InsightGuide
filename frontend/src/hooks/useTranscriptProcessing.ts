@@ -160,7 +160,6 @@ export function useTranscriptProcessing({
         console.error('Failed to save utterance:', err)
         setTranscriptionError(err instanceof Error ? err.message : 'Failed to save transcript')
       })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId, refs, candidateCards.length, onBufferedAnswer])
 
   const {

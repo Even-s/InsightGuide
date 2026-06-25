@@ -1,5 +1,6 @@
 import { renderHook, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import type { PresenterSessionRefs } from './usePresenterSessionRefs'
 import { useTranscriptProcessing } from './useTranscriptProcessing'
 
 const mockMatchPartialTranscript = vi.fn().mockResolvedValue(undefined)
@@ -39,13 +40,13 @@ vi.mock('@/components/PresenterMode/presenterUtils', () => ({
   getActiveCardId: () => 'card-1',
 }))
 
-function createMockRefs() {
+function createMockRefs(): PresenterSessionRefs {
   return {
     cardStatesRef: { current: [] },
     currentThemeRef: { current: { id: 'theme-1', themeNumber: 1, title: 'Test', cards: [] } },
     currentSectionRef: { current: null },
     isPresentingRef: { current: true },
-  } as any
+  } as unknown as PresenterSessionRefs
 }
 
 describe('useTranscriptProcessing', () => {

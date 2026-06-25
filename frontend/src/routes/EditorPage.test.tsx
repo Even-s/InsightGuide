@@ -1,6 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import type { DocumentStatus } from '@/api/documents'
 import EditorPage from './EditorPage'
 
 vi.mock('@/api/documents', () => ({
@@ -84,7 +85,7 @@ describe('EditorPage', () => {
       message: 'Analysis failed due to invalid format',
       costUsd: 0,
       aiUsage: {},
-    } as any)
+    } as DocumentStatus)
 
     renderEditorPage()
     await waitFor(() => {
@@ -99,7 +100,7 @@ describe('EditorPage', () => {
       status: 'analyzing',
       costUsd: 0,
       aiUsage: {},
-    } as any)
+    } as DocumentStatus)
 
     renderEditorPage()
     await waitFor(() => {

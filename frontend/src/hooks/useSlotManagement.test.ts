@@ -1,5 +1,6 @@
 import { renderHook, act } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import type { StakeholderPlan } from '@/api/projects'
 import { useSlotManagement } from './useSlotManagement'
 
 const mockSkipSlot = vi.fn().mockResolvedValue(undefined)
@@ -39,7 +40,7 @@ describe('useSlotManagement', () => {
 
   it('initializes with default state', () => {
     const { result } = renderHook(() =>
-      useSlotManagement({ projectId: 'proj-1', plan: mockPlan as any, loadData }),
+      useSlotManagement({ projectId: 'proj-1', plan: mockPlan as unknown as StakeholderPlan, loadData }),
     )
 
     expect(result.current.editingSlot).toBeNull()
@@ -50,7 +51,7 @@ describe('useSlotManagement', () => {
 
   it('handleSkipSlot calls API and reloads', async () => {
     const { result } = renderHook(() =>
-      useSlotManagement({ projectId: 'proj-1', plan: mockPlan as any, loadData }),
+      useSlotManagement({ projectId: 'proj-1', plan: mockPlan as unknown as StakeholderPlan, loadData }),
     )
 
     await act(async () => {
@@ -63,7 +64,7 @@ describe('useSlotManagement', () => {
 
   it('handleUnskipSlot calls API and reloads', async () => {
     const { result } = renderHook(() =>
-      useSlotManagement({ projectId: 'proj-1', plan: mockPlan as any, loadData }),
+      useSlotManagement({ projectId: 'proj-1', plan: mockPlan as unknown as StakeholderPlan, loadData }),
     )
 
     await act(async () => {
@@ -76,7 +77,7 @@ describe('useSlotManagement', () => {
 
   it('handleMoveSlot swaps slot order and calls reorder API', async () => {
     const { result } = renderHook(() =>
-      useSlotManagement({ projectId: 'proj-1', plan: mockPlan as any, loadData }),
+      useSlotManagement({ projectId: 'proj-1', plan: mockPlan as unknown as StakeholderPlan, loadData }),
     )
 
     await act(async () => {
@@ -89,7 +90,7 @@ describe('useSlotManagement', () => {
 
   it('handleMoveSlot does nothing when moving first slot up', async () => {
     const { result } = renderHook(() =>
-      useSlotManagement({ projectId: 'proj-1', plan: mockPlan as any, loadData }),
+      useSlotManagement({ projectId: 'proj-1', plan: mockPlan as unknown as StakeholderPlan, loadData }),
     )
 
     await act(async () => {
@@ -101,7 +102,7 @@ describe('useSlotManagement', () => {
 
   it('handleMoveSlot does nothing when moving last slot down', async () => {
     const { result } = renderHook(() =>
-      useSlotManagement({ projectId: 'proj-1', plan: mockPlan as any, loadData }),
+      useSlotManagement({ projectId: 'proj-1', plan: mockPlan as unknown as StakeholderPlan, loadData }),
     )
 
     await act(async () => {
@@ -113,7 +114,7 @@ describe('useSlotManagement', () => {
 
   it('handleDeleteSlot asks confirmation and calls API', async () => {
     const { result } = renderHook(() =>
-      useSlotManagement({ projectId: 'proj-1', plan: mockPlan as any, loadData }),
+      useSlotManagement({ projectId: 'proj-1', plan: mockPlan as unknown as StakeholderPlan, loadData }),
     )
 
     await act(async () => {
@@ -129,7 +130,7 @@ describe('useSlotManagement', () => {
     vi.mocked(globalThis.confirm).mockReturnValue(false)
 
     const { result } = renderHook(() =>
-      useSlotManagement({ projectId: 'proj-1', plan: mockPlan as any, loadData }),
+      useSlotManagement({ projectId: 'proj-1', plan: mockPlan as unknown as StakeholderPlan, loadData }),
     )
 
     await act(async () => {
@@ -141,7 +142,7 @@ describe('useSlotManagement', () => {
 
   it('handleAddSlot creates slot and resets form', async () => {
     const { result } = renderHook(() =>
-      useSlotManagement({ projectId: 'proj-1', plan: mockPlan as any, loadData }),
+      useSlotManagement({ projectId: 'proj-1', plan: mockPlan as unknown as StakeholderPlan, loadData }),
     )
 
     act(() => {
@@ -168,7 +169,7 @@ describe('useSlotManagement', () => {
 
   it('handleAddSlot does nothing with empty label', async () => {
     const { result } = renderHook(() =>
-      useSlotManagement({ projectId: 'proj-1', plan: mockPlan as any, loadData }),
+      useSlotManagement({ projectId: 'proj-1', plan: mockPlan as unknown as StakeholderPlan, loadData }),
     )
 
     await act(async () => {
@@ -180,7 +181,7 @@ describe('useSlotManagement', () => {
 
   it('handleDeleteProfile asks confirmation and calls API', async () => {
     const { result } = renderHook(() =>
-      useSlotManagement({ projectId: 'proj-1', plan: mockPlan as any, loadData }),
+      useSlotManagement({ projectId: 'proj-1', plan: mockPlan as unknown as StakeholderPlan, loadData }),
     )
 
     await act(async () => {
@@ -194,7 +195,7 @@ describe('useSlotManagement', () => {
 
   it('handleUpdateSlot updates and clears editing state', async () => {
     const { result } = renderHook(() =>
-      useSlotManagement({ projectId: 'proj-1', plan: mockPlan as any, loadData }),
+      useSlotManagement({ projectId: 'proj-1', plan: mockPlan as unknown as StakeholderPlan, loadData }),
     )
 
     act(() => {

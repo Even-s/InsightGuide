@@ -20,6 +20,16 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-opencc': ['opencc-js'],
+          'vendor-recharts': ['recharts'],
+        },
+      },
+    },
+  },
   test: {
     globals: true,
     environment: 'jsdom',
