@@ -12,6 +12,15 @@ from app.models.interview_session import InterviewCardState
 from app.models.live_utterance import LiveUtterance
 from app.models.question_card import QuestionCard
 from app.services.answer_completion_scorer import answer_completion_scorer
+from app.services.evaluation import (
+    derive_state_from_ledger,
+    is_question_like,
+    load_existing_evidence,
+    persist_criterion_evidence,
+    preserve_existing_followup_when_empty,
+    reduce_card_state,
+    should_skip_utterance,
+)
 from app.services.question_card_service import question_card_service
 from app.services.question_rubric_service import question_rubric_service
 
@@ -120,126 +129,6 @@ class AnswerEvaluationEngine:
 
         return sorted(covered_element_ids), sorted(missing_element_ids)
 
-    # High-confidence question detector: must have question signal AND lack answer signal
-    _QUESTION_ENDINGS = ("?", "？", "呢", "嗎", "嘛")
-    _QUESTION_MARKERS = (
-        "哪些",
-        "什麼",
-        "如何",
-        "為什麼",
-        "有沒有",
-        "是否",
-        "能否",
-        "怎麼",
-        "請問",
-        "想問",
-        "可不可以",
-        "你有",
-        "你會",
-    )
-    _ANSWER_MARKERS = (
-        "我們會",
-        "我們用",
-        "我們有",
-        "我會",
-        "我有",
-        "我遇到",
-        "之前有",
-        "當時",
-        "有一次",
-        "例如",
-        "像是",
-        "客戶要",
-        "客戶說",
-        "主管會",
-        "同事幫",
-        "遇到過",
-        "處理方式",
-        "解決方案",
-        "解決了",
-        "後來就",
-        "因為所以",
-        "結果是",
-        "通常會",
-        "其實是",
-        "我做的是",
-        "我的做法",
-        "我負責",
-    )
-
-    def _is_question_like(self, text: str) -> bool:
-        """High-confidence question detector.
-
-        Returns True only if the text has question markers AND lacks answer content markers.
-        This avoids blocking real answers that happen to contain question words.
-        """
-        stripped = text.strip()
-        if not stripped:
-            return False
-
-        has_question_signal = stripped.endswith(self._QUESTION_ENDINGS) or any(
-            marker in stripped for marker in self._QUESTION_MARKERS
-        )
-        if not has_question_signal:
-            return False
-
-        has_answer_content = any(marker in stripped for marker in self._ANSWER_MARKERS)
-        return not has_answer_content
-
-    # Filler patterns that should skip LLM evaluation
-    _FILLER_PATTERNS = frozenset(
-        [
-            "嗯",
-            "嗯嗯",
-            "好",
-            "好的",
-            "對",
-            "對對",
-            "是",
-            "是的",
-            "沒有",
-            "沒",
-            "嗯哼",
-            "喔",
-            "哦",
-            "啊",
-            "呃",
-            "那個",
-            "就是",
-            "然後",
-            "我想一下",
-            "等一下",
-            "讓我想想",
-            "稍等",
-            "ok",
-            "okay",
-            "yeah",
-            "yes",
-            "no",
-            "hmm",
-            "uh",
-            "right",
-            "sure",
-            "got it",
-            "i see",
-            "mm",
-        ]
-    )
-
-    def _should_skip_utterance(self, text: str) -> bool:
-        """Return True if utterance is too trivial to warrant LLM evaluation."""
-        stripped = text.strip()
-        if len(stripped) < 5:
-            return True
-        normalized = stripped.lower().rstrip("。，.!?！？⋯…")
-        if normalized in self._FILLER_PATTERNS:
-            return True
-        import re
-
-        if re.fullmatch(r"[\s\W]+", stripped):
-            return True
-        return False
-
     def process_utterance(
         self,
         db: Session,
@@ -254,7 +143,7 @@ class AnswerEvaluationEngine:
         Process a new utterance. Routes questions to cards; evaluates answers for completion.
         """
         try:
-            if self._should_skip_utterance(utterance_text):
+            if should_skip_utterance(utterance_text):
                 logger.info(
                     f"Skipping trivial utterance for session={session_id}: '{utterance_text[:30]}'"
                 )
@@ -266,7 +155,7 @@ class AnswerEvaluationEngine:
             )
 
             # Split: question → route to card; answer → evaluate completion
-            if self._is_question_like(utterance_text):
+            if is_question_like(utterance_text):
                 return self._route_question_to_card(
                     db, session_id, utterance_id, utterance_text, section_id, asked_card_id
                 )
@@ -1246,7 +1135,7 @@ class AnswerEvaluationEngine:
             covered, missing = [], []
 
         # Deterministic reducer with activation/completion separation
-        new_status, new_activation, new_completion = self._reduce_state(
+        new_status, new_activation, new_completion = reduce_card_state(
             current_status=old_status, judgment=judgment, is_partial=is_partial
         )
         # Scores only accumulate upward (never decrease)
@@ -1295,9 +1184,17 @@ class AnswerEvaluationEngine:
         # Skip for question-only turns — they activate cards but don't create progress
         response_status = judgment.get("response_status", "not_yet")
         criterion_evals = judgment.get("criterion_evaluations", [])
-        is_question_only = response_status in self._QUESTION_ONLY_STATUSES
+        _QUESTION_ONLY_STATUSES = frozenset(
+            [
+                "question_only",
+                "not_yet",
+                "not_started",
+                "clarification_question",
+            ]
+        )
+        is_question_only = response_status in _QUESTION_ONLY_STATUSES
         if criterion_evals and not is_question_only:
-            self._persist_criterion_evidence(
+            persist_criterion_evidence(
                 db=db,
                 session_id=card_state.session_id,
                 card_id=card.id,
@@ -1323,7 +1220,7 @@ class AnswerEvaluationEngine:
         card_state.completion_score = new_completion
         existing_evidence = card_state.evidence_transcript or ""
         card_state.evidence_transcript = f"{existing_evidence}\n{utterance_text}".strip()
-        judgment = self._preserve_existing_followup_when_empty(card_state.evidence, judgment)
+        judgment = preserve_existing_followup_when_empty(card_state.evidence, judgment)
         card_state.evidence = {
             "judgment": judgment,
             "utterance_id": utterance_id,
@@ -1367,238 +1264,6 @@ class AnswerEvaluationEngine:
             "judgment": judgment,
             "evaluation_seq": evaluation_seq,
         }
-
-    _QUESTION_ONLY_STATUSES = frozenset(
-        [
-            "question_only",
-            "not_yet",
-            "not_started",
-            "clarification_question",
-        ]
-    )
-
-    def _reduce_state(
-        self, current_status: str, judgment: dict, is_partial: bool = False
-    ) -> tuple[str, float, float]:
-        """Deterministic state reducer using activation/completion separation.
-
-        Returns (new_status, activation_score, completion_score).
-
-        activation_score: Is this card's topic being discussed? (0 or 1)
-        completion_score: How much of the criteria are answered? (0.0–1.0)
-
-        State mapping:
-        - activation=0, completion=0 → pending
-        - activation>0, completion=0 → listening (card glows, progress=0%)
-        - activation>0, completion>0 → probably_sufficient (progress bar)
-        - all gates met → sufficient
-        """
-        raw_confidence = judgment.get("sufficiency_score", None) or judgment.get("confidence", 0.0)
-        is_covered = judgment.get("is_sufficient", None) or judgment.get("is_covered", False)
-        has_evidence = bool(judgment.get("evidence_quote"))
-        missing = judgment.get("missing_element_ids", [])
-        response_status = judgment.get("response_status", "not_yet")
-        relation = judgment.get("relation", "irrelevant")
-
-        # Determine activation (topic detected?)
-        is_activated = (
-            raw_confidence > 0
-            or relation in ("answer", "tangential", "topic_mention")
-            or response_status == "question_only"
-        )
-        activation_score = 1.0 if is_activated else 0.0
-
-        # Determine completion (real answer evidence?)
-        completion_score = raw_confidence
-
-        # Question-only / non-answer turns: zero completion regardless of GPT score
-        if response_status in self._QUESTION_ONLY_STATUSES:
-            completion_score = 0.0
-
-        # Determine target state from activation + completion
-        if completion_score <= 0 and activation_score <= 0:
-            target = "pending"
-        elif completion_score <= 0:
-            target = "listening"
-        elif completion_score < 0.7:
-            target = "probably_sufficient"
-        elif is_covered and has_evidence and not missing:
-            target = "sufficient"
-        else:
-            target = "probably_sufficient"
-
-        # Constraints
-        if is_partial and target == "sufficient":
-            target = "probably_sufficient"
-            completion_score = min(completion_score, 0.80)
-
-        if not has_evidence and target == "sufficient":
-            target = "probably_sufficient"
-
-        # State can only move forward
-        STATE_ORDER = {"pending": 0, "listening": 1, "probably_sufficient": 2, "sufficient": 3}
-        current_order = STATE_ORDER.get(current_status, 0)
-        target_order = STATE_ORDER.get(target, 0)
-
-        if target_order < current_order:
-            target = current_status
-
-        return target, activation_score, completion_score
-
-    def _preserve_existing_followup_when_empty(
-        self,
-        existing_evidence: Optional[Dict[str, Any]],
-        judgment: Dict[str, Any],
-    ) -> Dict[str, Any]:
-        """Keep the last useful follow-up when a later judgment returns an empty one."""
-        next_followup = (
-            judgment.get("suggested_followup") or judgment.get("suggestedFollowup") or ""
-        )
-        if isinstance(next_followup, str) and next_followup.strip():
-            return judgment
-
-        if not isinstance(existing_evidence, dict):
-            return judgment
-
-        previous_followup = (
-            existing_evidence.get("suggested_followup")
-            or existing_evidence.get("suggestedFollowup")
-            or ""
-        )
-        previous_judgment = existing_evidence.get("judgment")
-        if not previous_followup and isinstance(previous_judgment, dict):
-            previous_followup = (
-                previous_judgment.get("suggested_followup")
-                or previous_judgment.get("suggestedFollowup")
-                or ""
-            )
-
-        if isinstance(previous_followup, str) and previous_followup.strip():
-            return {
-                **judgment,
-                "suggested_followup": previous_followup.strip(),
-            }
-
-        return judgment
-
-    def _persist_criterion_evidence(
-        self,
-        db: Session,
-        session_id: str,
-        card_id: str,
-        criterion_evaluations: List[Dict[str, Any]],
-        utterance_id: str,
-        utterance_text: str,
-        model: str,
-        evaluation_seq: int,
-    ) -> None:
-        """Write criterion-level evidence to the append-only ledger."""
-        from app.models.card_criterion_evidence import CardCriterionEvidence
-
-        skip_statuses = {"not_addressed"}
-        for crit_eval in criterion_evaluations:
-            status = crit_eval.get("status", "not_addressed")
-            if status in skip_statuses:
-                continue
-            evidence = CardCriterionEvidence(
-                id=f"cev_{uuid.uuid4().hex[:12]}",
-                session_id=session_id,
-                card_id=card_id,
-                criterion_id=crit_eval.get("criterion_id", ""),
-                utterance_id=utterance_id if not utterance_id.startswith("partial_") else None,
-                evaluation_turn_text=utterance_text[:500] if utterance_text else None,
-                status=status,
-                evidence_quote=(crit_eval.get("evidence_quotes") or [None])[0],
-                normalized_value=crit_eval.get("normalized_value"),
-                evaluator_confidence=crit_eval.get("evaluator_confidence"),
-                reason=crit_eval.get("reason"),
-                model=model,
-                evaluation_seq=evaluation_seq,
-                created_at=datetime.utcnow(),
-            )
-            db.add(evidence)
-
-    def _load_existing_evidence(
-        self,
-        db: Session,
-        session_id: str,
-        card_id: str,
-    ) -> Dict[str, str]:
-        """Load best evidence status per criterion from ledger. Returns {criterion_id: best_status}."""
-        from app.models.card_criterion_evidence import CardCriterionEvidence
-
-        rows = (
-            db.query(CardCriterionEvidence)
-            .filter(
-                CardCriterionEvidence.session_id == session_id,
-                CardCriterionEvidence.card_id == card_id,
-            )
-            .order_by(CardCriterionEvidence.evaluation_seq.desc())
-            .all()
-        )
-
-        STATUS_RANK = {
-            "satisfied": 5,
-            "partially_satisfied": 4,
-            "attempted_but_unresolved": 3,
-            "contradicted": 2,
-            "not_applicable": 1,
-            "not_addressed": 0,
-        }
-
-        best: Dict[str, str] = {}
-        for row in rows:
-            crit_id = row.criterion_id
-            if crit_id not in best:
-                best[crit_id] = row.status
-            else:
-                if STATUS_RANK.get(row.status, 0) > STATUS_RANK.get(best[crit_id], 0):
-                    best[crit_id] = row.status
-        return best
-
-    def _derive_state_from_ledger(
-        self,
-        db: Session,
-        session_id: str,
-        card_id: str,
-        rubric_criteria: List[Dict[str, Any]],
-        is_partial: bool = False,
-    ) -> tuple:
-        """Derive card state from evidence ledger using deterministic scorer.
-
-        Returns (state, completion_score).
-        """
-        evidence_statuses = self._load_existing_evidence(db, session_id, card_id)
-        if not evidence_statuses:
-            return ("pending", 0.0)
-
-        # Build criterion_evaluations structure for the scorer
-        criterion_evaluations = []
-        for crit in rubric_criteria:
-            crit_id = crit.get("id", "")
-            status = evidence_statuses.get(crit_id, "not_addressed")
-            criterion_evaluations.append(
-                {
-                    "criterion_id": crit_id,
-                    "status": status,
-                    "evidence_quotes": ["(from ledger)"] if status == "satisfied" else [],
-                }
-            )
-
-        completion_score = answer_completion_scorer.calculate_completion(
-            rubric_criteria, criterion_evaluations
-        )
-        is_sufficient = answer_completion_scorer.is_sufficient(
-            rubric_criteria, criterion_evaluations, completion_score
-        )
-        has_response = any(
-            e["status"] not in ("not_addressed", "not_applicable") for e in criterion_evaluations
-        )
-
-        state = answer_completion_scorer.determine_state(
-            completion_score, is_sufficient, has_response, is_partial
-        )
-        return (state, completion_score)
 
     def run_final_coverage(
         self,
@@ -1722,8 +1387,8 @@ class AnswerEvaluationEngine:
             else:
                 covered, missing = [], []
 
-            # Determine state using the same _reduce_state() method for consistency
-            state, _ = self._reduce_state(
+            # Determine state using the same reduce_card_state() method for consistency
+            state, _, _ = reduce_card_state(
                 current_status="pending",
                 judgment={
                     "confidence": ai_confidence,

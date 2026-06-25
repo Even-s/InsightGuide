@@ -11,6 +11,7 @@ import pytest
 from app.models.interview_session import InterviewCardState, InterviewSession
 from app.models.question_card import QuestionCard
 from app.services.answer_evaluation_engine import answer_evaluation_engine
+from app.services.evaluation import is_question_like, reduce_card_state
 
 
 class TestAnswerEvaluationEngine:
@@ -414,30 +415,30 @@ class TestQuestionGuardAndReduceState:
 
     def test_is_question_like_chinese_question_mark(self):
         assert (
-            answer_evaluation_engine._is_question_like("你有哪些情境是需要馬上有人幫忙的呢？")
+            is_question_like("你有哪些情境是需要馬上有人幫忙的呢？")
             is True
         )
 
     def test_is_question_like_english_question_mark(self):
-        assert answer_evaluation_engine._is_question_like("What scenarios need help?") is True
+        assert is_question_like("What scenarios need help?") is True
 
     def test_is_question_like_ne_ending(self):
-        assert answer_evaluation_engine._is_question_like("你覺得哪裡最需要改進呢") is True
+        assert is_question_like("你覺得哪裡最需要改進呢") is True
 
     def test_is_question_like_ma_ending(self):
-        assert answer_evaluation_engine._is_question_like("你有遇過這種情況嗎") is True
+        assert is_question_like("你有遇過這種情況嗎") is True
 
     def test_is_question_like_contains_marker(self):
-        assert answer_evaluation_engine._is_question_like("請問什麼時候會發生這個問題") is True
+        assert is_question_like("請問什麼時候會發生這個問題") is True
 
     def test_is_question_like_answer_not_detected(self):
         assert (
-            answer_evaluation_engine._is_question_like("我們主要用 PostgreSQL 處理這個流程")
+            is_question_like("我們主要用 PostgreSQL 處理這個流程")
             is False
         )
 
     def test_is_question_like_partial_answer_not_detected(self):
-        assert answer_evaluation_engine._is_question_like("最常遇到的情境是客戶突然改需求") is False
+        assert is_question_like("最常遇到的情境是客戶突然改需求") is False
 
     def test_reduce_state_question_only_caps_at_listening(self):
         """question_only response_status must not produce probably_sufficient."""
@@ -449,7 +450,7 @@ class TestQuestionGuardAndReduceState:
             "covered_element_ids": [],
             "response_status": "question_only",
         }
-        state, _act, _comp = answer_evaluation_engine._reduce_state("pending", judgment)
+        state, _act, _comp = reduce_card_state("pending", judgment)
         assert state == "listening"
         assert _comp == 0.0
 
@@ -463,7 +464,7 @@ class TestQuestionGuardAndReduceState:
             "covered_element_ids": [],
             "response_status": "not_yet",
         }
-        state, _act, _comp = answer_evaluation_engine._reduce_state("pending", judgment)
+        state, _act, _comp = reduce_card_state("pending", judgment)
         assert state == "listening"
 
     def test_reduce_state_responded_allows_probably_sufficient(self):
@@ -476,7 +477,7 @@ class TestQuestionGuardAndReduceState:
             "covered_element_ids": [],
             "response_status": "responded",
         }
-        state, _act, _comp = answer_evaluation_engine._reduce_state("pending", judgment)
+        state, _act, _comp = reduce_card_state("pending", judgment)
         assert state == "probably_sufficient"
 
     def test_reduce_state_question_only_does_not_create_50_percent_progress(self):
@@ -489,7 +490,7 @@ class TestQuestionGuardAndReduceState:
             "covered_element_ids": ["criterion_0"],
             "response_status": "question_only",
         }
-        state, _act, _comp = answer_evaluation_engine._reduce_state("pending", judgment)
+        state, _act, _comp = reduce_card_state("pending", judgment)
         assert state == "listening"
         assert _comp == 0.0
 
@@ -500,7 +501,7 @@ class TestQuestionGuardAndReduceState:
         The _is_question_like guard + _reduce_state response_status gate must prevent this.
         """
         text = "你有哪些情境是需要馬上有人幫忙的呢？"
-        assert answer_evaluation_engine._is_question_like(text) is True
+        assert is_question_like(text) is True
 
         # Simulate what GPT might return (incorrectly)
         judgment_from_gpt = {
@@ -528,14 +529,14 @@ class TestQuestionGuardAndReduceState:
         if not has_satisfied:
             judgment_from_gpt["response_status"] = "question_only"
 
-        state, _act, _comp = answer_evaluation_engine._reduce_state("pending", judgment_from_gpt)
+        state, _act, _comp = reduce_card_state("pending", judgment_from_gpt)
         assert state == "listening"
         assert _comp == 0.0
 
     def test_real_partial_answer_still_advances(self):
         """A real partial answer should still move the card to probably_sufficient."""
         text = "最常遇到的情境是客戶突然改需求，我們來不及準備"
-        assert answer_evaluation_engine._is_question_like(text) is False
+        assert is_question_like(text) is False
 
         judgment = {
             "confidence": 0.5,
@@ -545,7 +546,7 @@ class TestQuestionGuardAndReduceState:
             "covered_element_ids": ["criterion_0"],
             "response_status": "responded",
         }
-        state, _act, _comp = answer_evaluation_engine._reduce_state("pending", judgment)
+        state, _act, _comp = reduce_card_state("pending", judgment)
         assert state == "probably_sufficient"
 
 
@@ -556,7 +557,7 @@ class TestActivationCompletionSeparation:
         """A question mentioning card keywords should activate the card (listening)
         but keep completion_score = 0."""
         text = "哈嘍你好，就是目前你在銷售簡報的過程當中啊,最常需要有人幫忙的環節是什麼情境呢？"
-        assert answer_evaluation_engine._is_question_like(text) is True
+        assert is_question_like(text) is True
 
         judgment = {
             "confidence": 0.5,
@@ -567,7 +568,7 @@ class TestActivationCompletionSeparation:
             "response_status": "question_only",
             "relation": "topic_mention",
         }
-        state, act, comp = answer_evaluation_engine._reduce_state("pending", judgment)
+        state, act, comp = reduce_card_state("pending", judgment)
         assert state == "listening"
         assert act == 1.0
         assert comp == 0.0
@@ -588,8 +589,10 @@ class TestActivationCompletionSeparation:
                 }
             ],
         }
-        # The _QUESTION_ONLY_STATUSES check in _update_card_state skips evidence write
-        assert judgment["response_status"] in answer_evaluation_engine._QUESTION_ONLY_STATUSES
+        # Question-only statuses are handled by reduce_card_state to produce zero completion
+        state, _act, comp = reduce_card_state("pending", judgment)
+        assert comp == 0.0  # question_only must produce zero completion
+        assert state in ("pending", "listening")  # can only activate, not complete
 
     def test_question_only_does_not_move_to_probably_sufficient(self):
         """A question-only turn must never move a card to probably_sufficient,
@@ -604,7 +607,7 @@ class TestActivationCompletionSeparation:
             "response_status": "question_only",
             "relation": "topic_mention",
         }
-        state, act, comp = answer_evaluation_engine._reduce_state("pending", judgment)
+        state, act, comp = reduce_card_state("pending", judgment)
         assert state == "listening"
         assert comp == 0.0
         assert act == 1.0
@@ -612,7 +615,7 @@ class TestActivationCompletionSeparation:
     def test_real_partial_answer_creates_completion_progress(self):
         """A real answer should create non-zero completion_score and progress."""
         text = "像是客戶現場要我馬上確認折扣，但我沒有權限，所以會需要主管立刻協助。"
-        assert answer_evaluation_engine._is_question_like(text) is False
+        assert is_question_like(text) is False
 
         judgment = {
             "confidence": 0.6,
@@ -623,7 +626,7 @@ class TestActivationCompletionSeparation:
             "response_status": "responded",
             "relation": "answer",
         }
-        state, act, comp = answer_evaluation_engine._reduce_state("pending", judgment)
+        state, act, comp = reduce_card_state("pending", judgment)
         assert state == "probably_sufficient"
         assert act == 1.0
         assert comp == 0.6
@@ -639,7 +642,7 @@ class TestActivationCompletionSeparation:
             "response_status": "question_only",
             "relation": "topic_mention",
         }
-        state, act, comp = answer_evaluation_engine._reduce_state("pending", judgment)
+        state, act, comp = reduce_card_state("pending", judgment)
         assert state == "listening"
         assert act == 1.0
         assert comp == 0.0
@@ -647,12 +650,12 @@ class TestActivationCompletionSeparation:
     def test_question_with_preamble_detected(self):
         """Interviewer-style question with preamble like '我想先詢問' should be detected."""
         text = "我想先詢問一下，就是目前你在銷售過程當中最常需要幫忙的是什麼情境呢？"
-        assert answer_evaluation_engine._is_question_like(text) is True
+        assert is_question_like(text) is True
 
     def test_answer_with_question_word_not_blocked(self):
         """Real answer containing question words should NOT be blocked."""
         text = "客戶問我能不能馬上給折扣，所以我會先確認公司政策，再找主管協助。"
-        assert answer_evaluation_engine._is_question_like(text) is False
+        assert is_question_like(text) is False
 
 
 class TestExclusiveActiveCardMode:
