@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { interviewAPI } from '@/api/interview'
 import { apiClient } from '@/api/client'
-import { useInterviewSession } from '@/hooks/usePresentationSession'
+import { useInterviewSession } from '@/hooks/useInterviewSession'
 import { useRealtimeTranscription } from '@/hooks/useRealtimeTranscription'
 import { useMediaRecorder } from '@/hooks/useMediaRecorder'
 import { useSSEEvents } from '@/hooks/useSSEEvents'

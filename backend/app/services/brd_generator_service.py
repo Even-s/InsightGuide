@@ -1,4 +1,12 @@
-"""BRD (Business Requirements Document) generation service."""
+"""BRD structured requirements extraction service.
+
+Used by: /api/brd/generate (BRDGenerationPage)
+Purpose: Extracts individual Requirement records from interview data using
+structured AI output. Produces editable requirements with priorities/categories.
+
+See also: brd_generation_service.py — evidence-based BRD + transcript/Q&A report
+used by InterviewReportPage and project-level BRD generation.
+"""
 
 import logging
 import uuid

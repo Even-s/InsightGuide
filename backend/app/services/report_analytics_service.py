@@ -46,7 +46,7 @@ class ReportAnalyticsService:
         timeline = self.generate_timeline(db, session_id)
         topic_analysis = self.analyze_topic_performance(db, session_id)
         performance_metrics = self.calculate_performance_metrics(db, session)
-        slide_timing = self.calculate_time_per_slide(db, session_id)
+        section_timing = self.calculate_time_per_slide(db, session_id)
         insights = self.generate_insights(coverage_stats, topic_analysis, performance_metrics)
 
         report = {
@@ -62,7 +62,7 @@ class ReportAnalyticsService:
             "timeline": timeline,
             "topic_analysis": topic_analysis,
             "performance_metrics": performance_metrics,
-            "slide_timing": slide_timing,
+            "section_timing": section_timing,
             "insights": insights,
         }
 
@@ -182,7 +182,7 @@ class ReportAnalyticsService:
                 "type": "utterance",
                 "description": f"Spoke: {utterance.transcript[:50]}...",
                 "transcript": utterance.transcript,
-                "slide_id": utterance.section_id,
+                "section_id": utterance.section_id,
             })
 
         # Get card state changes
@@ -331,46 +331,43 @@ class ReportAnalyticsService:
             Utterance.section_id.isnot(None)
         ).order_by(Utterance.created_at).all()
 
-        slide_times = {}
+        section_times = {}
 
         for i, utterance in enumerate(utterances):
-            slide_id = utterance.section_id
-            if slide_id not in slide_times:
-                slide_times[slide_id] = {
+            section_id = utterance.section_id
+            if section_id not in section_times:
+                section_times[section_id] = {
                     "first_utterance": utterance.created_at,
                     "last_utterance": utterance.created_at,
                     "utterance_count": 0,
                 }
 
-            slide_times[slide_id]["last_utterance"] = utterance.created_at
-            slide_times[slide_id]["utterance_count"] += 1
+            section_times[section_id]["last_utterance"] = utterance.created_at
+            section_times[section_id]["utterance_count"] += 1
 
-        # Calculate duration for each slide
-        slide_timing = []
+        section_timing = []
 
-        for slide_id, times in slide_times.items():
+        for section_id, times in section_times.items():
             duration = (
                 times["last_utterance"] - times["first_utterance"]
             ).total_seconds()
 
-            # Load slide info
-            slide = db.query(Section).filter(Section.id == slide_id).first()
+            section = db.query(Section).filter(Section.id == section_id).first()
 
-            slide_timing.append({
-                "slide_id": slide_id,
-                "slide_page": slide.page_number if slide else None,
-                "slide_title": slide.title if slide else None,
+            section_timing.append({
+                "section_id": section_id,
+                "section_page": section.page_number if section else None,
+                "section_title": section.title if section else None,
                 "duration_seconds": round(duration, 2),
                 "utterance_count": times["utterance_count"],
                 "first_utterance": times["first_utterance"].isoformat() + "Z",
                 "last_utterance": times["last_utterance"].isoformat() + "Z",
             })
 
-        # Sort by page number
-        slide_timing.sort(key=lambda x: x["slide_page"] or 0)
+        section_timing.sort(key=lambda x: x["section_page"] or 0)
 
-        logger.debug(f"Calculated timing for {len(slide_timing)} slides")
-        return slide_timing
+        logger.debug(f"Calculated timing for {len(section_timing)} sections")
+        return section_timing
 
     def generate_insights(
         self,

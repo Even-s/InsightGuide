@@ -1,4 +1,12 @@
-"""BRD and transcript generation service.
+"""BRD evidence-based generation service.
+
+Used by: /api/interview-sessions/{id}/outputs/generate (InterviewReportPage)
+         /api/projects/{id}/generate-brd (project-level BRD)
+Purpose: Generates BRD from card coverage evidence + transcript + Q/A reconstruction.
+Produces markdown reports with theme-organized sections and open issues.
+
+See also: brd_generator_service.py — structured requirement extraction
+used by BRDGenerationPage for editable individual requirements.
 
 After an interview session ends, this service generates:
 1. A BRD document based on structured evidence from card states
