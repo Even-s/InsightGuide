@@ -1,5 +1,11 @@
 # 訪談逐字稿、Q&A 與卡片主題匹配系統最終版改進計劃書
 
+> **Status: COMPLETED (2026-06)**
+>
+> The live/final transcript separation, card coverage evaluation with basis_type, Q/A reconstruction,
+> and utterance alignment have all been implemented. This document is retained as historical reference
+> for the design rationale behind the transcript and evaluation architecture.
+
 ## 1. 改版背景
 
 目前系統支援兩個主要能力：

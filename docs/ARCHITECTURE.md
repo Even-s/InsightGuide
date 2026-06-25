@@ -7,15 +7,15 @@ InsightGuide is an AI-powered requirements interview assistant. It helps Busines
 1. Analyzing uploaded BRD (Business Requirements Document) drafts
 2. Generating interview themes and question cards with coverage rules
 3. Providing real-time transcription and answer evaluation during interviews
-4. Producing post-interview BRD documents and analytics reports
+4. Producing post-interview insight memos, evidence matrices, and BRD documents
 
 ## System Stack
 
 | Layer | Technology |
 |-------|-----------|
-| Frontend | React 18 + TypeScript + Vite + Tailwind CSS |
+| Frontend | React 18 + TypeScript + Vite + Tailwind CSS + Zustand |
 | Backend | Python 3.11 + FastAPI + SQLAlchemy + Pydantic |
-| Database | PostgreSQL |
+| Database | PostgreSQL + pgvector |
 | Cache/PubSub | Redis (SSE events, Celery broker) |
 | Object Storage | MinIO (S3-compatible) |
 | AI | OpenAI GPT-5.x family + Realtime API (WebRTC) |
@@ -27,8 +27,8 @@ InsightGuide is an AI-powered requirements interview assistant. It helps Busines
 ┌─────────────────────────────────────────────────────────────────┐
 │                         Frontend (Vite)                          │
 │  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌───────────────┐   │
-│  │  Upload  │  │  Editor  │  │Interview │  │    Report     │   │
-│  │  Page    │  │  Page    │  │  Page    │  │    Page       │   │
+│  │  Upload  │  │  Editor  │  │Interview │  │   Project     │   │
+│  │  Page    │  │  Page    │  │  Page    │  │   Dashboard   │   │
 │  └────┬─────┘  └────┬─────┘  └────┬─────┘  └──────┬────────┘   │
 │       │              │             │               │             │
 │       │         REST API      WebRTC + REST    REST API          │
@@ -40,7 +40,8 @@ InsightGuide is an AI-powered requirements interview assistant. It helps Busines
 │  ┌─────────────────────────────────────────────────────────┐    │
 │  │                     API Routes                          │    │
 │  │  documents | prep-sessions | interview-sessions | brd   │    │
-│  │  question-cards | sections | realtime | events          │    │
+│  │  projects | evidence-matrix | insight-memos | realtime  │    │
+│  │  question-cards | sections | events | session-reports   │    │
 │  └──────────────────────────┬──────────────────────────────┘    │
 │                             │                                   │
 │  ┌──────────────────────────▼──────────────────────────────┐    │
@@ -51,6 +52,13 @@ InsightGuide is an AI-powered requirements interview assistant. It helps Busines
 │  │  │  ├─ Themes     │  │  ├─ Embedding Service       │    │    │
 │  │  │  ├─ Cards      │  │  ├─ Scoring Service         │    │    │
 │  │  │  └─ Coverage   │  │  └─ Hallucination Filter    │    │    │
+│  │  └────────────────┘  └─────────────────────────────┘    │    │
+│  │  ┌────────────────┐  ┌─────────────────────────────┐    │    │
+│  │  │ Post-Interview │  │ Project-Level Analysis      │    │    │
+│  │  │  ├─ Insight    │  │  ├─ Stakeholder Plan        │    │    │
+│  │  │  │   Memo      │  │  ├─ Evidence Matrix         │    │    │
+│  │  │  ├─ Q/A Recon  │  │  ├─ BRD Readiness          │    │    │
+│  │  │  └─ BRD Gen    │  │  └─ Role Filter            │    │    │
 │  │  └────────────────┘  └─────────────────────────────┘    │    │
 │  │  ┌────────────────┐  ┌─────────────────────────────┐    │    │
 │  │  │ BRD Generation │  │ Billing Service             │    │    │
@@ -83,13 +91,15 @@ User
  │    ├── InterviewTheme (1:N) — AI-generated interview units
  │    │    └── QuestionCard (1:N) — questions with coverage rules
  │    │         ├── InterviewCardState (1:N per session)
- │    │         └── CardCoverageEvaluation (1:N, basis_type: live|final)
+ │    │         ├── CardCoverageEvaluation (1:N, basis_type: live|final)
+ │    │         └── CardCriterionEvidence (1:N)
  │    ├── PrepSession (1:1) — preparation container
  │    │    └── InterviewSession (1:N) — actual interview runs
  │    │         ├── InterviewCardState (1:N)
  │    │         ├── LiveUtterance (1:N) — real-time provisional transcripts
  │    │         ├── FinalUtterance (1:N) — diarized official transcripts
  │    │         ├── UtteranceAlignment (1:N) — live↔final mapping
+ │    │         ├── TranscriptRevision (1:N) — transcript versions
  │    │         ├── QuestionInstance + QuestionAnswer (Q/A reconstruction)
  │    │         ├── InterviewBrief (0:1) — pre-interview guide
  │    │         ├── AIUsageEvent (1:N)
@@ -103,7 +113,7 @@ User
 ### 1. Document Upload & Analysis
 
 ```
-User uploads PDF/DOCX
+User uploads PDF/DOCX/Markdown
   → S3 storage
   → Celery worker: document_analysis_worker.py
     → Phase 1: generate_interview_themes() [GPT-4o]
@@ -160,26 +170,54 @@ User opens report page
   → Return structured result
 ```
 
+### 5. Post-Interview Pipeline
+
+```
+Interview ends
+  → Diarization (gpt-4o-transcribe) → FinalUtterances
+  → Alignment (live_utterances ↔ final_utterances)
+  → Q/A Reconstruction (question_instances + question_answers)
+  → Final Card Coverage Re-evaluation (basis_type='final')
+  → Insight Memo Generation
+    → Pain points, requirement candidates, constraints, unresolved questions
+  → Stakeholder Plan Update (dynamic interview suggestions)
+  → Evidence Matrix Update (if project-level)
+  → BRD Generation (from final evidence only)
+```
+
+### 6. Project-Level Analysis
+
+```
+Project Dashboard
+  ├── Stakeholder Plan (AI-suggested roles + status tracking)
+  ├── Interview Progress (sessions completed, memos generated)
+  ├── Evidence Matrix (cross-interview requirement deduplication)
+  │    ├── Validation status: candidate | validated | conflicted | needs_more_evidence
+  │    ├── Stakeholder agreement: unanimous | majority | single_source | conflicted
+  │    └── Missing validation tracking → drives interview suggestions
+  └── BRD Readiness (readiness_score 0-1, mode: full | partial | not_ready)
+       └── Generation gate: checks evidence sufficiency before BRD creation
+```
+
 ## Frontend Architecture
 
 ### Pages (Routes)
 
 | Route | Component | Purpose |
 |-------|-----------|---------|
-| `/projects` | ProjectListPage | Project hub, create/manage projects |
+| `/` | DocumentUploadPage | Upload requirement documents |
+| `/projects` | ProjectSessionsPage | Project-centric session management |
 | `/projects/:projectId` | ProjectDetailPage | Stakeholder plan, guides, readiness |
-| `/` or `/documents` | DocumentUploadPage | Upload requirement documents |
-| `/prep-sessions` | PrepSessionListPage | Manage all prep sessions |
+| `/projects/:projectId/evidence-matrix` | EvidenceMatrixPage | Cross-stakeholder requirement validation |
+| `/projects/:projectId/readiness` | BRDReadinessPage | BRD generation feasibility check |
+| `/prep-sessions` | PrepSessionListPage | Manage all prep sessions (admin) |
 | `/editor/:deckId` | EditorPage | Review/edit themes & question cards |
 | `/interview/:deckId` | PresenterPage | Live interview with transcription |
-| `/interview/:deckId/report/:sessionId` | InterviewReportPage | BRD + transcript output |
+| `/interview/session/:sessionId` | PresenterPage | Resume interview by session |
+| `/interview/:deckId/report/:sessionId` | InterviewReportPage | Post-interview analytics |
 | `/interview/:sessionId/brd` | BRDGenerationPage | Structured BRD editor |
 | `/sessions/:sessionId/insight-memo` | InsightMemoPage | Post-interview qualitative analysis |
-| `/projects/:projectId/evidence-matrix` | EvidenceMatrixPage | Cross-stakeholder validation |
-| `/projects/:projectId/readiness` | BRDReadinessPage | BRD generation feasibility |
-| `/projects/manage` | ProjectSessionsPage | Project-centric session view |
 | `/sessions/:sessionId/log` | SessionLogPage | Event timeline |
-| `/prompts` | PromptsPage | Prompt management (admin) |
 
 ### Key Hooks
 
@@ -187,8 +225,9 @@ User opens report page
 |------|---------|
 | `useRealtimeTranscription` | WebRTC connection to OpenAI Realtime API |
 | `usePresentationSession` | Interview session state, theme navigation |
-| `usePrepSessionEvents` | SSE subscription for document analysis progress |
+| `useSSEEvents` | SSE subscription for card state updates & analysis progress |
 | `useResponsiveLayout` | Adaptive layout for interview mode |
+| `useMediaRecorder` | Audio recording during interview for post-diarization |
 
 ### Real-time Communication
 
@@ -222,29 +261,28 @@ User opens report page
 | `insight_memo_service` | Post-interview qualitative analysis extraction |
 | `evidence_matrix_service` | Cross-interview requirement consolidation & deduplication |
 | `brd_readiness_service` | Readiness scoring before BRD generation |
+| `brd_readiness_evaluator` | Detailed readiness evaluation logic |
 | `stakeholder_card_generator` | Interview guide generation per stakeholder |
 
 ### Supporting Services
 
 | Service | Responsibility |
 |---------|---------------|
-| `embedding_service` | text-embedding-3-large for semantic similarity |
-| `scoring_service` | Confidence score normalization |
-| `hallucination_filter` | Validates AI outputs against source material |
+| `answer_completion_scorer` | Answer completeness scoring |
 | `billing_service` | Token/audio cost tracking per session and per document |
 | `s3_service` | MinIO file upload/download |
 | `prep_session_service` | Prep session lifecycle |
 | `question_card_service` | Card CRUD and reordering |
+| `question_rubric_service` | Question rubric management |
 | `ai_question_generator` | Coverage rules, target roles, suggested followup |
 | `diarize_service` | Post-interview speaker diarization |
 | `alignment_service` | Live↔final utterance mapping |
 | `qa_reconstruction_service` | Q/A pair extraction from transcript |
-| `prompt_registry_service` | Dynamic prompt management with version control |
 | `section_service` | Document section management |
 | `report_analytics_service` | Post-interview performance analytics |
 | `report_export_service` | Report export formatting |
 | `brd_pdf_export_service` | BRD to PDF conversion |
-| `session_cleanup` | Stale session cleanup |
+| `brd_generator_service` | BRD content generation logic |
 
 ## AI Model Usage
 
@@ -253,37 +291,9 @@ User opens report page
 | GPT-5.5 | Document section analysis (highest quality) | High (~10s) |
 | GPT-4o | Interview theme + question card generation | Medium (~5s) |
 | GPT-5.4-mini | Speaker classification, answer evaluation, semantic judging | Low (~1s) |
+| gpt-4o-transcribe | Post-interview diarization | Medium (~5-15s) |
 | gpt-realtime-whisper | Live audio transcription via WebRTC | Real-time |
 | text-embedding-3-large | Semantic similarity for card matching | Low (~200ms) |
-
-### 5. Post-Interview Pipeline
-
-```
-Interview ends
-  → Diarization (gpt-4o-transcribe) → FinalUtterances
-  → Alignment (live_utterances ↔ final_utterances)
-  → Q/A Reconstruction (question_instances + question_answers)
-  → Final Card Coverage Re-evaluation (basis_type='final')
-  → Insight Memo Generation
-    → Pain points, requirement candidates, constraints, unresolved questions
-  → Stakeholder Plan Update (dynamic interview suggestions)
-  → Evidence Matrix Update (if project-level)
-  → BRD Generation (from final evidence only)
-```
-
-### 6. Project-Level Analysis
-
-```
-Project Dashboard
-  ├── Stakeholder Plan (AI-suggested roles + status tracking)
-  ├── Interview Progress (sessions completed, memos generated)
-  ├── Evidence Matrix (cross-interview requirement deduplication)
-  │    ├── Validation status: candidate | validated | conflicted | needs_more_evidence
-  │    ├── Stakeholder agreement: unanimous | majority | single_source | conflicted
-  │    └── Missing validation tracking → drives interview suggestions
-  └── BRD Readiness (readiness_score 0-1, mode: full | partial | not_ready)
-       └── Generation gate: checks evidence sufficiency before BRD creation
-```
 
 ## Key Design Decisions
 
@@ -297,9 +307,13 @@ Project Dashboard
 
 5. **Coverage rules on cards**: Each question card has `semanticAnchors`, `expectedKeywords`, and `mustMentionElements` — enabling both AI and deterministic evaluation.
 
-6. **BRD caching**: Generated BRD documents are persisted to avoid non-deterministic regeneration on repeated page visits.
+6. **Live/Final transcript separation**: `live_utterances` for real-time provisional UI, `final_utterances` for official reports. Prevents provisional data from contaminating formal outputs.
 
-7. **Cascade deletion via Document**: Document is the aggregate root. Deleting it cascades to all related data (themes, cards, sessions, utterances, BRDs, billing events).
+7. **Project-level multi-interview architecture**: Projects contain stakeholder plans, evidence matrices, and readiness gates — enabling systematic requirements research across multiple interviews.
+
+8. **BRD caching**: Generated BRD documents are persisted to avoid non-deterministic regeneration on repeated page visits.
+
+9. **Cascade deletion via Document**: Document is the aggregate root. Deleting it cascades to all related data (themes, cards, sessions, utterances, BRDs, billing events).
 
 ## Directory Structure
 
@@ -307,12 +321,12 @@ Project Dashboard
 InsightGuide/
 ├── backend/
 │   ├── app/
-│   │   ├── api/routes/          # FastAPI route handlers
+│   │   ├── api/routes/          # FastAPI route handlers (14 files)
 │   │   ├── core/                # Config, security, logging
 │   │   ├── db/                  # SQLAlchemy session, Alembic migrations
-│   │   ├── models/              # SQLAlchemy ORM models
+│   │   ├── models/              # SQLAlchemy ORM models (25 files)
 │   │   ├── schemas/             # Pydantic request/response schemas
-│   │   ├── services/            # Business logic layer
+│   │   ├── services/            # Business logic layer (32 files)
 │   │   └── workers/             # Celery background tasks
 │   ├── scripts/                 # Utility scripts
 │   └── tests/                   # Pytest test suite
@@ -325,14 +339,19 @@ InsightGuide/
 │   │   │   ├── PresenterMode/   # Interview mode UI
 │   │   │   ├── SessionReport/   # Post-interview report
 │   │   │   └── sessions/        # Session management
-│   │   ├── hooks/               # Custom React hooks
-│   │   ├── routes/              # Page-level components
-│   │   ├── stores/              # State management
+│   │   ├── hooks/               # Custom React hooks (5 files)
+│   │   ├── routes/              # Page-level components (12 files)
+│   │   ├── stores/              # Zustand state management
 │   │   ├── types/               # TypeScript type definitions
 │   │   └── utils/               # Utility functions
 │   └── vite.config.ts
-└── scripts/
-    └── integration_tests/       # End-to-end test scripts
+├── docs/                        # Documentation
+│   ├── knowledge/               # AI model guides & feature docs
+│   └── ...
+├── scripts/
+│   └── integration_tests/       # End-to-end test scripts
+├── insightguide.sh              # Primary launch/management script
+└── docker-compose.yml           # Docker services configuration
 ```
 
 ## Infrastructure Dependencies
@@ -341,7 +360,7 @@ InsightGuide/
 |---------|-------------|---------|
 | FastAPI | 8002 | Backend API server |
 | Vite dev server | 5174 | Frontend dev server |
-| PostgreSQL | 5432 | Primary database |
+| PostgreSQL | 5432 | Primary database (with pgvector) |
 | Redis | 6379 | Event pub/sub + Celery broker |
-| MinIO | 9000 | S3-compatible object storage |
+| MinIO | 9000 (API) / 9001 (Console) | S3-compatible object storage |
 | OpenAI API | — | AI inference (external) |

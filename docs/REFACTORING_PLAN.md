@@ -1,5 +1,10 @@
 # InsightGuide 重構實行計劃書
 
+> **Status: COMPLETED (2026-06)**
+>
+> All 6 phases (Project → Stakeholder → RoleFilter → Brief → Memo → Matrix → Readiness) have been implemented.
+> This document is retained as historical reference for the design rationale behind the multi-interview architecture.
+
 ## 從「BRD 生成器」轉型為「需求研究工作台」
 
 ---

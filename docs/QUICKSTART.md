@@ -27,7 +27,20 @@ cd InsightGuide
 ./insightguide.sh launch
 ```
 
-腳本會自動啟動 Docker services、安裝依賴、執行 migrations、啟動後端 + Celery + 前端。
+腳本會自動啟動 Docker services、安裝依賴、執行 migrations、啟動後端 + Celery + 前端，並在完成後開啟瀏覽器。
+
+### 其他常用指令
+
+```bash
+./insightguide.sh            # 互動式控制中心
+./insightguide.sh status     # 檢查服務狀態與健康度
+./insightguide.sh restart    # 完整重啟所有服務
+./insightguide.sh logs       # 查看近期 log
+./insightguide.sh tail       # 持續追蹤 log
+./insightguide.sh stop       # 停止所有服務
+```
+
+macOS 使用者也可以雙擊 `InsightGuide.command` 以 Finder 啟動。
 
 ---
 
@@ -43,7 +56,7 @@ cp backend/.env.example backend/.env
 ### 2. Docker Services
 
 ```bash
-docker-compose -f docker-compose.full.yml up -d postgres redis minio
+docker-compose up -d
 ```
 
 ### 3. 後端
@@ -100,11 +113,22 @@ curl http://localhost:8002/health
 
 ## 使用流程
 
+### 單次訪談模式
+
 1. 上傳 BRD 文件（PDF / DOCX / Markdown）
 2. 等待 AI 分析產生訪談主題與問題卡
 3. 在編輯模式調整問題順序與重要性
 4. 進入訪談模式，開啟麥克風即時轉錄
 5. 訪談結束後查看報告與 BRD 草稿
+
+### 專案模式（多訪談整合）
+
+1. 建立專案，定義 BRD 目標與範圍
+2. 系統自動產生 Stakeholder Plan（建議角色槽位）
+3. 登錄受訪者，安排訪談
+4. 進行訪談，自動產生 Insight Memo
+5. 查看 Evidence Matrix（跨訪談需求整合）
+6. 確認 BRD Readiness 後生成 BRD
 
 ---
 
@@ -112,8 +136,10 @@ curl http://localhost:8002/health
 
 **Docker 無法啟動**：確認 Docker Desktop 正在運行，執行 `docker ps` 驗證。
 
-**資料庫連接失敗**：`docker-compose -f docker-compose.full.yml logs postgres` 查看日誌。
+**資料庫連接失敗**：`docker-compose logs postgres` 查看日誌。
 
 **OpenAI API 錯誤**：確認 `backend/.env` 中 `OPENAI_API_KEY` 已正確設定。
 
 **前端無法連接後端**：確認 `frontend/.env` 中 `VITE_API_URL=http://localhost:8002`。
+
+**insightguide.sh 無法執行**：執行 `chmod +x insightguide.sh`。
