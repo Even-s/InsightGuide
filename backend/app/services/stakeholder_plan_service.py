@@ -306,10 +306,35 @@ class StakeholderPlanService:
         if not profile:
             return False
         project_id = profile.project_id
+
+        self._delete_profile_guide(db, profile)
+
         db.delete(profile)
         db.commit()
         self._update_slot_statuses(db, project_id)
         return True
+
+    def _delete_profile_guide(self, db: Session, profile: StakeholderProfile) -> None:
+        """Delete the interview guide document associated with this profile."""
+        from app.models.document import Document
+        from app.services.document_service import DocumentService
+
+        project = db.query(Project).filter(Project.id == profile.project_id).first()
+        if not project:
+            return
+
+        document_title = f"{project.title} - {profile.name} 訪談大綱"
+        document = (
+            db.query(Document)
+            .filter(
+                Document.project_id == project.id,
+                Document.title == document_title,
+                Document.source_file_url == "generated",
+            )
+            .first()
+        )
+        if document:
+            DocumentService.delete_document(db, document.id, commit=False)
 
     def cancel_profile(self, db: Session, profile_id: str) -> Optional[StakeholderProfile]:
         return self.update_profile(db, profile_id, {"status": "unavailable"})
