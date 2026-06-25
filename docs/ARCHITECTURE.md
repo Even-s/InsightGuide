@@ -321,7 +321,7 @@ Project Dashboard
 InsightGuide/
 ├── backend/
 │   ├── app/
-│   │   ├── api/routes/          # FastAPI route handlers (14 files)
+│   │   ├── api/routes/          # FastAPI route handlers (19 files)
 │   │   ├── core/                # Config, security, logging
 │   │   ├── db/                  # SQLAlchemy session, Alembic migrations
 │   │   ├── models/              # SQLAlchemy ORM models (25 files)
@@ -339,8 +339,8 @@ InsightGuide/
 │   │   │   ├── PresenterMode/   # Interview mode UI
 │   │   │   ├── SessionReport/   # Post-interview report
 │   │   │   └── sessions/        # Session management
-│   │   ├── hooks/               # Custom React hooks (5 files)
-│   │   ├── routes/              # Page-level components (12 files)
+│   │   ├── hooks/               # Custom React hooks (13 files)
+│   │   ├── routes/              # Page-level components (13 files)
 │   │   ├── stores/              # Zustand state management
 │   │   ├── types/               # TypeScript type definitions
 │   │   └── utils/               # Utility functions

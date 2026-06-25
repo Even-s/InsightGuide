@@ -102,7 +102,7 @@ macOS 使用者也可以雙擊 `InsightGuide.command` 以 Finder 啟動。
 
 ## 前置需求
 
-- Node.js 18+
+- Node.js 20+
 - Python 3.11+
 - Docker & Docker Compose
 - LibreOffice（文件轉換）
