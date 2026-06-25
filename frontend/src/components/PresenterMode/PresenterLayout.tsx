@@ -1,26 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { interviewAPI } from '@/api/interview'
 import { apiClient } from '@/api/client'
+import { interviewAPI } from '@/api/interview'
 import { useInterviewSession } from '@/hooks/useInterviewSession'
-import { useRealtimeTranscription } from '@/hooks/useRealtimeTranscription'
-import { useMediaRecorder } from '@/hooks/useMediaRecorder'
-import { useSSEEvents } from '@/hooks/useSSEEvents'
 import { useResponsiveLayout } from '@/hooks/useResponsiveLayout'
+import { usePresenterSessionRefs } from '@/hooks/usePresenterSessionRefs'
+import { useCardEventHandlers } from '@/hooks/useCardEventHandlers'
+import { useTranscriptProcessing } from '@/hooks/useTranscriptProcessing'
 import type { CardState } from '@/types/interview'
 import LoadingSpinner from '@/components/common/LoadingSpinner'
 import SessionHeader from './SessionHeader'
 import TranscriptDisplay from './TranscriptDisplay'
 import AnimatedStrikeText from './AnimatedStrikeText'
 import FollowupPromptPanel from './FollowupPromptPanel'
-import { simplifiedToTraditional } from '@/utils/chineseConverter'
 import { formatFocusText, formatQuestionText, formatThemeTitle } from '@/utils/interviewCopy'
-import {
-  statusFromEvent,
-  getActiveCardId,
-  findAskedCard,
-  buildFollowupPrompt,
-  getEvidenceSuggestedFollowup,
-} from './presenterUtils'
 
 interface PresenterLayoutProps {
   sessionId: string
@@ -28,20 +20,9 @@ interface PresenterLayoutProps {
 }
 
 export default function PresenterLayout({ sessionId, documentId }: PresenterLayoutProps) {
-  const [cardStates, setCardStates] = useState<CardState[]>([])
-  const [, setCardsLoading] = useState(true)
-  const [transcriptHistory, setTranscriptHistory] = useState<string[]>([]) // 保留最近 3 句
-  const [pendingTranscript, setPendingTranscript] = useState('')
-  const [transcriptionError, setTranscriptionError] = useState<string | null>(null)
-  const [followupQueue, setFollowupQueue] = useState<string[]>([]) // queue of card IDs
-  const [skippedCards, setSkippedCards] = useState<Set<string>>(new Set())
   const [slideOrientation] = useState<'landscape' | 'portrait' | 'unknown'>('unknown')
-  const [isPreparingToPresent, setIsPreparingToPresent] = useState(false)
-  const hasConfirmedScriptPreview = true
-  const scriptReadiness = { isReady: true, isPreparing: false, error: null as string | null }
-
-  // 動態響應式佈局
   const { layoutConfig } = useResponsiveLayout(slideOrientation)
+  const hasRequestedInitialPreparationRef = useRef(false)
 
   const {
     session,
@@ -60,223 +41,64 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
     endSession,
   } = useInterviewSession(sessionId)
 
-  const { start: startRecording, stop: stopRecording } = useMediaRecorder()
-  const [isDiarizing, setIsDiarizing] = useState(false)
-  const [candidateCards, setCandidateCards] = useState<Array<{ cardId: string; questionText: string; focusText: string; score: number }>>([])
-  const [activeCardId, setActiveCardId] = useState<string | null>(null)
-  const [bufferedAnswerCount, setBufferedAnswerCount] = useState(0)
-  const recordingStartedAtRef = useRef<string | null>(null)
-  const finalRecordingBlobRef = useRef<Blob | null>(null)
-
-  const currentSectionRef = useRef(currentSection)
-  const currentThemeRef = useRef(currentTheme)
-  const cardStatesRef = useRef<CardState[]>([])
-  const isPresentingRef = useRef(false)
-  const hasRequestedInitialPreparationRef = useRef(false)
-  const partialTranscriptRef = useRef('')
-  const partialMatchTimeoutRef = useRef<number | null>(null)
-  const partialMatchInFlightRef = useRef(false)
-  const pendingPartialMatchRef = useRef<string | null>(null)
-  const lastPartialMatchTextRef = useRef('')
-
-  useEffect(() => {
-    currentSectionRef.current = currentSection
-    currentThemeRef.current = currentTheme
-  }, [currentSection, currentTheme])
-
-  useEffect(() => {
-    isPresentingRef.current = session?.status === 'interviewing'
-  }, [session?.status])
-
-  useEffect(() => {
-    cardStatesRef.current = cardStates
-  }, [cardStates])
-
-  useEffect(() => {
-    return () => {
-      if (partialMatchTimeoutRef.current) {
-        clearTimeout(partialMatchTimeoutRef.current)
-      }
-    }
-  }, [])
-
-  const loadCardStates = useCallback(async () => {
-    try {
-      setCardsLoading(true)
-      const states = await interviewAPI.getSessionCards(sessionId, documentId)
-      setCardStates(states)
-    } finally {
-      setCardsLoading(false)
-    }
-  }, [documentId, sessionId])
-
-  useEffect(() => {
-    loadCardStates()
-  }, [loadCardStates])
-
-  useSSEEvents(sessionId, {
-    onCardListening: (data) => updateCardFromEvent(data.card_id, statusFromEvent(data, 'listening'), data.confidence, data.evidence, data.evidenceTranscript),
-    onCardCovered: (data) => updateCardFromEvent(data.card_id, statusFromEvent(data, 'sufficient'), data.confidence, data.evidence, data.evidenceTranscript),
-    onCardProbablyCovered: (data) => updateCardFromEvent(data.card_id, statusFromEvent(data, 'probably_sufficient'), data.confidence, data.evidence, data.evidenceTranscript),
-    onCardAtRisk: (data) => updateCardFromEvent(data.card_id, statusFromEvent(data, 'at_risk'), data.confidence, data.evidence, data.evidenceTranscript),
-    onCardSkipped: (data) => updateCardFromEvent(data.card_id, statusFromEvent(data, 'skipped'), data.confidence, data.evidence, data.evidenceTranscript),
-    onQuestionCardCandidates: (data) => {
-      setCandidateCards(data.candidates)
-    },
-    onActiveCardChanged: (data) => {
-      setActiveCardId(data.card_id)
-      setCandidateCards([])
-      setBufferedAnswerCount(0)
-      updateCardFromEvent(data.card_id, 'listening', 0, undefined, undefined)
-    },
-    onCardManuallyCompleted: (data) => {
-      updateCardFromEvent(data.card_id, statusFromEvent(data, 'sufficient'), 1.0, data.evidence, data.evidenceTranscript)
-      if (activeCardId === data.card_id) setActiveCardId(null)
-    },
-    onActiveCardCleared: () => {
-      setActiveCardId(null)
-    },
-    onMatchingError: (data) => {
-      console.error('Topic matching error received:', data)
-      setTranscriptionError(`Topic matching failed: ${data.error}`)
-    },
-  })
-
-  const handleTranscriptCompleted = useCallback((payload: {
-    transcript: string
-    itemId?: string
-    startedAt?: string
-    endedAt?: string
-  }) => {
-    let text = payload.transcript.trim()
-    const activeTheme = currentThemeRef.current
-    const activeSlide = currentSectionRef.current
-    const activeId = activeTheme?.id ?? activeSlide?.id
-
-    partialTranscriptRef.current = ''
-    lastPartialMatchTextRef.current = ''
-    pendingPartialMatchRef.current = null
-    if (partialMatchTimeoutRef.current) {
-      clearTimeout(partialMatchTimeoutRef.current)
-      partialMatchTimeoutRef.current = null
-    }
-
-    if (!text || !activeId || !isPresentingRef.current) {
-      setPendingTranscript('')
-      return
-    }
-
-    text = simplifiedToTraditional(text)
-
-    setTranscriptHistory((prev) => {
-      const newHistory = [...prev, text]
-      return newHistory.slice(-3)
-    })
-    setPendingTranscript('')
-    setTranscriptionError(null)
-
-    // Detect if this utterance is asking a specific card (for question routing)
-    const askedCard = findAskedCard(text, cardStatesRef.current, activeId)
-
-    interviewAPI.createUtterance(
-      sessionId,
-      text,
-      activeId,
-      payload.itemId,
-      payload.startedAt,
-      payload.endedAt,
-      askedCard ?? undefined,
-    )
-      .then(() => {
-        // Track buffered answers when candidates are showing (waiting for user to pick a card)
-        if (candidateCards.length > 0 && !askedCard) {
-          setBufferedAnswerCount(prev => prev + 1)
-        }
-      })
-      .catch((err) => {
-        console.error('Failed to save utterance:', err)
-        setTranscriptionError(err instanceof Error ? err.message : 'Failed to save transcript')
-      })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sessionId])
-
-  const sendPartialTranscriptMatch = useCallback((text: string, itemId?: string) => {
-    const activeTheme = currentThemeRef.current
-    const activeSlide = currentSectionRef.current
-    const activeId = activeTheme?.id ?? activeSlide?.id
-    const trimmed = text.trim()
-    const activeCardId = getActiveCardId(cardStatesRef.current, activeId)
-
-    if (!activeId || !activeCardId || !isPresentingRef.current || trimmed.length < 12) return
-    if (trimmed === lastPartialMatchTextRef.current) return
-    if (trimmed.length - lastPartialMatchTextRef.current.length < 8) return
-
-    if (partialMatchInFlightRef.current) {
-      pendingPartialMatchRef.current = trimmed
-      return
-    }
-
-    partialMatchInFlightRef.current = true
-    lastPartialMatchTextRef.current = trimmed
-
-    interviewAPI.matchPartialTranscript(sessionId, trimmed, activeId, activeCardId, itemId)
-      .catch((err) => {
-        console.warn('[PresenterLayout] Partial transcript matching failed:', err)
-      })
-      .finally(() => {
-        partialMatchInFlightRef.current = false
-        const pending = pendingPartialMatchRef.current
-        pendingPartialMatchRef.current = null
-        if (pending && pending !== lastPartialMatchTextRef.current) {
-          sendPartialTranscriptMatch(pending, itemId)
-        }
-      })
-  }, [sessionId])
-
-  const schedulePartialTranscriptMatch = useCallback((text: string, itemId?: string) => {
-    if (partialMatchTimeoutRef.current) {
-      clearTimeout(partialMatchTimeoutRef.current)
-    }
-
-    partialMatchTimeoutRef.current = window.setTimeout(() => {
-      sendPartialTranscriptMatch(text, itemId)
-    }, 800)
-  }, [sendPartialTranscriptMatch])
+  const refs = usePresenterSessionRefs(
+    [] as CardState[], // initial, will sync via cardStates effect below
+    currentTheme,
+    currentSection,
+    session?.status,
+  )
 
   const {
-    status: realtimeStatus,
-    isRecording,
-    isTranscribing,
-    startTranscription,
-    stopTranscription,
-    error: realtimeError,
-  } = useRealtimeTranscription({
-    onMediaStreamReady: (stream) => {
-      if (import.meta.env.VITE_DISABLE_DIARIZATION === 'true') return
-      recordingStartedAtRef.current = recordingStartedAtRef.current ?? new Date().toISOString()
-      startRecording(stream)
-    },
-    onSpeechStarted: () => {
-      setTranscriptionError(null)
-      setPendingTranscript('正在聽取...')
-      partialTranscriptRef.current = ''
-    },
-    onTranscriptDelta: (delta, itemId) => {
-      const convertedDelta = simplifiedToTraditional(delta)
-      setPendingTranscript((previous) => {
-        const nextTranscript =
-          !previous || previous === '正在聽取...' || previous === '轉錄中...'
-            ? convertedDelta
-            : `${previous}${convertedDelta}`
-
-        partialTranscriptRef.current = nextTranscript
-        schedulePartialTranscriptMatch(nextTranscript, itemId)
-        return nextTranscript
-      })
-    },
-    onTranscriptCompleted: handleTranscriptCompleted,
+    cardStates,
+    candidateCards,
+    activeCardId,
+    bufferedAnswerCount,
+    followupPrompt,
+    followupQueueLength,
+    setActiveCardId,
+    setCandidateCards,
+    setBufferedAnswerCount,
+    handleSkipFollowup,
+    updateCardFromEvent,
+  } = useCardEventHandlers({
+    sessionId,
+    documentId,
+    currentThemeId: currentTheme?.id,
+    currentSectionId: currentSection?.id,
   })
 
+  // Keep cardStatesRef in sync
+  useEffect(() => {
+    refs.cardStatesRef.current = cardStates
+  }, [cardStates, refs.cardStatesRef])
+
+  const {
+    transcriptHistory,
+    pendingTranscript,
+    transcriptionError,
+    isPreparingToPresent,
+    isDiarizing,
+    realtimeStatus,
+    isRecording,
+    isTranscribing,
+    realtimeError,
+    recordingStartedAtRef,
+    finalRecordingBlobRef,
+    setIsDiarizing,
+    setTranscriptionError,
+    setIsPreparingToPresent,
+    startTranscription,
+    stopTranscription,
+    stopRecording,
+  } = useTranscriptProcessing({
+    sessionId,
+    refs,
+    candidateCards,
+    onBufferedAnswer: () => setBufferedAnswerCount(prev => prev + 1),
+  })
+
+  const scriptReadiness = { isReady: true, isPreparing: false, error: null as string | null }
+  const hasConfirmedScriptPreview = true
 
   const handleStartRequested = useCallback(async () => {
     if (session?.status === 'interviewing') return
@@ -284,10 +106,7 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
     setIsPreparingToPresent(true)
 
     try {
-      // Start session first (so isPresentingRef becomes true)
       await startPresenting()
-
-      // Then start transcription
       if (realtimeStatus === 'idle' || realtimeStatus === 'error') {
         startTranscription()
       }
@@ -297,7 +116,7 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
     } finally {
       setIsPreparingToPresent(false)
     }
-  }, [realtimeStatus, session?.status, startPresenting, startTranscription])
+  }, [realtimeStatus, session?.status, startPresenting, startTranscription, setTranscriptionError, setIsPreparingToPresent])
 
   useEffect(() => {
     if (hasRequestedInitialPreparationRef.current) return
@@ -309,8 +128,7 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
     }
 
     setIsPreparingToPresent(false)
-  }, [currentSection, session])
-
+  }, [currentSection, session, setIsPreparingToPresent])
 
   useEffect(() => {
     if (session?.status === 'interviewing' && realtimeStatus === 'idle') {
@@ -321,11 +139,10 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
       stopTranscription()
     }
 
-    // If session ended, show error message
     if (session?.status === 'ended' && realtimeStatus !== 'idle') {
       setTranscriptionError('Session has ended. Please start a new session to continue.')
     }
-  }, [isPreparingToPresent, realtimeStatus, session?.status, startTranscription, stopTranscription])
+  }, [isPreparingToPresent, realtimeStatus, session?.status, startTranscription, stopTranscription, setTranscriptionError])
 
   useEffect(() => {
     if (!isPreparingToPresent) return
@@ -365,48 +182,9 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
     scriptReadiness.isReady,
     startPresenting,
     startTranscription,
+    setIsPreparingToPresent,
+    setTranscriptionError,
   ])
-
-  // Followup queue: add new listening/probably_sufficient cards that have followups
-  useEffect(() => {
-    const activeSectionId = currentTheme?.id ?? currentSection?.id
-    if (!activeSectionId) return
-
-    const cardsWithFollowup = cardStates.filter((cs) => {
-      const qc = cs.questionCard
-      const isInSection = qc.interviewThemeId === activeSectionId || qc.sectionId === activeSectionId
-      const hasFollowup = cs.evidence && getEvidenceSuggestedFollowup(cs.evidence as Record<string, unknown>)
-      const needsFollowup = cs.status === 'listening' || cs.status === 'probably_sufficient'
-      return isInSection && needsFollowup && hasFollowup && !skippedCards.has(cs.questionCard.id)
-    })
-
-    setFollowupQueue((prev) => {
-      const existingSet = new Set(prev)
-      const newIds = cardsWithFollowup
-        .map((cs) => cs.questionCard.id)
-        .filter((id) => !existingSet.has(id))
-      if (newIds.length === 0) return prev
-      return [...prev, ...newIds]
-    })
-  }, [cardStates, currentTheme?.id, currentSection?.id, skippedCards])
-
-  // Current followup: first in queue that still needs followup
-  const currentFollowupCard = followupQueue
-    .filter((id) => !skippedCards.has(id))
-    .map((id) => cardStates.find((cs) => cs.questionCard.id === id))
-    .find((cs) => cs && (cs.status === 'listening' || cs.status === 'probably_sufficient'))
-
-  const followupPrompt = currentFollowupCard
-    ? buildFollowupPrompt([currentFollowupCard], currentTheme?.id ?? currentSection?.id)
-    : null
-
-  const followupQueueLength = followupQueue.filter((id) => !skippedCards.has(id)).length
-
-  const handleSkipFollowup = useCallback(() => {
-    if (currentFollowupCard) {
-      setSkippedCards((prev) => new Set([...prev, currentFollowupCard.questionCard.id]))
-    }
-  }, [currentFollowupCard])
 
   if (isLoading) {
     return <LoadingSpinner label="載入演講 Session..." />
@@ -494,7 +272,6 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
       ) : (
         <>
           <main className="relative flex min-h-0 flex-1 overflow-hidden">
-            {/* Left arrow: previous theme */}
             <button
               type="button"
               onClick={previousTheme}
@@ -506,7 +283,6 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
               </svg>
             </button>
 
-            {/* Right arrow: next theme */}
             <button
               type="button"
               onClick={nextTheme}
@@ -518,10 +294,7 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
               </svg>
             </button>
 
-            {/* Questions with inline strikethrough status */}
             <div className="min-h-0 flex-1 overflow-y-auto bg-cream-100 px-14 py-5">
-
-              {/* Candidate suggestion bar */}
               {candidateCards.length > 0 && (
                 <div className="mx-auto max-w-3xl mb-4 rounded-xl border border-wood-200 bg-wood-50 p-3 shadow-natural animate-themeFadeIn">
                   <p className="text-xs font-medium text-wood-500 mb-2">系統建議正在問的問題：</p>
@@ -551,184 +324,22 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
                     </button>
                     {bufferedAnswerCount > 0 && (
                       <span className="text-xs text-wood-400">
-                        💬 {bufferedAnswerCount} 句回答已暫存，選擇問題卡後將自動記錄
+                        {bufferedAnswerCount} 句回答已暫存，選擇問題卡後將自動記錄
                       </span>
                     )}
                   </div>
                 </div>
               )}
 
-
               {currentTheme ? (
-                <div key={currentTheme.id} className="mx-auto max-w-3xl space-y-4 animate-themeFadeIn">
-                  {(() => {
-                    const cardStateMap = new Map(cardStates.map(cs => [cs.questionCard.id, cs.status]))
-                    const completedStatuses = new Set(['sufficient', 'covered', 'manually_checked'])
-
-                    const groups: { focus: string; cards: typeof currentTheme.cards }[] = []
-                    let cur: typeof groups[number] | null = null
-                    for (const card of currentTheme.cards) {
-                      const f = card.focusText || ''
-                      if (!cur || cur.focus !== f) {
-                        cur = { focus: f, cards: [card] }
-                        groups.push(cur)
-                      } else {
-                        cur.cards.push(card)
-                      }
-                    }
-
-                    return groups.map((group, gi) => {
-                      const groupCardStates = group.cards.map(c => {
-                        const cs = cardStates.find(s => s.questionCard.id === c.id)
-                        return { card: c, status: cardStateMap.get(c.id) ?? 'pending', confidence: cs?.confidence ?? 0 }
-                      })
-                      const groupDone = groupCardStates.every(c => completedStatuses.has(c.status))
-                      const groupConfidenceSum = groupCardStates.reduce((sum, c) => sum + (completedStatuses.has(c.status) ? 1 : (c.confidence ?? 0)), 0)
-                      const groupProgress = groupCardStates.length > 0 ? Math.round((groupConfidenceSum / groupCardStates.length) * 100) : 0
-
-                      return (
-                        <div key={gi} className={`relative rounded-2xl border shadow-sm overflow-hidden ${groupDone ? 'border-sage-200' : 'border-cream-300'}`}>
-                          {/* Water fill background for the whole group */}
-                          <div
-                            className="pointer-events-none absolute inset-x-0 bottom-0 z-0 transition-[height] duration-1000 ease-out"
-                            style={{ height: `${groupProgress}%` }}
-                            aria-hidden="true"
-                          >
-                            <div className={`absolute inset-0 ${groupDone ? 'bg-sage-100/60' : 'bg-sage-50/50'}`} />
-                          </div>
-
-                          {/* Content on top */}
-                          <div className="relative z-10">
-                            {group.focus && (
-                              <div className={`border-b px-5 py-2.5 ${groupDone ? 'border-sage-200' : 'border-sage-100'}`}>
-                                <div className="flex items-center justify-between">
-                                  <AnimatedStrikeText
-                                    text={`${groupDone ? '✓ ' : ''}${formatFocusText(group.focus)}`}
-                                    done={groupDone}
-                                    className={`text-sm font-semibold transition-colors duration-500 ease-out ${groupDone ? 'text-sage-500' : 'text-sage-400'}`}
-                                  />
-                                </div>
-                              </div>
-                            )}
-                            <div className="space-y-3 p-3">
-                              {groupCardStates.map(({ card, status, confidence }, qi) => {
-                                const isDone = completedStatuses.has(status)
-                                const isActive = status === 'listening' || status === 'probably_sufficient'
-                                const itemProgress = isDone ? 100 : status === 'listening' ? 0 : Math.round((confidence ?? 0) * 100)
-
-                                return (
-                                  <div key={card.id} className={`rounded-2xl border bg-white p-4 shadow-sm transition-[border-color,background-color,box-shadow,opacity,transform] duration-500 ease-out ${isActive ? 'scale-[1.01] border-yellow-300 bg-yellow-50 shadow-yellow-100' : isDone ? 'border-sage-200 bg-sage-50/60' : 'border-cream-300'}`}>
-                                    <div className="mb-3 flex items-center justify-between gap-3">
-                                      <div className="flex items-center gap-2">
-                                        <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-sm font-semibold transition-[background-color,color,transform,opacity] duration-500 ease-out ${
-                                          isDone ? 'bg-sage-100 text-sage-500' : isActive ? 'bg-yellow-200 text-yellow-800 animate-pulse' : 'bg-cream-200 text-natural-500'
-                                        }`}>
-                                          {isDone ? '✓' : qi + 1}
-                                        </span>
-                                        <span className="rounded-lg bg-cream-200 px-2 py-0.5 text-xs font-semibold tracking-wide text-natural-500">
-                                          建議提問
-                                        </span>
-                                      </div>
-                                      {!isDone && card.importance === 'must' && (
-                                        <span className="shrink-0 rounded-lg bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">必問</span>
-                                      )}
-                                    </div>
-                                    <AnimatedStrikeText
-                                      text={formatQuestionText(card.questionText)}
-                                      done={isDone}
-                                      className={`text-base font-normal leading-relaxed transition-colors duration-500 ease-out ${isDone ? 'text-natural-300' : 'text-natural-700'}`}
-                                    />
-                                      <div className={`mt-2 overflow-hidden transition-[max-height,opacity] duration-500 ease-out ${isDone ? 'max-h-0 opacity-0' : 'max-h-4 opacity-100'}`}>
-                                        <div className="h-1 w-full overflow-hidden rounded-full bg-cream-300">
-                                          <div
-                                            className={`h-1 rounded-full transition-[width,background-color,opacity] duration-700 ease-out ${isActive ? 'bg-yellow-400' : 'bg-sage-400'}`}
-                                            style={{ width: `${itemProgress}%` }}
-                                          />
-                                        </div>
-                                      </div>
-                                      {/* Reason why not 100% + followup suggestion */}
-                                      {!isDone && (() => {
-                                        const cs = cardStates.find(c => c.questionCard.id === card.id)
-                                        const ev = cs?.evidence as Record<string, unknown> | undefined
-                                        const judgment = ev?.judgment as Record<string, unknown> | undefined
-                                        const reason = judgment?.reason as string | undefined
-                                        const followup = judgment?.suggested_followup as string | undefined
-                                        if (!reason && !followup) return null
-                                        return (
-                                          <div className="mt-2 space-y-1">
-                                            {reason && (
-                                              <p className="text-xs text-natural-400 leading-relaxed">{reason}</p>
-                                            )}
-                                            {followup && (
-                                              <p className="text-xs text-sage-600 leading-relaxed">追問：{followup}</p>
-                                            )}
-                                          </div>
-                                        )
-                                      })()}
-                                      {/* Manual card actions */}
-                                      {!isDone && (
-                                        <div className="mt-3 flex gap-2">
-                                          <button
-                                            onClick={(e) => {
-                                              e.stopPropagation()
-                                              interviewAPI.manualCompleteCard(sessionId, card.id)
-                                              updateCardFromEvent(card.id, 'sufficient', 1.0, undefined, undefined)
-                                            }}
-                                            className="px-2.5 py-1 text-xs bg-sage-50 text-sage-500 border border-sage-200 rounded-xl hover:bg-sage-100 transition-colors"
-                                          >
-                                            標記完成
-                                          </button>
-                                          {activeCardId === card.id ? (
-                                            <button
-                                              onClick={(e) => {
-                                                e.stopPropagation()
-                                                interviewAPI.clearActiveCard(sessionId)
-                                                setActiveCardId(null)
-                                              }}
-                                              className="px-2.5 py-1 text-xs bg-wood-100 text-wood-500 border border-wood-200 rounded-xl hover:bg-wood-200 transition-colors"
-                                            >
-                                              取消目前問題
-                                            </button>
-                                          ) : (
-                                            <button
-                                              onClick={(e) => {
-                                                e.stopPropagation()
-                                                interviewAPI.confirmActiveCard(sessionId, card.id)
-                                                setActiveCardId(card.id)
-                                              }}
-                                              className="px-2.5 py-1 text-xs bg-wood-50 text-wood-500 border border-wood-200 rounded-xl hover:bg-wood-100 transition-colors"
-                                            >
-                                              設為目前問題
-                                            </button>
-                                          )}
-                                        </div>
-                                      )}
-                                      {isDone && (
-                                        <div className="mt-2">
-                                          <button
-                                            onClick={(e) => {
-                                              e.stopPropagation()
-                                              interviewAPI.undoCompleteCard(sessionId, card.id)
-                                              updateCardFromEvent(card.id, 'listening', 0, undefined, undefined)
-                                            }}
-                                            className="px-2.5 py-1 text-xs bg-cream-100 text-natural-400 border border-cream-300 rounded-xl hover:bg-cream-200 transition-colors"
-                                          >
-                                            復原
-                                          </button>
-                                        </div>
-                                      )}
-                                  </div>
-                                )
-                              })}
-                            </div>
-                          </div>
-                        </div>
-                      )
-                    })
-                  })()}
-                  {/* 底部留白，避免被懸浮追問提示擋住 */}
-                  <div className="h-28" />
-                </div>
+                <ThemeCardsList
+                  currentTheme={currentTheme}
+                  cardStates={cardStates}
+                  activeCardId={activeCardId}
+                  sessionId={sessionId}
+                  setActiveCardId={setActiveCardId}
+                  updateCardFromEvent={updateCardFromEvent}
+                />
               ) : currentSection ? (
                 <div className="mx-auto max-w-3xl">
                   <p className="text-base text-natural-600 whitespace-pre-wrap">{currentSection.extractedText}</p>
@@ -736,11 +347,9 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
               ) : null}
             </div>
 
-            {/* 懸浮追問提示（排隊制） */}
             <FollowupPromptPanel prompt={followupPrompt} queueLength={followupQueueLength} onSkip={handleSkipFollowup} />
           </main>
 
-          {/* 底部：轉錄區 - 動態高度 */}
           <div className={layoutConfig.transcriptArea.height}>
             <TranscriptDisplay
               transcriptHistory={transcriptHistory}
@@ -756,46 +365,182 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
       )}
     </div>
   )
+}
 
-  function updateCardFromEvent(
-    cardId: string | undefined,
-    status: CardState['status'],
-    confidence?: number,
-    evidence?: unknown,
-    evidenceTranscriptFromEvent?: string,
-  ) {
-    if (!cardId) return
+interface ThemeCardsListProps {
+  currentTheme: { id: string; cards: Array<{ id: string; focusText?: string; questionText: string; importance?: string }> }
+  cardStates: CardState[]
+  activeCardId: string | null
+  sessionId: string
+  setActiveCardId: (id: string | null) => void
+  updateCardFromEvent: (cardId: string | undefined, status: CardState['status'], confidence?: number, evidence?: unknown, evidenceTranscript?: string) => void
+}
 
-    const evidenceTranscript =
-      evidenceTranscriptFromEvent
-        ? evidenceTranscriptFromEvent
-        : evidence && typeof evidence === 'object' && 'matchedTranscript' in evidence
-        ? String((evidence as { matchedTranscript?: unknown }).matchedTranscript ?? '')
-        : ''
+function ThemeCardsList({ currentTheme, cardStates, activeCardId, sessionId, setActiveCardId, updateCardFromEvent }: ThemeCardsListProps) {
+  const cardStateMap = new Map(cardStates.map(cs => [cs.questionCard.id, cs.status]))
+  const completedStatuses = new Set(['sufficient', 'covered', 'manually_checked'])
 
-    setCardStates((previous) =>
-      previous.map((cardState) =>
-        cardState.questionCard.id === cardId
-          ? {
-              ...cardState,
-              status,
-              confidence: confidence ?? cardState.confidence,
-              evidence: evidence && typeof evidence === 'object' ? evidence as Record<string, unknown> : cardState.evidence,
-              evidenceTranscript:
-                evidenceTranscript
-                  ? evidenceTranscript
-                  : cardState.evidenceTranscript,
-              questionCard: {
-                ...cardState.questionCard,
-                status,
-                confidence: confidence ?? cardState.questionCard.confidence,
-              },
-            }
-          : cardState,
-      ),
-    )
+  const groups: { focus: string; cards: typeof currentTheme.cards }[] = []
+  let cur: typeof groups[number] | null = null
+  for (const card of currentTheme.cards) {
+    const f = card.focusText || ''
+    if (!cur || cur.focus !== f) {
+      cur = { focus: f, cards: [card] }
+      groups.push(cur)
+    } else {
+      cur.cards.push(card)
+    }
   }
 
+  return (
+    <div key={currentTheme.id} className="mx-auto max-w-3xl space-y-4 animate-themeFadeIn">
+      {groups.map((group, gi) => {
+        const groupCardStates = group.cards.map(c => {
+          const cs = cardStates.find(s => s.questionCard.id === c.id)
+          return { card: c, status: cardStateMap.get(c.id) ?? 'pending', confidence: cs?.confidence ?? 0 }
+        })
+        const groupDone = groupCardStates.every(c => completedStatuses.has(c.status))
+        const groupConfidenceSum = groupCardStates.reduce((sum, c) => sum + (completedStatuses.has(c.status) ? 1 : (c.confidence ?? 0)), 0)
+        const groupProgress = groupCardStates.length > 0 ? Math.round((groupConfidenceSum / groupCardStates.length) * 100) : 0
+
+        return (
+          <div key={gi} className={`relative rounded-2xl border shadow-sm overflow-hidden ${groupDone ? 'border-sage-200' : 'border-cream-300'}`}>
+            <div
+              className="pointer-events-none absolute inset-x-0 bottom-0 z-0 transition-[height] duration-1000 ease-out"
+              style={{ height: `${groupProgress}%` }}
+              aria-hidden="true"
+            >
+              <div className={`absolute inset-0 ${groupDone ? 'bg-sage-100/60' : 'bg-sage-50/50'}`} />
+            </div>
+
+            <div className="relative z-10">
+              {group.focus && (
+                <div className={`border-b px-5 py-2.5 ${groupDone ? 'border-sage-200' : 'border-sage-100'}`}>
+                  <div className="flex items-center justify-between">
+                    <AnimatedStrikeText
+                      text={`${groupDone ? '✓ ' : ''}${formatFocusText(group.focus)}`}
+                      done={groupDone}
+                      className={`text-sm font-semibold transition-colors duration-500 ease-out ${groupDone ? 'text-sage-500' : 'text-sage-400'}`}
+                    />
+                  </div>
+                </div>
+              )}
+              <div className="space-y-3 p-3">
+                {groupCardStates.map(({ card, status, confidence }, qi) => {
+                  const isDone = completedStatuses.has(status)
+                  const isActive = status === 'listening' || status === 'probably_sufficient'
+                  const itemProgress = isDone ? 100 : status === 'listening' ? 0 : Math.round((confidence ?? 0) * 100)
+
+                  return (
+                    <div key={card.id} className={`rounded-2xl border bg-white p-4 shadow-sm transition-[border-color,background-color,box-shadow,opacity,transform] duration-500 ease-out ${isActive ? 'scale-[1.01] border-yellow-300 bg-yellow-50 shadow-yellow-100' : isDone ? 'border-sage-200 bg-sage-50/60' : 'border-cream-300'}`}>
+                      <div className="mb-3 flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-sm font-semibold transition-[background-color,color,transform,opacity] duration-500 ease-out ${
+                            isDone ? 'bg-sage-100 text-sage-500' : isActive ? 'bg-yellow-200 text-yellow-800 animate-pulse' : 'bg-cream-200 text-natural-500'
+                          }`}>
+                            {isDone ? '✓' : qi + 1}
+                          </span>
+                          <span className="rounded-lg bg-cream-200 px-2 py-0.5 text-xs font-semibold tracking-wide text-natural-500">
+                            建議提問
+                          </span>
+                        </div>
+                        {!isDone && card.importance === 'must' && (
+                          <span className="shrink-0 rounded-lg bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">必問</span>
+                        )}
+                      </div>
+                      <AnimatedStrikeText
+                        text={formatQuestionText(card.questionText)}
+                        done={isDone}
+                        className={`text-base font-normal leading-relaxed transition-colors duration-500 ease-out ${isDone ? 'text-natural-300' : 'text-natural-700'}`}
+                      />
+                      <div className={`mt-2 overflow-hidden transition-[max-height,opacity] duration-500 ease-out ${isDone ? 'max-h-0 opacity-0' : 'max-h-4 opacity-100'}`}>
+                        <div className="h-1 w-full overflow-hidden rounded-full bg-cream-300">
+                          <div
+                            className={`h-1 rounded-full transition-[width,background-color,opacity] duration-700 ease-out ${isActive ? 'bg-yellow-400' : 'bg-sage-400'}`}
+                            style={{ width: `${itemProgress}%` }}
+                          />
+                        </div>
+                      </div>
+                      {!isDone && (() => {
+                        const cs = cardStates.find(c => c.questionCard.id === card.id)
+                        const ev = cs?.evidence as Record<string, unknown> | undefined
+                        const judgment = ev?.judgment as Record<string, unknown> | undefined
+                        const reason = judgment?.reason as string | undefined
+                        const followup = judgment?.suggested_followup as string | undefined
+                        if (!reason && !followup) return null
+                        return (
+                          <div className="mt-2 space-y-1">
+                            {reason && (
+                              <p className="text-xs text-natural-400 leading-relaxed">{reason}</p>
+                            )}
+                            {followup && (
+                              <p className="text-xs text-sage-600 leading-relaxed">追問：{followup}</p>
+                            )}
+                          </div>
+                        )
+                      })()}
+                      {!isDone && (
+                        <div className="mt-3 flex gap-2">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              interviewAPI.manualCompleteCard(sessionId, card.id)
+                              updateCardFromEvent(card.id, 'sufficient', 1.0, undefined, undefined)
+                            }}
+                            className="px-2.5 py-1 text-xs bg-sage-50 text-sage-500 border border-sage-200 rounded-xl hover:bg-sage-100 transition-colors"
+                          >
+                            標記完成
+                          </button>
+                          {activeCardId === card.id ? (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                interviewAPI.clearActiveCard(sessionId)
+                                setActiveCardId(null)
+                              }}
+                              className="px-2.5 py-1 text-xs bg-wood-100 text-wood-500 border border-wood-200 rounded-xl hover:bg-wood-200 transition-colors"
+                            >
+                              取消目前問題
+                            </button>
+                          ) : (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                interviewAPI.confirmActiveCard(sessionId, card.id)
+                                setActiveCardId(card.id)
+                              }}
+                              className="px-2.5 py-1 text-xs bg-wood-50 text-wood-500 border border-wood-200 rounded-xl hover:bg-wood-100 transition-colors"
+                            >
+                              設為目前問題
+                            </button>
+                          )}
+                        </div>
+                      )}
+                      {isDone && (
+                        <div className="mt-2">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              interviewAPI.undoCompleteCard(sessionId, card.id)
+                              updateCardFromEvent(card.id, 'listening', 0, undefined, undefined)
+                            }}
+                            className="px-2.5 py-1 text-xs bg-cream-100 text-natural-400 border border-cream-300 rounded-xl hover:bg-cream-200 transition-colors"
+                          >
+                            復原
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        )
+      })}
+      <div className="h-28" />
+    </div>
+  )
 }
 
 function PreparingOverlay() {
@@ -808,4 +553,3 @@ function PreparingOverlay() {
     </div>
   )
 }
-

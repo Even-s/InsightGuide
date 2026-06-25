@@ -3,7 +3,7 @@ import { interviewAPI } from '../api/interview';
 import type { InterviewSession, SessionStatus, DocumentSection } from '../types/interview';
 import apiClient from '../api/client';
 
-interface InterviewTheme {
+export interface InterviewTheme {
   id: string
   themeNumber: number
   title: string

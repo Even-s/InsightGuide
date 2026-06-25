@@ -1,11 +1,9 @@
 """Semantic judge service for text cleanup using LLM."""
 
-import json
 import logging
 
-from openai import OpenAI
-
 from app.core.config import settings
+from app.services.openai_service import openai_service
 
 logger = logging.getLogger(__name__)
 
@@ -14,7 +12,6 @@ class SemanticJudgeService:
     """Service for LLM-powered text processing (spoken script cleanup)."""
 
     def __init__(self):
-        self.client = OpenAI(api_key=settings.OPENAI_API_KEY)
         self.model = settings.SEMANTIC_UNDERSTANDING_MODEL
 
     def clean_spoken_script(self, raw_text: str) -> str:
@@ -45,17 +42,17 @@ class SemanticJudgeService:
 }}
 """.strip()
 
-            response = self.client.chat.completions.create(
-                model=self.model,
+            result = openai_service.chat_completion(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                response_format={"type": "json_object"},
+                model=self.model,
                 temperature=0.1,
+                response_format={"type": "json_object"},
+                purpose="semantic_judge_clean_script",
             )
 
-            result = json.loads(response.choices[0].message.content)
             cleaned_text = str(result.get("cleaned_text", "")).strip()
             return cleaned_text or text
         except Exception as e:
