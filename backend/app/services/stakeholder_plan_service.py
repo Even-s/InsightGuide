@@ -328,7 +328,7 @@ class StakeholderPlanService:
             .first()
         )
         if document:
-            DocumentService.delete_document(db, document.id, commit=False)
+            DocumentService.delete_document(db, document.id, commit=True)
 
     def cancel_profile(self, db: Session, profile_id: str) -> Optional[StakeholderProfile]:
         return self.update_profile(db, profile_id, {"status": "unavailable"})
