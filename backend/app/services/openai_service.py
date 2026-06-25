@@ -2,9 +2,13 @@
 
 import json
 import logging
+import time
 from typing import Any, Dict, List, Optional
 
+import openai
 from openai import OpenAI
+from sqlalchemy.orm import Session
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from app.core.config import settings
 from app.services.billing_service import billing_service
@@ -19,6 +23,126 @@ class OpenAIService:
         """Initialize OpenAI client."""
         self.client = OpenAI(api_key=settings.OPENAI_API_KEY, timeout=60.0)
         self.analysis_model = settings.DOCUMENT_ANALYSIS_MODEL
+
+    @retry(
+        retry=retry_if_exception_type(
+            (
+                openai.RateLimitError,
+                openai.APIConnectionError,
+                openai.InternalServerError,
+            )
+        ),
+        stop=stop_after_attempt(3),
+        wait=wait_exponential(multiplier=1, min=1, max=4),
+    )
+    def chat_completion(
+        self,
+        messages: list,
+        *,
+        model: str = "gpt-4o-mini",
+        temperature: float = 0,
+        response_format: Optional[dict] = None,
+        max_tokens: Optional[int] = None,
+        # Billing context (optional — if provided, records cost)
+        db: Optional[Session] = None,
+        session_id: Optional[str] = None,
+        document_id: Optional[str] = None,
+        purpose: str = "general",
+    ) -> Any:
+        """Centralized chat completion with billing, retry, timeout, and logging.
+
+        Returns the parsed response message content (as dict if JSON, else str).
+        """
+        start_time = time.time()
+
+        # Build request parameters
+        request_params = {
+            "model": model,
+            "messages": messages,
+            "temperature": temperature,
+        }
+
+        if response_format is not None:
+            request_params["response_format"] = response_format
+
+        if max_tokens is not None:
+            request_params["max_tokens"] = max_tokens
+
+        # Call OpenAI API
+        response = self.client.chat.completions.create(**request_params)
+
+        # Extract usage
+        usage = response.usage
+        total_tokens = usage.total_tokens if usage else 0
+        input_tokens = usage.prompt_tokens if usage else 0
+        output_tokens = usage.completion_tokens if usage else 0
+
+        # Calculate elapsed time
+        elapsed_ms = (time.time() - start_time) * 1000
+
+        # Log timing and usage
+        logger.info(f"[AI] {purpose}: {elapsed_ms:.0f}ms, model={model}, tokens={total_tokens}")
+
+        # Log slow calls
+        if elapsed_ms > 5000:
+            logger.warning(
+                f"[AI] Slow call detected: {purpose} took {elapsed_ms:.0f}ms with {total_tokens} tokens"
+            )
+
+        # Record billing if db provided
+        if db is not None:
+            try:
+                cost_usd, pricing = billing_service.calculate_token_cost(
+                    model=model,
+                    input_tokens=input_tokens,
+                    cached_input_tokens=0,
+                    output_tokens=output_tokens,
+                )
+
+                # Create usage event
+                import uuid
+                from datetime import datetime
+
+                from app.models.ai_usage_event import AIUsageEvent
+
+                event = AIUsageEvent(
+                    id=f"aiusage_{uuid.uuid4().hex[:12]}",
+                    interview_session_id=session_id,
+                    document_id=document_id,
+                    operation=purpose,
+                    model=model,
+                    input_tokens=input_tokens,
+                    cached_input_tokens=0,
+                    output_tokens=output_tokens,
+                    total_tokens=total_tokens,
+                    audio_seconds=0,
+                    cost_usd=cost_usd,
+                    pricing=pricing,
+                    created_at=datetime.utcnow(),
+                )
+                db.add(event)
+                db.commit()
+            except Exception as e:
+                logger.error(f"Failed to record billing for {purpose}: {e}")
+                db.rollback()
+
+        # Parse and return response
+        content = response.choices[0].message.content
+        if not content:
+            logger.warning(f"Empty response from OpenAI for {purpose}")
+            return ""
+
+        # If JSON response format, try to parse
+        if response_format and response_format.get("type") == "json_object":
+            try:
+                return json.loads(content)
+            except json.JSONDecodeError as e:
+                logger.warning(
+                    f"Failed to parse JSON response for {purpose}: {e}. Returning raw string."
+                )
+                return content
+
+        return content
 
     def generate_card_metadata(self, prompt: str) -> Dict[str, Any]:
         """

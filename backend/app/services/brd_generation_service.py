@@ -151,7 +151,9 @@ class BRDGenerationService:
         qa_md, question_count = self._build_qa_report(db, session_id)
 
         # Use GPT to rewrite raw evidence into formal BRD paragraphs
-        brd_sections = self._rewrite_sections_with_ai(document, brd_sections)
+        brd_sections = self._rewrite_sections_with_ai(
+            document, brd_sections, db=db, session_id=session_id
+        )
 
         brd_md = self._render_brd_markdown(document, brd_sections, open_issues)
 
@@ -489,7 +491,11 @@ class BRDGenerationService:
         return "\n".join(lines), len(questions)
 
     def _rewrite_sections_with_ai(
-        self, document: Optional[Document], sections: List[Dict[str, Any]]
+        self,
+        document: Optional[Document],
+        sections: List[Dict[str, Any]],
+        db: Optional[Session] = None,
+        session_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """Use GPT 5.4 mini to rewrite raw evidence into formal BRD paragraphs."""
         import json
@@ -528,18 +534,21 @@ class BRDGenerationService:
                         f"請改寫成正式 BRD 段落。"
                     )
 
-                    response = openai_service.client.chat.completions.create(
-                        model="gpt-5.4-mini",
+                    rewritten = openai_service.chat_completion(
                         messages=[
                             {"role": "system", "content": system_prompt},
                             {"role": "user", "content": user_prompt},
                         ],
+                        model="gpt-5.4-mini",
                         temperature=0.3,
-                        max_completion_tokens=500,
+                        max_tokens=500,
+                        db=db,
+                        session_id=session_id,
+                        document_id=document.id if document else None,
+                        purpose="brd_rewrite",
                     )
-                    rewritten = response.choices[0].message.content.strip()
-                    if rewritten:
-                        item["evidence"] = rewritten
+                    if isinstance(rewritten, str) and rewritten.strip():
+                        item["evidence"] = rewritten.strip()
                 except Exception as e:
                     logger.warning(f"Failed to rewrite BRD section: {e}")
 

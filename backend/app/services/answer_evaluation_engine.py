@@ -979,27 +979,19 @@ class AnswerEvaluationEngine:
         )
 
         try:
-            # Phase 3: Use model parameter from argument (nano for live, mini for final)
-            import time
-
-            llm_start = time.perf_counter()
-            response = openai_service.client.chat.completions.create(
-                model=model,
+            result = openai_service.chat_completion(
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
+                model=model,
                 temperature=0,
                 response_format={"type": "json_object"},
+                db=db,
+                session_id=session_id,
+                purpose="answer_evaluation",
             )
-            llm_elapsed_ms = (time.perf_counter() - llm_start) * 1000
-
-            content = response.choices[0].message.content
-            result = json.loads(content)
-            logger.info(
-                f"[PERF] LLM judge: {llm_elapsed_ms:.0f}ms, {len(candidate_cards)} cards, model={model}"
-            )
-            logger.info(f"Batch judgment raw response: {content[:300]}")
+            logger.info(f"Batch judgment raw response: {str(result)[:300]}")
 
             # Phase 3: Parse result — try "evaluations" key FIRST, then fallback to other formats
             if isinstance(result, list):
