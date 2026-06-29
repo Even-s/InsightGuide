@@ -118,6 +118,11 @@ export const questionCardsAPI = {
     return response.data
   },
 
+  async generateCriteria(cardId: string): Promise<import('@/types/questionCard').RubricCriterion[]> {
+    const response = await apiClient.post(`/api/question-cards/${cardId}/generate-criteria`)
+    return response.data.criteria
+  },
+
   async deleteCard(cardId: string): Promise<void> {
     await apiClient.delete(`/api/question-cards/${cardId}`)
   },

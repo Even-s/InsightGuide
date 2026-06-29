@@ -1,6 +1,7 @@
 import { useCallback, useState, useRef, useEffect } from 'react'
-import type { QuestionCard } from '@/types/questionCard'
+import type { QuestionCard, RubricCriterion } from '@/types/questionCard'
 import type { QuestionCardFormData } from '@/api/questionCards'
+import { questionCardsAPI } from '@/api/questionCards'
 import Badge from '@/components/common/Badge'
 import { formatFocusText, formatQuestionText } from '@/utils/interviewCopy'
 
@@ -54,9 +55,11 @@ function CardItem({
   const [swipeX, setSwipeX] = useState(0)
   const [isSwiping, setIsSwiping] = useState(false)
   const [hasMovedRef, setHasMovedRef] = useState(false)
+  const [isGenerating, setIsGenerating] = useState(false)
   const [form, setForm] = useState({
     questionText: card.questionText,
     importance: card.importance,
+    criteria: (card.coverageRule?.criteria ?? []) as RubricCriterion[],
   })
   const startXRef = useRef(0)
   const startYRef = useRef(0)
@@ -145,21 +148,57 @@ function CardItem({
   // Save edit
   const handleSave = useCallback(async () => {
     if (!form.questionText.trim()) return
+    const validCriteria = form.criteria.filter(c => c.description.trim())
     await onUpdate({
       sectionId: card.sectionId,
       questionText: form.questionText,
       suggestedFollowup: card.suggestedFollowup || '',
       importance: form.importance,
+      coverageRule: { ...card.coverageRule, criteria: validCriteria },
     })
     setIsEditing(false)
-  }, [card.sectionId, card.suggestedFollowup, form.importance, form.questionText, onUpdate])
+  }, [card.coverageRule, card.sectionId, card.suggestedFollowup, form.criteria, form.importance, form.questionText, onUpdate])
 
   function handleCancel() {
     setForm({
       questionText: card.questionText,
       importance: card.importance,
+      criteria: card.coverageRule?.criteria ?? [],
     })
     setIsEditing(false)
+  }
+
+  function addCriterion() {
+    const newCriterion: RubricCriterion = {
+      id: `criterion_${Date.now()}`,
+      description: '',
+      type: 'value_slot',
+      required: true,
+      critical: false,
+      weight: 1.0,
+    }
+    setForm({ ...form, criteria: [...form.criteria, newCriterion] })
+  }
+
+  function removeCriterion(id: string) {
+    setForm({ ...form, criteria: form.criteria.filter(c => c.id !== id) })
+  }
+
+  function updateCriterionText(id: string, description: string) {
+    setForm({
+      ...form,
+      criteria: form.criteria.map(c => c.id === id ? { ...c, description } : c),
+    })
+  }
+
+  async function handleGenerateCriteria() {
+    setIsGenerating(true)
+    try {
+      const generated = await questionCardsAPI.generateCriteria(card.id)
+      setForm({ ...form, criteria: generated })
+    } finally {
+      setIsGenerating(false)
+    }
   }
 
 
@@ -182,9 +221,10 @@ function CardItem({
       setForm({
         questionText: card.questionText,
         importance: card.importance,
+        criteria: card.coverageRule?.criteria ?? [],
       })
     }
-  }, [card.importance, card.questionText, isEditing])
+  }, [card.coverageRule?.criteria, card.importance, card.questionText, isEditing])
 
   return (
     <div className="relative overflow-hidden">
@@ -264,6 +304,56 @@ function CardItem({
               autoFocus
             />
 
+            {/* Criteria editor */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-natural-500">評分標準</span>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={handleGenerateCriteria}
+                    disabled={isGenerating}
+                    className="rounded px-2 py-1 text-xs text-sage-600 hover:bg-sage-50 disabled:opacity-50"
+                  >
+                    {isGenerating ? 'AI 產生中...' : 'AI 產生'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={addCriterion}
+                    className="rounded px-2 py-1 text-xs text-sage-600 hover:bg-sage-50"
+                  >
+                    + 新增
+                  </button>
+                </div>
+              </div>
+              {form.criteria.length > 0 ? (
+                <ul className="space-y-1.5">
+                  {form.criteria.map((c) => (
+                    <li key={c.id} className="flex items-center gap-1.5">
+                      <span className="shrink-0 text-xs text-natural-300">-</span>
+                      <input
+                        type="text"
+                        value={c.description}
+                        onChange={(e) => updateCriterionText(c.id, e.target.value)}
+                        placeholder="輸入評分標準描述"
+                        className="flex-1 rounded border border-cream-300 px-2 py-1 text-xs leading-relaxed focus:border-sage-400 focus:outline-none focus:ring-1 focus:ring-sage-400"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => removeCriterion(c.id)}
+                        className="shrink-0 rounded p-1 text-natural-300 hover:bg-red-50 hover:text-red-500"
+                      >
+                        <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="text-xs text-natural-300 italic">尚無評分標準，可手動新增或用 AI 產生</p>
+              )}
+            </div>
 
             <div className="flex justify-end gap-2 pt-2">
               <button
@@ -313,7 +403,7 @@ function CardItem({
                   {importanceLabel[card.importance]}
                 </Badge>
               </div>
-              {card.coverageRule?.criteria && card.coverageRule.criteria.length > 0 && (
+              {card.coverageRule?.criteria && card.coverageRule.criteria.length > 0 ? (
                 <ul className="mt-1.5 space-y-0.5">
                   {card.coverageRule.criteria.map((c) => (
                     <li key={c.id} className="text-xs text-natural-400 leading-relaxed">
@@ -321,6 +411,8 @@ function CardItem({
                     </li>
                   ))}
                 </ul>
+              ) : (
+                <p className="mt-1.5 text-xs text-natural-300 italic">尚無評分標準（雙擊編輯以新增）</p>
               )}
             </div>
           </div>

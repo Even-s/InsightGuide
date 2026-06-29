@@ -75,21 +75,34 @@ def convert_card_to_schema(card) -> QuestionCardSchema:
 @router.post("/", status_code=status.HTTP_201_CREATED, response_model=QuestionCardSchema)
 async def create_question_card(question_card: QuestionCardCreate, db: Session = Depends(get_db)):
     """Create a new question card (user-created)."""
+    from app.models.interview_theme import InterviewTheme
+
     section_id = question_card.resolved_section_id
     logger.info(f"Creating question card for section {section_id}")
 
-    # For user-created cards, we need to get the document_id from the section
-    from app.services.section_service import section_service
+    # Check if sectionId is actually an interview theme ID
+    theme = db.query(InterviewTheme).filter(InterviewTheme.id == section_id).first()
+    if theme:
+        card = question_card_service.create_question_card(
+            db=db,
+            document_id=theme.document_id,
+            section_id=section_id,
+            section_number=0,
+            card_data=question_card,
+            created_by="user",
+            interview_theme_id=theme.id,
+        )
+    else:
+        from app.services.section_service import section_service
 
-    section = section_service.get_section(db, section_id)
-
-    card = question_card_service.create_question_card(
-        db=db,
-        document_id=section.document_id,
-        section_id=section_id,
-        section_number=section.section_number,
-        card_data=question_card,
-    )
+        section = section_service.get_section(db, section_id)
+        card = question_card_service.create_question_card(
+            db=db,
+            document_id=section.document_id,
+            section_id=section_id,
+            section_number=section.section_number,
+            card_data=question_card,
+        )
 
     return convert_card_to_schema(card)
 
@@ -155,6 +168,16 @@ async def reorder_question_cards(
     logger.info(f"Reordering {len(card_order)} question cards for section {section_id}")
     cards = question_card_service.reorder_question_cards(db, section_id, card_order)
     return [convert_card_to_schema(card) for card in cards]
+
+
+@router.post("/{question_card_id}/generate-criteria")
+async def generate_criteria(question_card_id: str, db: Session = Depends(get_db)):
+    """Generate evaluation criteria for a question card using AI. Returns without saving."""
+    from app.services.question_rubric_service import question_rubric_service
+
+    card = question_card_service.get_question_card(db, question_card_id)
+    rubric = question_rubric_service.generate_rubric_with_llm(card)
+    return {"criteria": rubric.get("criteria", [])}
 
 
 @router.post("/{card_id}/generate-role-targeting")

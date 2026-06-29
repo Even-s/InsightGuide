@@ -141,17 +141,26 @@ class QuestionCardService:
         section_number: int,
         card_data: QuestionCardCreate,
         created_by: str = "user",
+        interview_theme_id: Optional[str] = None,
     ) -> QuestionCard:
         """Create a new question card."""
         card_id = f"qcard_{uuid.uuid4().hex[:12]}"
 
-        # Get next order index for this section
-        max_order = (
-            db.query(func.max(QuestionCard.order_index))
-            .filter(QuestionCard.section_id == section_id)
-            .scalar()
-            or -1
-        )
+        # Get next order index for this theme or section
+        if interview_theme_id:
+            max_order = (
+                db.query(func.max(QuestionCard.order_index))
+                .filter(QuestionCard.interview_theme_id == interview_theme_id)
+                .scalar()
+                or -1
+            )
+        else:
+            max_order = (
+                db.query(func.max(QuestionCard.order_index))
+                .filter(QuestionCard.section_id == section_id)
+                .scalar()
+                or -1
+            )
         order_index = max_order + 1
 
         # Resolve fields (supports both frontend and internal naming)
@@ -196,7 +205,8 @@ class QuestionCardService:
         card = QuestionCard(
             id=card_id,
             document_id=document_id,
-            section_id=section_id,
+            interview_theme_id=interview_theme_id,
+            section_id=section_id if not interview_theme_id else None,
             section_number=section_number,
             question_text=question_text,
             question_type=question_type,
@@ -218,8 +228,29 @@ class QuestionCardService:
         db.commit()
         db.refresh(card)
 
-        logger.info(f"Created question card {card_id} for section {section_id}")
+        logger.info(f"Created question card {card_id}")
         return card
+
+    def _auto_generate_criteria(self, db: Session, card: QuestionCard) -> None:
+        """Generate criteria via LLM and save to card after creation."""
+        from app.services.question_rubric_service import question_rubric_service
+
+        try:
+            rubric = question_rubric_service.generate_rubric_with_llm(card)
+            criteria = rubric.get("criteria")
+            if criteria:
+                coverage_rule = dict(card.coverage_rule or {})
+                coverage_rule["criteria"] = criteria
+                coverage_rule["rubricVersion"] = rubric.get("rubricVersion", "v1")
+                coverage_rule["answerTarget"] = rubric.get("answerTarget", "")
+                card.coverage_rule = coverage_rule
+                from sqlalchemy.orm.attributes import flag_modified
+                flag_modified(card, "coverage_rule")
+                db.commit()
+                db.refresh(card)
+                logger.info(f"Auto-generated {len(criteria)} criteria for card {card.id}")
+        except Exception as e:
+            logger.warning(f"Failed to auto-generate criteria for card {card.id}: {e}")
 
     _FIELD_MAP = {
         "questionText": "question_text",
@@ -239,10 +270,13 @@ class QuestionCardService:
 
         update_data = card_update.model_dump(exclude_unset=True)
         question_text_changed = False
+        criteria_explicitly_provided = False
 
         for field, value in update_data.items():
             model_field = self._FIELD_MAP.get(field, field)
             if model_field == "coverage_rule" and value:
+                if value.get("criteria"):
+                    criteria_explicitly_provided = True
                 value = self.normalize_coverage_rule_for_important_elements(value)
             if model_field == "question_text" and value != card.question_text:
                 question_text_changed = True
@@ -250,8 +284,10 @@ class QuestionCardService:
 
         card.updated_at = datetime.utcnow()
 
-        if question_text_changed:
+        if question_text_changed and not criteria_explicitly_provided:
             self._regenerate_rubric(db, card)
+        elif not criteria_explicitly_provided and not (card.coverage_rule or {}).get("criteria"):
+            self._auto_generate_criteria(db, card)
 
         db.commit()
         db.refresh(card)
@@ -260,20 +296,16 @@ class QuestionCardService:
         return card
 
     def _regenerate_rubric(self, db: Session, card: QuestionCard) -> None:
-        """Clear stale rubric and recompile from elements after question_text change."""
-        from app.services.question_rubric_service import question_rubric_service
-
+        """Clear stale rubric and regenerate criteria after question_text change."""
         coverage_rule = dict(card.coverage_rule or {})
         coverage_rule.pop("rubricVersion", None)
         coverage_rule.pop("answerTarget", None)
         coverage_rule.pop("criteria", None)
+        coverage_rule["semanticAnchors"] = [card.question_text]
         card.coverage_rule = coverage_rule
         db.flush()
 
-        try:
-            question_rubric_service.compile_and_save_rubric(db, card)
-        except Exception as e:
-            logger.warning(f"Failed to recompile rubric for card {card.id}: {e}")
+        self._auto_generate_criteria(db, card)
 
     def delete_question_card(self, db: Session, card_id: str) -> None:
         """Delete a question card."""

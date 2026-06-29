@@ -217,9 +217,10 @@ export default function EditorPage() {
   async function createCard() {
     if (!selectedTheme) return
     try {
-      const firstSectionId = selectedTheme.cards[0]?.id ? undefined : undefined
+      const existingCard = cards.find((c) => c.interviewThemeId === selectedThemeId)
+      const sectionId = existingCard?.sectionId ?? selectedThemeId
       const newCard = await questionCardsAPI.createCard({
-        sectionId: firstSectionId ?? selectedThemeId,
+        sectionId,
         questionText: '新問題',
         suggestedFollowup: '請輸入追問內容',
         importance: 'must',
