@@ -100,7 +100,7 @@ start_app() {
         bold "InsightGuide is already running."
     else
         bold "Starting InsightGuide services..."
-        "$ROOT_DIR/restart-all.sh"
+        "$ROOT_DIR/bin/restart-all.sh"
     fi
 
     if [ "$1" = "--open" ]; then
@@ -113,7 +113,7 @@ start_app() {
 restart_app() {
     print_header
     bold "Restarting InsightGuide services..."
-    "$ROOT_DIR/restart-all.sh"
+    "$ROOT_DIR/bin/restart-all.sh"
 
     if [ "$1" = "--open" ]; then
         echo ""
@@ -125,7 +125,7 @@ restart_app() {
 stop_app() {
     print_header
     bold "Stopping InsightGuide services..."
-    "$ROOT_DIR/stop-services.sh"
+    "$ROOT_DIR/bin/stop-services.sh"
 }
 
 restart_backend() {
@@ -173,7 +173,7 @@ restart_service() {
 
 show_status() {
     print_header
-    "$ROOT_DIR/status.sh"
+    "$ROOT_DIR/bin/status.sh"
 }
 
 show_logs() {
