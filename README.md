@@ -8,14 +8,14 @@ InsightGuide 是一款 AI 驅動的需求訪談輔助系統，透過 OpenAI Real
 
 **版本**: v0.2.0
 **開發階段**: 核心功能完成，進入優化階段
-**最後更新**: 2026-06-25
+**最後更新**: 2026-06-30
 
 ### 實施統計
-- **後端服務**: 32 個 service files
+- **後端服務**: 34 個 service files
 - **資料模型**: 25 個 models
-- **API Routes**: 14 個 route files
+- **API Routes**: 19 個 route files
 - **前端頁面**: 12 個 pages
-- **React Hooks**: 5 個 custom hooks
+- **React Hooks**: 10 個 custom hooks
 
 ---
 
