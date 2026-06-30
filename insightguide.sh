@@ -90,11 +90,49 @@ quick_status() {
     printf "   Docker:   %s\n" "$docker_state"
 }
 
+check_environment() {
+    local missing=""
+
+    if [ ! -d "$ROOT_DIR/backend/venv" ]; then
+        missing="${missing}  - backend/venv 不存在（Python 虛擬環境未建立）\n"
+    fi
+
+    if [ ! -f "$ROOT_DIR/backend/.env" ]; then
+        missing="${missing}  - backend/.env 不存在（環境變數未設定）\n"
+    elif grep -q "^OPENAI_API_KEY=sk-\.\.\." "$ROOT_DIR/backend/.env" 2>/dev/null; then
+        missing="${missing}  - backend/.env 中 OPENAI_API_KEY 尚未填入\n"
+    fi
+
+    if [ ! -d "$ROOT_DIR/frontend/node_modules" ]; then
+        missing="${missing}  - frontend/node_modules 不存在（前端依賴未安裝）\n"
+    fi
+
+    if ! command -v docker >/dev/null 2>&1; then
+        missing="${missing}  - docker 未安裝\n"
+    fi
+
+    if [ -n "$missing" ]; then
+        echo ""
+        bold "⚠️  環境尚未就緒："
+        printf "$missing"
+        echo ""
+        info "請先執行首次安裝："
+        info "  ./insightguide.sh setup"
+        echo ""
+        return 1
+    fi
+    return 0
+}
+
 start_app() {
     print_header
     bold "Checking InsightGuide..."
     quick_status
     echo ""
+
+    if ! check_environment; then
+        return 1
+    fi
 
     if http_ok "$BACKEND_URL/health" && http_ok "$FRONTEND_URL"; then
         bold "InsightGuide is already running."
