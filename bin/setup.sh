@@ -20,13 +20,32 @@ echo ""
 
 bold "1. 檢查前置需求..."
 
-command -v docker >/dev/null 2>&1 || fail "未找到 docker，請安裝 Docker Desktop"
-command -v node >/dev/null 2>&1 || fail "未找到 node，請安裝 Node.js 20+"
-command -v python3 >/dev/null 2>&1 || fail "未找到 python3，請安裝 Python 3.11+"
+MISSING=""
 
-NODE_MAJOR=$(node -v | cut -d. -f1 | tr -d 'v')
-if [ "$NODE_MAJOR" -lt 20 ]; then
-    fail "Node.js 版本過舊 ($(node -v))，需要 20+"
+if ! command -v docker >/dev/null 2>&1; then
+    MISSING="${MISSING}\n   ❌ docker — 請安裝 Docker Desktop：https://www.docker.com/products/docker-desktop/"
+fi
+
+if ! command -v node >/dev/null 2>&1; then
+    MISSING="${MISSING}\n   ❌ node — 請安裝 Node.js 20+：brew install node 或 https://nodejs.org/"
+elif [ "$(node -v | cut -d. -f1 | tr -d 'v')" -lt 20 ]; then
+    MISSING="${MISSING}\n   ❌ node 版本過舊 ($(node -v)) — 需要 20+：brew upgrade node"
+fi
+
+if ! command -v python3 >/dev/null 2>&1; then
+    MISSING="${MISSING}\n   ❌ python3 — 請安裝 Python 3.11+：brew install python@3.11 或 https://www.python.org/"
+fi
+
+if [ -n "$MISSING" ]; then
+    echo ""
+    bold "缺少以下工具，請先安裝："
+    printf "$MISSING\n"
+    echo ""
+    info "macOS 一鍵安裝所有前置需求："
+    info "  brew install --cask docker && brew install node python@3.11"
+    echo ""
+    info "安裝完成後請重新執行：./insightguide.sh setup"
+    exit 1
 fi
 
 info "✅ docker: $(docker --version | head -1)"
