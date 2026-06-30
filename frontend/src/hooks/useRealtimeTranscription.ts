@@ -33,8 +33,42 @@ interface UseRealtimeTranscriptionOptions {
 }
 
 function getErrorMessage(error: unknown) {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'response' in error &&
+    typeof error.response === 'object' &&
+    error.response !== null &&
+    'data' in error.response
+  ) {
+    const data = error.response.data
+    if (typeof data === 'object' && data !== null && 'detail' in data && typeof data.detail === 'string') {
+      return data.detail
+    }
+    if (typeof data === 'string' && data.trim()) return data
+  }
   if (error instanceof Error) return error.message
   return 'Realtime transcription failed'
+}
+
+function waitForIceGatheringComplete(peerConnection: RTCPeerConnection, timeoutMs = 3000) {
+  if (peerConnection.iceGatheringState === 'complete') return Promise.resolve()
+
+  return new Promise<void>((resolve) => {
+    const timeout = window.setTimeout(() => {
+      peerConnection.removeEventListener('icegatheringstatechange', handleStateChange)
+      resolve()
+    }, timeoutMs)
+
+    function handleStateChange() {
+      if (peerConnection.iceGatheringState !== 'complete') return
+      window.clearTimeout(timeout)
+      peerConnection.removeEventListener('icegatheringstatechange', handleStateChange)
+      resolve()
+    }
+
+    peerConnection.addEventListener('icegatheringstatechange', handleStateChange)
+  })
 }
 
 export function useRealtimeTranscription({
@@ -296,10 +330,11 @@ export function useRealtimeTranscription({
 
       const offer = await peerConnection.createOffer()
       await peerConnection.setLocalDescription(offer)
+      await waitForIceGatheringComplete(peerConnection)
 
       const sdpResponse = await fetch(OPENAI_REALTIME_WEBRTC_URL, {
         method: 'POST',
-        body: offer.sdp,
+        body: peerConnection.localDescription?.sdp ?? offer.sdp,
         headers: {
           Authorization: `Bearer ${session.token}`,
           'Content-Type': 'application/sdp',
@@ -308,7 +343,7 @@ export function useRealtimeTranscription({
 
       if (!sdpResponse.ok) {
         const detail = await sdpResponse.text()
-        throw new Error(`OpenAI Realtime connection failed: ${detail || sdpResponse.statusText}`)
+        throw new Error(`OpenAI Realtime SDP exchange failed: ${detail || sdpResponse.statusText}`)
       }
 
       await peerConnection.setRemoteDescription({

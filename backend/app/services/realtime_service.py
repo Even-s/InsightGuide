@@ -18,6 +18,19 @@ class RealtimeService:
         self.api_key = settings.OPENAI_API_KEY
         self.base_url = "https://api.openai.com/v1"
 
+    def _transcription_session_config(self) -> Dict[str, Any]:
+        """Build the Realtime transcription session config shared by both flows."""
+        return {
+            "type": "transcription",
+            "audio": {
+                "input": {
+                    "transcription": {
+                        "model": settings.REALTIME_TRANSCRIPTION_MODEL,
+                    },
+                }
+            },
+        }
+
     def create_transcription_ephemeral_token(self) -> Dict[str, Any]:
         """
         Create an ephemeral client secret for Realtime transcription.
@@ -34,21 +47,7 @@ class RealtimeService:
                 "Content-Type": "application/json",
             }
 
-            data = {
-                "session": {
-                    "type": "transcription",
-                    "audio": {
-                        "input": {
-                            "noise_reduction": {"type": "near_field"},
-                            "transcription": {
-                                "model": settings.REALTIME_TRANSCRIPTION_MODEL,
-                                "language": "zh",
-                                "delay": "medium",
-                            },
-                        }
-                    },
-                }
-            }
+            data = {"session": self._transcription_session_config()}
 
             with httpx.Client(timeout=30.0) as client:
                 response = client.post(
@@ -73,7 +72,12 @@ class RealtimeService:
             if not token:
                 raise Exception("No token returned from OpenAI API")
 
-            logger.info(f"Successfully created transcription token, expires at {expires_at}")
+            logger.info(
+                "Successfully created transcription token: session_id=%s model=%s expires_at=%s",
+                session_config.get("id"),
+                settings.REALTIME_TRANSCRIPTION_MODEL,
+                expires_at,
+            )
 
             return {
                 "token": token,
