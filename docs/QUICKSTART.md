@@ -18,16 +18,35 @@ brew install node python@3.11 docker libreoffice poppler
 
 ---
 
-## 一鍵啟動（推薦）
+## 首次安裝
 
 ```bash
 cd InsightGuide
 
-# 啟動所有服務
+# 一鍵安裝：檢查環境、安裝依賴、建立資料庫
+./insightguide.sh setup
+
+# 編輯 backend/.env，填入你的 OPENAI_API_KEY
+```
+
+安裝腳本會自動完成：
+1. 檢查前置需求（Docker、Node.js、Python）
+2. 建立 `backend/.env` 環境檔
+3. 啟動 Docker 基礎服務（PostgreSQL、Redis、MinIO）
+4. 建立 Python 虛擬環境並安裝依賴
+5. 執行資料庫 migrations
+6. 安裝前端 npm 依賴
+
+---
+
+## 啟動系統
+
+```bash
+# 啟動所有服務並開啟瀏覽器
 ./insightguide.sh launch
 ```
 
-腳本會自動啟動 Docker services、安裝依賴、執行 migrations、啟動後端 + Celery + 前端，並在完成後開啟瀏覽器。
+腳本會啟動 Docker services、後端 + Celery + 前端，並在完成後開啟瀏覽器。
 
 ### 其他常用指令
 

@@ -277,6 +277,7 @@ InsightGuide app-style launcher
 
 Usage:
   ./insightguide.sh                 Open the interactive control center
+  ./insightguide.sh setup           First-time install (dependencies + DB + env)
   ./insightguide.sh launch          Start services if needed, then open InsightGuide
   ./insightguide.sh start           Start services if needed
   ./insightguide.sh restart [all|backend|frontend]
@@ -292,6 +293,7 @@ EOF
 
 case "${1:-menu}" in
     menu) interactive_menu ;;
+    setup) "$ROOT_DIR/bin/setup.sh" ;;
     launch) start_app --open ;;
     start) start_app ;;
     restart) restart_service "${2:-all}" ;;
