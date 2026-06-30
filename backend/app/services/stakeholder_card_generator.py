@@ -373,16 +373,22 @@ class StakeholderCardGenerator:
         if options_parts:
             context += "\n\n## 訪談設定\n" + "\n".join(options_parts)
 
-        # Determine target theme count based on duration
+        # Determine target theme count based on duration (5-min granularity)
         duration = opts.get("duration_minutes", 30)
-        if duration <= 15:
+        if duration <= 10:
+            theme_count_hint = "2-3"
+        elif duration <= 15:
             theme_count_hint = "3-4"
+        elif duration <= 20:
+            theme_count_hint = "4-5"
         elif duration <= 30:
             theme_count_hint = "5-6"
         elif duration <= 45:
             theme_count_hint = "6-8"
+        elif duration <= 60:
+            theme_count_hint = "7-9"
         else:
-            theme_count_hint = "7-10"
+            theme_count_hint = "8-10"
 
         # Call AI
         try:

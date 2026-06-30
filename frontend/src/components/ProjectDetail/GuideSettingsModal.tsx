@@ -40,20 +40,23 @@ export function GuideSettingsModal({ profileId, projectId, onClose, onGenerated 
         <div className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-natural-700 mb-1">預計訪談時長</label>
-            <div className="flex gap-2">
-              {[15, 30, 45, 60].map(min => (
-                <button
-                  key={min}
-                  onClick={() => setGuideOpts(o => ({ ...o, duration_minutes: min }))}
-                  className={`px-3 py-1.5 text-sm rounded-lg border transition-colors ${
-                    guideOpts.duration_minutes === min
-                      ? 'bg-sage-50 border-sage-300 text-sage-700'
-                      : 'border-cream-200 text-natural-600 hover:bg-cream-50'
-                  }`}
-                >
-                  {min} 分鐘
-                </button>
-              ))}
+            <div className="flex items-center gap-3">
+              <input
+                type="range"
+                min={10}
+                max={90}
+                step={5}
+                value={guideOpts.duration_minutes ?? 30}
+                onChange={e => setGuideOpts(o => ({ ...o, duration_minutes: Number(e.target.value) }))}
+                className="flex-1 h-2 bg-cream-200 rounded-lg appearance-none cursor-pointer accent-sage-400"
+              />
+              <span className="w-16 text-center text-sm font-medium text-natural-700 tabular-nums">
+                {guideOpts.duration_minutes ?? 30} 分鐘
+              </span>
+            </div>
+            <div className="flex justify-between mt-1 text-xs text-natural-400 px-0.5">
+              <span>10 min</span>
+              <span>90 min</span>
             </div>
           </div>
 
