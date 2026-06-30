@@ -48,6 +48,15 @@ export interface InterviewSession {
   pausedAt?: string | null
   pausedDurationSeconds?: number
   createdAt: string
+  costUsd?: number
+  aiUsage?: {
+    inputTokens: number
+    cachedInputTokens: number
+    outputTokens: number
+    totalTokens: number
+    realtimeSeconds: number
+    totalCostUsd: number
+  }
 }
 
 export interface DocumentSection {

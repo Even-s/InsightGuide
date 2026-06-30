@@ -26,6 +26,7 @@ async def list_interview_sessions(
     limit: int = Query(50, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     project_id: Optional[str] = Query(None, alias="projectId"),
+    document_id: Optional[str] = Query(None, alias="documentId"),
     db: Session = Depends(get_db),
 ):
     """
@@ -35,9 +36,11 @@ async def list_interview_sessions(
     - limit: Number of sessions to return (1-1000, default 50)
     - offset: Number of sessions to skip (for pagination)
     - projectId: Optional filter by project
+    - documentId: Optional filter by document
     """
     logger.info(
-        f"Listing interview sessions: limit={limit}, offset={offset}, project_id={project_id}"
+        f"Listing interview sessions: limit={limit}, offset={offset}, "
+        f"project_id={project_id}, document_id={document_id}"
     )
 
     # For MVP, use default user
@@ -49,6 +52,7 @@ async def list_interview_sessions(
         limit=limit,
         offset=offset,
         project_id=project_id,
+        document_id=document_id,
     )
 
     return result

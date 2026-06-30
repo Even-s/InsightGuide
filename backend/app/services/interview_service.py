@@ -483,8 +483,9 @@ class InterviewService:
         limit: int = 50,
         offset: int = 0,
         project_id: Optional[str] = None,
+        document_id: Optional[str] = None,
     ) -> InterviewSessionListResponse:
-        """List interview sessions for a user, optionally filtered by project."""
+        """List interview sessions for a user, optionally filtered by project or document."""
         # Query sessions with document information
         query = (
             db.query(InterviewSession, Document.title.label("document_title"))
@@ -494,6 +495,9 @@ class InterviewService:
 
         if project_id:
             query = query.filter(InterviewSession.project_id == project_id)
+
+        if document_id:
+            query = query.filter(InterviewSession.document_id == document_id)
 
         # Get total count
         total = query.count()

@@ -196,8 +196,8 @@ export default function EditorPage() {
     setShowSessionPanel(true)
     setSessionsLoading(true)
     try {
-      const response = await apiClient.get(`/api/prep-sessions/${documentId}/interview-sessions`)
-      setSessions(response.data)
+      const response = await apiClient.get(`/api/interview-sessions/`, { params: { documentId } })
+      setSessions(response.data.sessions ?? [])
     } catch {
       setSessions([])
     } finally {
