@@ -174,6 +174,8 @@ class EvidenceMatrixService:
                 "]\n\n"
                 "規則：\n"
                 "- 語意相同或高度相似的合併為同一條\n"
+                "- 合併判斷依據：描述的是同一個功能/流程/限制，即使用詞不同\n"
+                "- 不合併：相似但針對不同使用者或不同情境的需求\n"
                 "- 保留 source_indices 標記來自哪些原始 candidates（1-based）\n"
                 "- 如果不同角色有矛盾觀點，在 conflicts 中說明\n"
                 "- 只回傳 JSON"
@@ -181,7 +183,7 @@ class EvidenceMatrixService:
 
             result = openai_service.chat_completion(
                 messages=[
-                    {"role": "system", "content": "你是需求分析師。合併相似需求。只回傳 JSON。"},
+                    {"role": "system", "content": "你是專案需求整合分析師。你的任務是對比來自不同利害關係人的需求描述，判斷哪些語意相同（合併），哪些有衝突（標記），哪些獨立。合併時保留最完整的描述。只回傳 JSON。"},
                     {"role": "user", "content": prompt},
                 ],
                 model="gpt-5.4-mini",

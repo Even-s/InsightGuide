@@ -301,16 +301,16 @@ class OpenAIService:
 
 每個訪談單元代表一個需要在訪談中釐清的主題領域。你應該：
 1. 找出初稿中的缺口、模糊處、假設、待確認事項
-2. 將這些缺口整理成 8-13 個訪談單元（含開場與結尾）
+2. 將這些缺口整理成 5-8 個訪談單元
 3. 為每個單元寫出「提問依據」—— 說明為什麼需要問這個主題
 4. 標註每個單元對應的 BRD 章節
 5. 排出訪談優先順序
 6. 避免逐段照抄原文標題，應以「訪談邏輯」重新組織
 
-訪談單元的典型結構：
-- 第 0 單元：訪談開場與範圍確認
-- 中間單元：核心業務規則、使用者角色、流程、例外、資料需求等
-- 最後一單元：訪談結尾確認（待補事項、假設條件、下一步）
+嚴格規則：
+- 不要產生「訪談開場」「範圍確認」「結尾確認」等訪談技巧類主題 — 這些由系統自動處理
+- 每個主題都必須是「需要從受訪者口中得到具體資訊」的主題
+- 主題應該對應可寫入 BRD 的具體內容區塊（流程、痛點、需求、限制等）
 
 輸出格式（JSON）：
 {
@@ -318,15 +318,15 @@ class OpenAIService:
   "themes": [
     {
       "theme_number": 0,
-      "title": "訪談開場與範圍確認",
-      "rationale": "初版只定義需求方向...尚未明確第一階段範圍、是否採 MVP",
-      "brd_mapping": ["需求背景", "需求範圍", "MVP 定義"],
-      "priority": 3,
-      "estimated_minutes": 5,
+      "title": "現有業務流程與角色分工",
+      "rationale": "初版未描述現有流程細節，需釐清目前的運作方式",
+      "brd_mapping": ["業務流程", "角色權責"],
+      "priority": 1,
+      "estimated_minutes": 8,
       "source_section_numbers": [1, 2]
     }
   ],
-  "priority_order": [1, 3, 5, 6, 7],
+  "priority_order": [0, 2, 3, 1],
   "priority_reasoning": "若訪談時間有限，建議優先..."
 }
 
@@ -399,46 +399,42 @@ class OpenAIService:
         logger.info(f"Generating question cards for theme: {theme_title}")
 
         # Default fallback prompt
-        system_prompt_fallback = """你是一位資深商業分析師，負責為特定訪談單元設計「提問主題」與「建議提問」。
+        system_prompt_fallback = """你是一位資深商業分析師，負責為特定訪談單元設計具體的訪談問題。
 
-你的輸出結構是「主題 → 問題」的階層：
-- 一個訪談單元下有 3-6 個提問主題（focus_text）
-- 每個提問主題下有 1-3 個具體的建議提問（question_text）
-- 同一個提問主題下的問題應循序漸進：先問大方向，再深入細節
+嚴格規則：
+- 每個問題必須是「需要受訪者提供具體資訊」的問題
+- 不要產生以下類型的問題：
+  • 開場白（「您好，我想先請教...」）
+  • 範圍確認（「這樣的範圍合適嗎？」）
+  • 結尾確認（「還有什麼想補充的嗎？」）
+  • 引導語（「接下來我們聊聊...」）
+  • 純禮貌句
+- 問題中不要包含受訪者的名字
+- 問題要直接切入主題，不需要前導語
+- 每個問題只問一件事
 
 每張卡片的欄位：
-- focus_text：提問主題（這組問題要補齊什麼 BRD 資訊）。同一主題下的多張卡片 focus_text 必須完全相同。
-- question_text：建議提問（訪談者可以怎麼問）
+- focus_text：提問重點（這個問題要補齊什麼 BRD 資訊）
+- question_text：具體問題（口語化，可直接開口問）
 - question_type：問題類型
 - importance：重要度（must = 必問, should = 選問）
 - expected_answer_elements：期待回答要素
-- suggested_followup：追問方向
+- suggested_followup：追問方向（接在回答不足之後直接追問）
 - brd_mapping：對應 BRD 區塊
 - coverage_rule：判斷回答是否充分的規則
 
 設計語言：
 - 以 BA 對 BU 訪談的語氣撰寫，語句要自然、清楚、可直接念出口。
-- 避免使用「agent 的 agent」、「系統之系統」、「該功能模組」等技術或重複詞。若原文提到 agent，對 BU 的問法優先稱為「這個助手」、「需求訪談助手」或「這套工具」。
-- focus_text 使用名詞化的資訊缺口，例如「確認需求訪談助手的目標與範圍」、「界定第一階段支援對象與不納入範圍」。
-- question_text 使用訪談句型，例如「想先請你說明，這個助手第一階段主要希望解決的是什麼問題？」而不是「能否描述 agent 的主要目標？」。
-- 若訪談單元與「目標與範圍」相關，必須明確區分：業務目標、第一階段範圍、使用對象、支援情境、不支援或延後處理的項目。
-- suggested_followup 要能接在回答不足之後直接追問，不要只重述原問題。
-- expected_answer_elements 與 must_mention_elements 要寫成可驗收的資訊項，而不是抽象詞。
-
-目標與範圍類單元的推薦語言範例：
-- focus_text: "確認需求訪談助手的業務目標"
-- question_text: "想先請你說明，這個需求訪談助手第一階段最想解決的是什麼問題？"
-- suggested_followup: "如果只能先做 MVP，哪些目標是這一階段一定要達成的？"
-- focus_text: "界定第一階段支援範圍"
-- question_text: "這個助手第一階段主要支援哪些需求訪談情境？哪些情境先不納入？"
-- suggested_followup: "可以再補充不支援或延後處理的需求類型嗎？"
+- 避免使用「agent 的 agent」、「系統之系統」、「該功能模組」等技術或重複詞。
+- question_text 使用訪談句型，例如「目前這些資料通常是怎麼進到你們的作業流程裡的？」
+- expected_answer_elements 要寫成可驗收的資訊項，而不是抽象詞。
 
 輸出格式（JSON）：
 {
   "cards": [
     {
       "focus_text": "釐清服務優先級的判斷因素",
-      "question_text": "BU 認為服務優先級最重要的判斷因素有哪些？",
+      "question_text": "你們判斷服務優先級最重要的因素有哪些？",
       "question_type": "clarification",
       "importance": "must",
       "expected_answer_elements": ["主要排序因子", "因子優先順序"],
@@ -452,36 +448,16 @@ class OpenAIService:
         ],
         "thresholds": {"probably_sufficient": 0.65, "sufficient": 0.80}
       }
-    },
-    {
-      "focus_text": "釐清服務優先級的判斷因素",
-      "question_text": "若 KYC、資產級距與交易頻率互相衝突，排序應以哪個為主？",
-      "question_type": "clarification",
-      "importance": "must",
-      "expected_answer_elements": ["因子衝突時決策原則", "是否有權重"],
-      "suggested_followup": "是否已有既定服務規則或過去人工排序邏輯可以提供？",
-      "brd_mapping": ["排序規則"],
-      "coverage_rule": {
-        "semantic_anchors": ["衝突", "優先順序", "權重"],
-        "expected_keywords": ["衝突", "優先", "權重", "規則"],
-        "must_mention_elements": [
-          {"text": "說明衝突時優先原則", "required": true, "aliases": ["以哪個為主"], "subpoints": []}
-        ],
-        "thresholds": {"probably_sufficient": 0.65, "sufficient": 0.80}
-      }
     }
   ]
 }
 
 規則：
-- 同一 focus_text 下的問題字串必須完全一致（系統用它來分組）
-- 每個訪談單元產出 3-6 個提問主題，每個主題 1-3 個問題，總計 8-15 張卡片
+- 每個訪談單元產出 2-4 張卡片，只保留最關鍵的問題
 - question_type: clarification, validation, exploration, edge_case, constraint, priority
 - importance: must（核心缺口）或 should（補充資訊）
-- focus_text 是系統判斷回答是否充分的核心
 - 不得要求完整帳號、身分證字號等敏感個資
-- cards 陣列的順序必須是「適合實際對話的提問順序」：先問全局性、背景性的問題，再問細節與規則，最後問確認與例外。模擬一位資深 BA 在訪談現場自然的對話節奏。
-- 同一 focus_text 下的問題也要按由淺入深排列：先問開放式大問題，再問確認細節、邊界條件。
+- cards 陣列的順序必須是「適合實際對話的提問順序」：先問全局性、背景性的問題，再問細節與規則，最後問確認與例外。
 """
 
         system_prompt = system_prompt_fallback
