@@ -581,7 +581,7 @@ class StakeholderCardGenerator:
   ]
 }
 
-請產生 3-5 個問題，按訪談自然順序排列。"""
+請產生 2-3 個問題，按訪談自然順序排列。只保留最關鍵的問題，不要湊數。"""
 
             user_prompt = f"""{context}
 
