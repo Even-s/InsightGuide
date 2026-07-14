@@ -47,6 +47,11 @@ describe('useSlotManagement', () => {
     expect(result.current.showAddSlot).toBe(false)
     expect(result.current.newSlotLabel).toBe('')
     expect(result.current.newSlotCategory).toBe('business')
+    expect(result.current.newSlotPriority).toBe('required')
+    expect(result.current.newSlotMinInterviews).toBe(1)
+    expect(result.current.newSlotFirstWave).toBe(false)
+    expect(result.current.newSlotExpectedContributions).toBe('')
+    expect(result.current.newSlotKeyQuestions).toBe('')
   })
 
   it('handleSkipSlot calls API and reloads', async () => {
@@ -149,6 +154,11 @@ describe('useSlotManagement', () => {
       result.current.setNewSlotLabel('QA Lead')
       result.current.setNewSlotCategory('qa')
       result.current.setNewSlotRationale('Need QA perspective')
+      result.current.setNewSlotPriority('recommended')
+      result.current.setNewSlotMinInterviews(2)
+      result.current.setNewSlotFirstWave(true)
+      result.current.setNewSlotExpectedContributions('Test strategy, Release risks')
+      result.current.setNewSlotKeyQuestions('How do you test?\nWhat blocks release?')
       result.current.setShowAddSlot(true)
     })
 
@@ -160,10 +170,19 @@ describe('useSlotManagement', () => {
       role_category: 'qa',
       role_label: 'QA Lead',
       rationale: 'Need QA perspective',
-      priority: 'required',
+      expected_contributions: ['Test strategy', 'Release risks'],
+      key_questions_to_cover: ['How do you test?', 'What blocks release?'],
+      priority: 'recommended',
+      min_interviews: 2,
+      first_wave: true,
     })
     expect(result.current.showAddSlot).toBe(false)
     expect(result.current.newSlotLabel).toBe('')
+    expect(result.current.newSlotPriority).toBe('required')
+    expect(result.current.newSlotMinInterviews).toBe(1)
+    expect(result.current.newSlotFirstWave).toBe(false)
+    expect(result.current.newSlotExpectedContributions).toBe('')
+    expect(result.current.newSlotKeyQuestions).toBe('')
     expect(loadData).toHaveBeenCalled()
   })
 

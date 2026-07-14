@@ -51,6 +51,7 @@ class StakeholderSlotCreate(BaseModel):
     key_questions_to_cover: List[str] = Field(default_factory=list)
     priority: str = "required"
     min_interviews: int = 1
+    first_wave: bool = False
 
 
 class StakeholderSlotUpdate(BaseModel):
@@ -61,8 +62,25 @@ class StakeholderSlotUpdate(BaseModel):
     key_questions_to_cover: Optional[List[str]] = None
     priority: Optional[str] = None
     min_interviews: Optional[int] = None
+    first_wave: Optional[bool] = None
     status: Optional[str] = None
     order_index: Optional[int] = None
+
+
+class StakeholderSlotDraft(BaseModel):
+    role_category: str = "other"
+    role_label: str = ""
+    rationale: str = ""
+    expected_contributions: List[str] = Field(default_factory=list)
+    key_questions_to_cover: List[str] = Field(default_factory=list)
+    priority: str = "required"
+    min_interviews: int = Field(default=1, ge=1, le=20)
+    first_wave: bool = False
+
+
+class StakeholderSlotDraftResponse(BaseModel):
+    transcript: Optional[str] = None
+    draft: StakeholderSlotDraft
 
 
 class StakeholderSlotSchema(BaseModel):
@@ -75,6 +93,7 @@ class StakeholderSlotSchema(BaseModel):
     keyQuestionsToCover: List[str] = Field(default_factory=list)
     priority: str
     minInterviews: int
+    firstWave: bool
     status: str
     orderIndex: int
     source: str
@@ -100,6 +119,33 @@ class StakeholderProfileCreate(BaseModel):
     knowledge_boundaries: List[str] = Field(default_factory=list)
     decision_power: Optional[str] = None
     notes: Optional[str] = None
+
+
+class StakeholderProfileDraft(BaseModel):
+    name: str = ""
+    role_title: str = ""
+    department: str = ""
+    stakeholder_type: str = "other"
+    expertise_tags: List[str] = Field(default_factory=list)
+    knowledge_boundaries: List[str] = Field(default_factory=list)
+
+
+class StakeholderProfileDraftResponse(BaseModel):
+    transcript: Optional[str] = None
+    draft: StakeholderProfileDraft
+
+
+class InterviewGuideDraft(BaseModel):
+    duration_minutes: int = Field(default=30, ge=10, le=90)
+    interview_purpose: str = ""
+    focus_topics: str = ""
+    exclude_topics: str = ""
+    interview_style: str = ""
+
+
+class InterviewGuideDraftResponse(BaseModel):
+    transcript: Optional[str] = None
+    draft: InterviewGuideDraft
 
 
 class StakeholderProfileUpdate(BaseModel):

@@ -26,6 +26,79 @@ export async function voiceToProjectFields(audioBlob: Blob): Promise<VoiceParseR
   return res.data
 }
 
+export interface StakeholderSlotDraft {
+  role_category: string
+  role_label: string
+  rationale: string
+  expected_contributions: string[]
+  key_questions_to_cover: string[]
+  priority: string
+  min_interviews: number
+  first_wave: boolean
+}
+
+export interface StakeholderSlotDraftResult {
+  transcript?: string | null
+  draft: StakeholderSlotDraft
+}
+
+export async function voiceToStakeholderSlotDraft(
+  projectId: string,
+  audioBlob: Blob,
+): Promise<StakeholderSlotDraftResult> {
+  const formData = new FormData()
+  formData.append('audio', audioBlob, 'role-description.webm')
+  const res = await apiClient.post(
+    `/api/projects/${projectId}/stakeholder-slot-draft/voice`,
+    formData,
+    { headers: { 'Content-Type': 'multipart/form-data' } },
+  )
+  return res.data
+}
+
+export async function refineStakeholderSlotDraft(
+  projectId: string,
+  draft: StakeholderSlotDraft,
+): Promise<StakeholderSlotDraftResult> {
+  const res = await apiClient.post(
+    `/api/projects/${projectId}/stakeholder-slot-draft/refine`,
+    draft,
+  )
+  return res.data
+}
+
+export interface StakeholderProfileDraft {
+  name: string
+  role_title: string
+  department: string
+  stakeholder_type: string
+  expertise_tags: string[]
+  knowledge_boundaries: string[]
+}
+
+export interface StakeholderProfileDraftResult {
+  transcript?: string | null
+  draft: StakeholderProfileDraft
+}
+
+export async function voiceToStakeholderProfileDraft(
+  projectId: string,
+  slotId: string,
+  audioBlob: Blob,
+): Promise<StakeholderProfileDraftResult> {
+  const formData = new FormData()
+  formData.append('audio', audioBlob, 'participant-description.webm')
+  const res = await apiClient.post(
+    `/api/projects/${projectId}/stakeholder-profile-draft/voice`,
+    formData,
+    {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      params: { slot_id: slotId },
+    },
+  )
+  return res.data
+}
+
 // --- Types ---
 
 export interface Project {
@@ -48,6 +121,7 @@ export interface StakeholderSlot {
   keyQuestionsToCover: string[]
   priority: string
   minInterviews: number
+  firstWave: boolean
   status: string
   orderIndex: number
   source: string
@@ -85,11 +159,15 @@ export interface StakeholderPlan {
     total_slots: number
     completed_slots: number
     progress_percentage: number
+    first_wave_total: number
+    first_wave_completed: number
+    generation_source: 'ai_suggested' | 'fallback' | 'user_created'
     slots: Array<{
       id: string
       role_label: string
       role_category: string
       priority: string
+      first_wave: boolean
       status: string
       profiles_count: number
       min_interviews: number
@@ -179,17 +257,21 @@ export async function createStakeholderSlot(projectId: string, data: {
   key_questions_to_cover?: string[]
   priority?: string
   min_interviews?: number
+  first_wave?: boolean
 }): Promise<StakeholderSlot> {
   const res = await apiClient.post(`/api/projects/${projectId}/stakeholder-slots`, data)
   return res.data
 }
 
 export async function updateStakeholderSlot(slotId: string, data: {
+  role_category?: string
   role_label?: string
   rationale?: string
   expected_contributions?: string[]
   key_questions_to_cover?: string[]
   priority?: string
+  min_interviews?: number
+  first_wave?: boolean
   status?: string
 }): Promise<StakeholderSlot> {
   const res = await apiClient.put(`/api/projects/stakeholder-slots/${slotId}`, data)
@@ -542,6 +624,36 @@ export interface InterviewGuideOptions {
   target_card_count?: number
   must_cover_topics?: string[]
   reference_questions?: string[]
+}
+
+export interface InterviewGuideDraft {
+  duration_minutes: number
+  interview_purpose: string
+  focus_topics: string
+  exclude_topics: string
+  interview_style: string
+}
+
+export interface InterviewGuideDraftResult {
+  transcript?: string | null
+  draft: InterviewGuideDraft
+}
+
+export async function voiceToInterviewGuideDraft(
+  projectId: string,
+  profileId: string,
+  audioBlob: Blob,
+  currentOptions: InterviewGuideDraft,
+): Promise<InterviewGuideDraftResult> {
+  const formData = new FormData()
+  formData.append('audio', audioBlob, 'guide-settings.webm')
+  formData.append('current_options', JSON.stringify(currentOptions))
+  const res = await apiClient.post(
+    `/api/projects/${projectId}/stakeholders/${profileId}/interview-guide-draft/voice`,
+    formData,
+    { headers: { 'Content-Type': 'multipart/form-data' } },
+  )
+  return res.data
 }
 
 export async function generateInterviewGuide(

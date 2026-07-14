@@ -110,7 +110,7 @@ export default function EvidenceMatrixPage() {
 
       {/* Summary */}
       {summary && summary.total_candidates > 0 && (
-        <div className="grid grid-cols-5 gap-3 mb-6">
+        <div className="motion-reveal-in grid grid-cols-5 gap-3 mb-6">
           <div className="p-3 bg-white rounded-xl border border-cream-200 text-center">
             <div className="text-xl font-bold text-natural-700">{summary.total_candidates}</div>
             <div className="text-xs text-natural-500">候選需求</div>
@@ -136,7 +136,7 @@ export default function EvidenceMatrixPage() {
 
       {/* Roles info */}
       {summary && summary.roles_missing.length > 0 && (
-        <div className="mb-6 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+        <div className="motion-status-in mb-6 p-3 bg-amber-50 border border-amber-200 rounded-lg">
           <span className="text-sm text-amber-800 font-medium">缺少角色驗證：</span>
           <span className="text-sm text-amber-700 ml-2">{summary.roles_missing.join(', ')}</span>
         </div>
@@ -161,15 +161,16 @@ export default function EvidenceMatrixPage() {
 
       {/* Entries */}
       {filteredEntries.length === 0 ? (
-        <div className="text-center py-12 text-natural-500">
+        <div className="motion-fade-in text-center py-12 text-natural-500">
           {entries.length === 0 ? '尚無資料。請先完成訪談並產生洞察紀錄，再刷新矩陣。' : '此篩選條件下無結果。'}
         </div>
       ) : (
         <div className="space-y-3">
-          {filteredEntries.map(entry => (
+          {filteredEntries.map((entry, entryIndex) => (
             <div
               key={entry.id}
-              className="p-4 bg-white rounded-xl border border-cream-200 hover:border-cream-300 transition-colors"
+              className="motion-surface-in p-4 bg-white rounded-xl border border-cream-200 hover:border-cream-300 transition-colors"
+              style={{ animationDelay: `${Math.min(entryIndex * 35, 210)}ms` }}
             >
               <div className="flex items-start justify-between">
                 <div className="flex-1">
@@ -217,7 +218,7 @@ export default function EvidenceMatrixPage() {
 
               {/* Expanded evidence */}
               {expandedEntry === entry.id && (
-                <div className="mt-3 pt-3 border-t border-cream-200 space-y-2">
+                <div className="motion-reveal-in mt-3 pt-3 border-t border-cream-200 space-y-2">
                   {entry.supportingEvidence.map((ev, i) => (
                     <div key={i} className="text-xs p-2 bg-cream-50 rounded">
                       <span className="font-medium text-natural-700">{ev.stakeholder_name}</span>

@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base
@@ -28,6 +28,7 @@ class StakeholderSlot(Base):
     key_questions_to_cover = Column(JSON, nullable=False, default=[])
     priority = Column(String, nullable=False, default="required")
     min_interviews = Column(Integer, nullable=False, default=1)
+    first_wave = Column(Boolean, nullable=False, default=False)
     status = Column(String, nullable=False, default="unassigned")
     order_index = Column(Integer, nullable=False, default=0)
     source = Column(String, nullable=False, default="ai_suggested")

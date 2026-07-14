@@ -32,8 +32,13 @@ elif [ "$(node -v | cut -d. -f1 | tr -d 'v')" -lt 20 ]; then
     MISSING="${MISSING}\n   ❌ node 版本過舊 ($(node -v)) — 需要 20+：brew upgrade node"
 fi
 
-if ! command -v python3 >/dev/null 2>&1; then
-    MISSING="${MISSING}\n   ❌ python3 — 請安裝 Python 3.11+：brew install python@3.11 或 https://www.python.org/"
+PYTHON_BIN=""
+if command -v python3.11 >/dev/null 2>&1; then
+    PYTHON_BIN="$(command -v python3.11)"
+elif command -v python3 >/dev/null 2>&1 && python3 -c 'import sys; raise SystemExit(sys.version_info < (3, 11))'; then
+    PYTHON_BIN="$(command -v python3)"
+else
+    MISSING="${MISSING}\n   ❌ Python 3.11+ — 請安裝：brew install python@3.11"
 fi
 
 if [ -n "$MISSING" ]; then
@@ -42,7 +47,7 @@ if [ -n "$MISSING" ]; then
     printf "$MISSING\n"
     echo ""
     info "macOS 一鍵安裝所有前置需求："
-    info "  brew install --cask docker && brew install node python@3.11"
+    info "  請雙擊 InstallInsightGuide.command"
     echo ""
     info "安裝完成後請重新執行：./insightguide.sh setup"
     exit 1
@@ -50,7 +55,7 @@ fi
 
 info "✅ docker: $(docker --version | head -1)"
 info "✅ node: $(node -v)"
-info "✅ python3: $(python3 --version)"
+info "✅ python: $($PYTHON_BIN --version) ($PYTHON_BIN)"
 echo ""
 
 # ─── Environment file ─────────────────────────────────────────────────────────
@@ -68,6 +73,21 @@ echo ""
 # ─── Docker services ──────────────────────────────────────────────────────────
 
 bold "3. 啟動 Docker 基礎服務 (PostgreSQL, Redis, MinIO)..."
+
+if ! docker info >/dev/null 2>&1; then
+    if [ "$(uname -s)" = "Darwin" ] && [ -d /Applications/Docker.app ]; then
+        info "Docker Desktop 尚未啟動，正在開啟..."
+        open -a Docker
+        for _ in $(seq 1 90); do
+            docker info >/dev/null 2>&1 && break
+            sleep 2
+        done
+    fi
+fi
+
+if ! docker info >/dev/null 2>&1; then
+    fail "Docker daemon 未就緒，請完成 Docker Desktop 首次啟動設定後重試"
+fi
 
 compose() {
     if command -v docker-compose >/dev/null 2>&1; then
@@ -106,7 +126,7 @@ bold "4. 安裝後端依賴..."
 cd "$ROOT_DIR/backend"
 
 if [ ! -d venv ]; then
-    python3 -m venv venv
+    "$PYTHON_BIN" -m venv venv
     info "已建立 Python 虛擬環境"
 fi
 
@@ -136,7 +156,7 @@ cd "$ROOT_DIR"
 
 # ─── Make scripts executable ──────────────────────────────────────────────────
 
-chmod +x insightguide.sh InsightGuide.command bin/*.sh
+chmod +x insightguide.sh ./*.command bin/*.sh
 
 # ─── Done ─────────────────────────────────────────────────────────────────────
 

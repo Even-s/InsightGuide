@@ -13,12 +13,17 @@
 
 macOS 安裝：
 ```bash
-brew install node python@3.11 docker libreoffice poppler
+brew install node python@3.11 poppler
+brew install --cask docker-desktop libreoffice
 ```
 
 ---
 
 ## 首次安裝
+
+macOS 新電腦可直接雙擊 `InstallInsightGuide.command`，它會安裝系統工具、Docker Desktop 與所有專案依賴。安裝 Homebrew 或 Docker 時可能會要求 macOS 密碼或首次啟動授權。
+
+也可在終端手動執行：
 
 ```bash
 cd InsightGuide
@@ -47,19 +52,22 @@ cd InsightGuide
 ```
 
 腳本會啟動 Docker services、後端 + Celery + 前端，並在完成後開啟瀏覽器。
+在 macOS 上，如果 Docker Desktop 尚未運行，啟動器會自動開啟並等待它就緒。應用程序由 `launchctl` 管理，關閉終端後仍會持續運行。
 
 ### 其他常用指令
 
 ```bash
 ./insightguide.sh            # 互動式控制中心
+./insightguide.sh start      # 只啟動尚未運行的服務
 ./insightguide.sh status     # 檢查服務狀態與健康度
 ./insightguide.sh restart    # 完整重啟所有服務
+./insightguide.sh restart backend  # 單獨重啟 backend / celery / frontend
 ./insightguide.sh logs       # 查看近期 log
 ./insightguide.sh tail       # 持續追蹤 log
 ./insightguide.sh stop       # 停止所有服務
 ```
 
-macOS 使用者也可以雙擊 `InsightGuide.command` 以 Finder 啟動。
+macOS 使用者也可以雙擊 `InsightGuide.command` 啟動，或雙擊 `StopInsightGuide.command` 關閉所有服務。
 
 ---
 

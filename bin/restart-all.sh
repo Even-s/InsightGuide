@@ -1,160 +1,98 @@
 #!/bin/bash
-# Restart all InsightGuide services.
+# Start or restart the complete local InsightGuide stack.
 
 set -e
 
-export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=common.sh
+source "$SCRIPT_DIR/common.sh"
 
-ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cd "$ROOT_DIR"
+MODE="${1:-restart}"
+if [ "$MODE" != "start" ] && [ "$MODE" != "restart" ]; then
+    echo "Usage: $0 [start|restart]" >&2
+    exit 2
+fi
 
-mkdir -p logs
+check_environment() {
+    local missing=0
 
-echo "🔄 重啟所有 InsightGuide 服務..."
+    [ -x "$ROOT_DIR/backend/venv/bin/python" ] || { fail "backend/venv 尚未建立"; missing=1; }
+    [ -x "$ROOT_DIR/backend/venv/bin/celery" ] || { fail "Celery 尚未安裝"; missing=1; }
+    [ -f "$ROOT_DIR/backend/.env" ] || { fail "backend/.env 不存在"; missing=1; }
+    [ -d "$ROOT_DIR/frontend/node_modules" ] || { fail "frontend/node_modules 尚未安裝"; missing=1; }
+    command_exists npm || { fail "找不到 npm"; missing=1; }
+    command_exists curl || { fail "找不到 curl"; missing=1; }
+
+    if [ "$missing" -ne 0 ]; then
+        info "請先執行 ./insightguide.sh setup"
+        return 1
+    fi
+}
+
+bold "InsightGuide ${MODE}"
 echo ""
 
-require_cmd() {
-    local cmd="$1"
-    if ! command -v "$cmd" >/dev/null 2>&1; then
-        echo "❌ 找不到 $cmd。請確認 Docker / Node.js 已安裝，或 PATH 包含 /usr/local/bin /opt/homebrew/bin。"
+check_environment
+wait_for_docker
+
+if [ "$MODE" = "restart" ]; then
+    info "停止現有應用程序..."
+    stop_application_services
+    sleep 1
+fi
+
+bold "1. 啟動基礎服務"
+compose up -d postgres redis minio
+wait_for_container insightguide-postgres
+wait_for_container insightguide-redis
+wait_for_container insightguide-minio
+echo ""
+
+bold "2. 啟動後端 API"
+if [ "$MODE" = "start" ] && http_ok "$BACKEND_URL/health"; then
+    ok "後端已在運行"
+else
+    stop_service backend
+    start_service backend "$ROOT_DIR/backend" \
+        "env DEBUG=false venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port $BACKEND_PORT --reload"
+    if ! wait_for_http "後端" "$BACKEND_URL/health" 30; then
+        tail -40 "$LOG_DIR/backend.log" 2>/dev/null || true
+        tail -40 "$LOG_DIR/backend.err" 2>/dev/null || true
         exit 1
     fi
-}
+fi
+echo ""
 
-compose() {
-    if command -v docker-compose >/dev/null 2>&1; then
-        docker-compose "$@"
-    else
-        docker compose "$@"
+bold "3. 啟動 Celery worker"
+if [ "$MODE" = "start" ] && celery_ok; then
+    ok "Celery 已在運行"
+else
+    stop_service celery
+    start_service celery "$ROOT_DIR/backend" \
+        "env DEBUG=false venv/bin/celery -A app.workers.celery_app worker --loglevel=info --pool=solo"
+    if ! wait_for_celery 15; then
+        tail -40 "$LOG_DIR/celery.err" 2>/dev/null || true
+        exit 1
     fi
-}
-
-wait_for_http() {
-    local name="$1"
-    local url="$2"
-    local attempts="${3:-20}"
-
-    for _ in $(seq 1 "$attempts"); do
-        if curl -s -m 3 "$url" >/dev/null 2>&1; then
-            echo "   ✅ $name 啟動成功"
-            return 0
-        fi
-        sleep 1
-    done
-
-    echo "   ❌ $name 未響應：$url"
-    return 1
-}
-
-wait_for_container_health() {
-    local container="$1"
-    local attempts="${2:-30}"
-
-    for _ in $(seq 1 "$attempts"); do
-        local status
-        status="$(docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$container" 2>/dev/null || echo unknown)"
-        if [ "$status" = "healthy" ] || [ "$status" = "running" ]; then
-            echo "   ✅ $container: $status"
-            return 0
-        fi
-        sleep 1
-    done
-
-    echo "   ❌ $container 尚未就緒"
-    return 1
-}
-
-require_cmd docker
-require_cmd curl
-require_cmd npm
-
-echo "1️⃣  停止現有服務..."
-launchctl remove insightguide.frontend 2>/dev/null || true
-launchctl remove insightguide.celery 2>/dev/null || true
-pkill -9 -f "uvicorn app.main:app" 2>/dev/null || true
-pkill -9 -f "celery -A app.workers.celery_app worker" 2>/dev/null || true
-pkill -9 -f "Project/InsightGuide/frontend/node_modules/.bin/vite" 2>/dev/null || true
-pkill -9 -f "npm run dev" 2>/dev/null || true
-lsof -ti:8002 | xargs kill -9 2>/dev/null || true
-lsof -ti:5174 | xargs kill -9 2>/dev/null || true
-sleep 2
-echo "   ✅ 已停止舊進程"
-echo ""
-
-echo "2️⃣  啟動 Docker 服務..."
-compose -f docker-compose.yml up -d postgres redis minio
-wait_for_container_health insightguide-postgres
-wait_for_container_health insightguide-redis
-wait_for_container_health insightguide-minio
-echo ""
-
-echo "3️⃣  啟動後端 (Port 8002)..."
-cd "$ROOT_DIR/backend"
-source venv/bin/activate
-DEBUG=false nohup python -m uvicorn app.main:app --host 0.0.0.0 --port 8002 --reload > "$ROOT_DIR/logs/backend.log" 2>&1 &
-BACKEND_PID=$!
-echo "$BACKEND_PID" > "$ROOT_DIR/logs/backend.pid"
-cd "$ROOT_DIR"
-if ! wait_for_http "後端" "http://localhost:8002/health" 20; then
-    tail -40 logs/backend.log
-    exit 1
 fi
-echo "   PID: $BACKEND_PID"
 echo ""
 
-echo "4️⃣  啟動 Celery worker..."
-if command -v launchctl >/dev/null 2>&1; then
-    launchctl submit -l insightguide.celery -o "$ROOT_DIR/logs/celery.log" -e "$ROOT_DIR/logs/celery.err" -- /bin/bash -lc "cd '$ROOT_DIR/backend' && source venv/bin/activate && export DEBUG=false && celery -A app.workers.celery_app worker --loglevel=info --pool=solo"
-    echo "   ✅ Celery 已透過 launchctl 啟動"
+bold "4. 啟動前端"
+if [ "$MODE" = "start" ] && http_ok "$FRONTEND_URL"; then
+    ok "前端已在運行"
 else
-    cd "$ROOT_DIR/backend"
-    DEBUG=false nohup celery -A app.workers.celery_app worker --loglevel=info --pool=solo > "$ROOT_DIR/logs/celery.log" 2>&1 &
-    CELERY_PID=$!
-    echo "$CELERY_PID" > "$ROOT_DIR/logs/celery.pid"
-    cd "$ROOT_DIR"
-    echo "   ✅ Celery 已啟動 (PID: $CELERY_PID)"
+    stop_service frontend
+    start_service frontend "$ROOT_DIR/frontend" "npm run dev"
+    if ! wait_for_http "前端" "$FRONTEND_URL" 30; then
+        tail -40 "$LOG_DIR/frontend.log" 2>/dev/null || true
+        tail -40 "$LOG_DIR/frontend.err" 2>/dev/null || true
+        exit 1
+    fi
 fi
 echo ""
 
-echo "5️⃣  啟動前端 (Port 5174)..."
-if command -v launchctl >/dev/null 2>&1; then
-    launchctl submit -l insightguide.frontend -o "$ROOT_DIR/logs/frontend.log" -e "$ROOT_DIR/logs/frontend.err" -- /bin/bash -lc "cd '$ROOT_DIR/frontend' && export PATH='$PATH' && npm run dev"
-    echo "   ✅ 前端已透過 launchctl 啟動"
-else
-    cd "$ROOT_DIR/frontend"
-    nohup npm run dev > "$ROOT_DIR/logs/frontend.log" 2>&1 &
-    FRONTEND_PID=$!
-    echo "$FRONTEND_PID" > "$ROOT_DIR/logs/frontend.pid"
-    cd "$ROOT_DIR"
-    echo "   ✅ 前端已啟動 (PID: $FRONTEND_PID)"
-fi
-if ! wait_for_http "前端" "http://localhost:5174" 20; then
-    tail -40 logs/frontend.log
-    [ -f logs/frontend.err ] && tail -40 logs/frontend.err
-    exit 1
-fi
-echo ""
-
-echo "📊 服務狀態："
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo -n "後端 (8002): "
-curl -s -m 2 http://localhost:8002/health >/dev/null && echo "✅ 運行中" || echo "❌ 未響應"
-echo -n "前端 (5174): "
-curl -s -m 2 http://localhost:5174 >/dev/null && echo "✅ 運行中" || echo "❌ 未響應"
-docker ps --filter "name=insightguide" --format "{{.Names}} {{.Status}}"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-
-echo "🌐 訪問地址："
-echo "   前端: http://localhost:5174"
-echo "   後端: http://localhost:8002"
-echo "   API 文檔: http://localhost:8002/docs"
-echo ""
-
-echo "📝 日誌位置："
-echo "   後端: logs/backend.log"
-echo "   Celery: logs/celery.log"
-echo "   前端: logs/frontend.log"
-echo ""
-
-echo "✅ 所有服務已重啟！"
+bold "✅ InsightGuide 已就緒"
+echo "   前端:     $FRONTEND_URL"
+echo "   後端:     $BACKEND_URL"
+echo "   API 文件: $BACKEND_URL/docs"
+echo "   MinIO:    http://localhost:9001"

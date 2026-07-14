@@ -314,9 +314,9 @@ export default function PrepSessionListPage() {
 
         {/* Empty state */}
         {projectsData.length === 0 && (
-          <div className="text-center py-12 bg-white rounded-xl border border-cream-200">
+          <div className="motion-fade-in text-center py-12 bg-white rounded-xl border border-cream-200">
             <p className="text-natural-500 mb-3">尚無專案</p>
-            <button onClick={() => navigate('/')} className="text-sage-600 hover:underline text-sm">
+            <button onClick={() => navigate('/projects/new')} className="text-sage-600 hover:underline text-sm">
               建立第一個專案
             </button>
           </div>
@@ -324,13 +324,17 @@ export default function PrepSessionListPage() {
 
         {/* Project hierarchy */}
         <div className="space-y-4">
-          {projectsData.map(({ project, stakeholders }) => {
+          {projectsData.map(({ project, stakeholders }, projectIndex) => {
             const isProjectExpanded = expandedProjects.has(project.id)
             const projectSessions = stakeholders.reduce((s, st) => s + st.sessions.length, 0)
             const projectCompleted = stakeholders.reduce((s, st) => s + st.sessions.filter(se => se.status === 'ended').length, 0)
 
             return (
-              <div key={project.id} className="bg-white rounded-xl border border-cream-200 overflow-hidden">
+              <div
+                key={project.id}
+                className="motion-surface-in bg-white rounded-xl border border-cream-200 overflow-hidden"
+                style={{ animationDelay: `${Math.min(projectIndex * 45, 225)}ms` }}
+              >
                 {/* Project row */}
                 <div
                   className="px-5 py-4 cursor-pointer hover:bg-cream-50 transition-colors flex items-center gap-3"
@@ -373,7 +377,7 @@ export default function PrepSessionListPage() {
 
                 {/* Expanded: Stakeholders */}
                 {isProjectExpanded && (
-                  <div className="border-t border-cream-200">
+                  <div className="motion-reveal-in border-t border-cream-200">
                     {stakeholders.length === 0 ? (
                       <div className="px-10 py-4 text-sm text-natural-400">
                         尚無受訪者。
@@ -446,7 +450,7 @@ export default function PrepSessionListPage() {
 
                             {/* Expanded: Sessions */}
                             {isStakeholderExpanded && (
-                              <div className="px-16 pb-3">
+                              <div className="motion-reveal-in px-16 pb-3">
                                 {sessions.length === 0 ? (
                                   <div className="text-xs text-natural-400 py-2">尚無訪談紀錄</div>
                                 ) : (

@@ -1,15 +1,18 @@
 """Project, Stakeholder Plan, and Stakeholder Profile routes."""
 
+import io
 import json
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.schemas.project import (
+    InterviewGuideDraft,
+    InterviewGuideDraftResponse,
     ProjectCreate,
     ProjectDashboardResponse,
     ProjectListResponse,
@@ -17,9 +20,13 @@ from app.schemas.project import (
     ProjectUpdate,
     StakeholderPlanResponse,
     StakeholderProfileCreate,
+    StakeholderProfileDraft,
+    StakeholderProfileDraftResponse,
     StakeholderProfileSchema,
     StakeholderProfileUpdate,
     StakeholderSlotCreate,
+    StakeholderSlotDraft,
+    StakeholderSlotDraftResponse,
     StakeholderSlotSchema,
     StakeholderSlotUpdate,
 )
@@ -31,6 +38,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 DEMO_USER_ID = "user_default"
+
+
+def _ai_assist_error_detail(exc: Exception, fallback: str) -> str:
+    """Return an actionable, non-sensitive message for common OpenAI failures."""
+    status_code = getattr(exc, "status_code", None)
+    error_code = getattr(exc, "code", None)
+    if status_code == 401 or error_code in {"invalid_api_key", "ip_not_authorized"}:
+        return "OpenAI API 驗證失敗，請檢查 API key 與 IP 白名單。"
+    return fallback
 
 
 def _project_to_schema(project) -> ProjectSchema:
@@ -62,6 +78,7 @@ def _slot_to_schema(slot, db: Session) -> StakeholderSlotSchema:
         keyQuestionsToCover=slot.key_questions_to_cover or [],
         priority=slot.priority,
         minInterviews=slot.min_interviews,
+        firstWave=slot.first_wave,
         status=slot.status,
         orderIndex=slot.order_index,
         source=slot.source,
@@ -305,15 +322,314 @@ def regenerate_stakeholder_plan(project_id: str, db: Session = Depends(get_db)):
 
     from app.models.stakeholder_slot import StakeholderSlot
 
-    # Only delete AI-suggested slots, keep user-created ones
+    # Replace generated slots, but preserve roles explicitly created by the user.
     db.query(StakeholderSlot).filter(
         StakeholderSlot.project_id == project_id,
-        StakeholderSlot.source == "ai_suggested",
+        StakeholderSlot.source.in_(["ai_suggested", "fallback"]),
     ).delete()
     db.commit()
 
     slots = stakeholder_plan_service.generate_initial_plan(db, project_id)
     return {"slots": [_slot_to_schema(s, db) for s in slots]}
+
+
+@router.post(
+    "/{project_id}/stakeholder-slot-draft/voice",
+    response_model=StakeholderSlotDraftResponse,
+)
+async def voice_to_stakeholder_slot_draft(
+    project_id: str,
+    audio: UploadFile = File(...),
+    db: Session = Depends(get_db),
+):
+    """Transcribe a spoken role description and return an unsaved role draft."""
+    project = project_service.get_project(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    audio_bytes = await audio.read()
+    if len(audio_bytes) < 1000:
+        raise HTTPException(status_code=400, detail="錄音太短，請再說明一次。")
+    if len(audio_bytes) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="錄音檔超過 25 MB，請縮短後再試。")
+
+    from app.models.stakeholder_slot import StakeholderSlot
+    from app.services.openai_service import openai_service
+
+    try:
+        transcript_response = openai_service.client.audio.transcriptions.create(
+            model="gpt-4o-transcribe",
+            file=(
+                audio.filename or "role-description.webm",
+                io.BytesIO(audio_bytes),
+                audio.content_type or "audio/webm",
+            ),
+            language="zh",
+            response_format="json",
+        )
+        transcript = str(getattr(transcript_response, "text", "") or "").strip()
+    except Exception as exc:
+        logger.exception("Stakeholder role transcription failed: %s", exc)
+        raise HTTPException(
+            status_code=502,
+            detail=_ai_assist_error_detail(exc, "語音轉文字失敗，請稍後再試。"),
+        ) from exc
+
+    if not transcript:
+        raise HTTPException(status_code=400, detail="無法辨識語音內容，請再說明一次。")
+
+    existing_labels = [
+        row.role_label
+        for row in db.query(StakeholderSlot).filter(StakeholderSlot.project_id == project_id).all()
+    ]
+    try:
+        draft = stakeholder_plan_service.assist_slot_draft(
+            project,
+            transcript=transcript,
+            existing_role_labels=existing_labels,
+        )
+    except Exception as exc:
+        logger.exception("Stakeholder role voice parsing failed: %s", exc)
+        raise HTTPException(
+            status_code=502,
+            detail=_ai_assist_error_detail(exc, "AI 無法整理角色內容，請稍後再試。"),
+        ) from exc
+
+    return StakeholderSlotDraftResponse(transcript=transcript, draft=StakeholderSlotDraft(**draft))
+
+
+@router.post(
+    "/{project_id}/stakeholder-profile-draft/voice",
+    response_model=StakeholderProfileDraftResponse,
+)
+async def voice_to_stakeholder_profile_draft(
+    project_id: str,
+    audio: UploadFile = File(...),
+    slot_id: Optional[str] = None,
+    db: Session = Depends(get_db),
+):
+    """Transcribe spoken participant details and return an unsaved profile draft."""
+    project = project_service.get_project(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    slot_context = None
+    if slot_id:
+        from app.models.stakeholder_slot import StakeholderSlot
+
+        slot = (
+            db.query(StakeholderSlot)
+            .filter(
+                StakeholderSlot.id == slot_id,
+                StakeholderSlot.project_id == project_id,
+            )
+            .first()
+        )
+        if not slot:
+            raise HTTPException(status_code=404, detail="Stakeholder slot not found")
+        slot_context = {
+            "role_category": slot.role_category,
+            "role_label": slot.role_label,
+            "rationale": slot.rationale or "",
+        }
+
+    audio_bytes = await audio.read()
+    if len(audio_bytes) < 1000:
+        raise HTTPException(status_code=400, detail="錄音太短，請再說明一次。")
+    if len(audio_bytes) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="錄音檔超過 25 MB，請縮短後再試。")
+
+    from app.services.openai_service import openai_service
+
+    try:
+        transcript_response = openai_service.client.audio.transcriptions.create(
+            model="gpt-4o-transcribe",
+            file=(
+                audio.filename or "participant-description.webm",
+                io.BytesIO(audio_bytes),
+                audio.content_type or "audio/webm",
+            ),
+            language="zh",
+            response_format="json",
+        )
+        transcript = str(getattr(transcript_response, "text", "") or "").strip()
+    except Exception as exc:
+        logger.exception("Stakeholder profile transcription failed: %s", exc)
+        raise HTTPException(
+            status_code=502,
+            detail=_ai_assist_error_detail(exc, "語音轉文字失敗，請稍後再試。"),
+        ) from exc
+
+    if not transcript:
+        raise HTTPException(status_code=400, detail="無法辨識語音內容，請再說明一次。")
+
+    try:
+        draft = stakeholder_plan_service.assist_profile_draft(
+            project,
+            transcript=transcript,
+            slot_context=slot_context,
+        )
+    except Exception as exc:
+        logger.exception("Stakeholder profile voice parsing failed: %s", exc)
+        raise HTTPException(
+            status_code=502,
+            detail=_ai_assist_error_detail(exc, "AI 無法整理受訪者資料，請稍後再試。"),
+        ) from exc
+
+    return StakeholderProfileDraftResponse(
+        transcript=transcript,
+        draft=StakeholderProfileDraft(**draft),
+    )
+
+
+@router.post(
+    "/{project_id}/stakeholders/{profile_id}/interview-guide-draft/voice",
+    response_model=InterviewGuideDraftResponse,
+)
+async def voice_to_interview_guide_draft(
+    project_id: str,
+    profile_id: str,
+    audio: UploadFile = File(...),
+    current_options: str = Form("{}"),
+    db: Session = Depends(get_db),
+):
+    """Transcribe spoken guide preferences and return an unsaved guide draft."""
+    project = project_service.get_project(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    from app.models.stakeholder_profile import StakeholderProfile
+    from app.models.stakeholder_slot import StakeholderSlot
+
+    profile = (
+        db.query(StakeholderProfile)
+        .filter(
+            StakeholderProfile.id == profile_id,
+            StakeholderProfile.project_id == project_id,
+        )
+        .first()
+    )
+    if not profile:
+        raise HTTPException(status_code=404, detail="Stakeholder profile not found")
+
+    try:
+        current_draft = InterviewGuideDraft(**json.loads(current_options))
+    except (json.JSONDecodeError, TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="訪談大綱設定格式不正確。") from exc
+
+    slot_context = {}
+    if profile.slot_id:
+        slot = (
+            db.query(StakeholderSlot)
+            .filter(
+                StakeholderSlot.id == profile.slot_id,
+                StakeholderSlot.project_id == project_id,
+            )
+            .first()
+        )
+        if slot:
+            slot_context = {
+                "role_category": slot.role_category,
+                "role_label": slot.role_label,
+                "rationale": slot.rationale or "",
+            }
+
+    profile_context = {
+        "name": profile.name,
+        "role_title": profile.role_title or "",
+        "department": profile.department or "",
+        "stakeholder_type": profile.stakeholder_type,
+        "expertise_tags": profile.expertise_tags or [],
+        "knowledge_boundaries": profile.knowledge_boundaries or [],
+        "slot": slot_context,
+    }
+
+    audio_bytes = await audio.read()
+    if len(audio_bytes) < 1000:
+        raise HTTPException(status_code=400, detail="錄音太短，請再說明一次。")
+    if len(audio_bytes) > 25 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="錄音檔超過 25 MB，請縮短後再試。")
+
+    from app.services.openai_service import openai_service
+
+    try:
+        transcript_response = openai_service.client.audio.transcriptions.create(
+            model="gpt-4o-transcribe",
+            file=(
+                audio.filename or "guide-settings.webm",
+                io.BytesIO(audio_bytes),
+                audio.content_type or "audio/webm",
+            ),
+            language="zh",
+            response_format="json",
+        )
+        transcript = str(getattr(transcript_response, "text", "") or "").strip()
+    except Exception as exc:
+        logger.exception("Interview guide settings transcription failed: %s", exc)
+        raise HTTPException(
+            status_code=502,
+            detail=_ai_assist_error_detail(exc, "語音轉文字失敗，請稍後再試。"),
+        ) from exc
+
+    if not transcript:
+        raise HTTPException(status_code=400, detail="無法辨識語音內容，請再說明一次。")
+
+    try:
+        draft = stakeholder_plan_service.assist_interview_guide_draft(
+            project,
+            transcript=transcript,
+            profile_context=profile_context,
+            current_draft=current_draft.model_dump(),
+        )
+    except Exception as exc:
+        logger.exception("Interview guide settings voice parsing failed: %s", exc)
+        raise HTTPException(
+            status_code=502,
+            detail=_ai_assist_error_detail(exc, "AI 無法整理訪談大綱設定，請稍後再試。"),
+        ) from exc
+
+    return InterviewGuideDraftResponse(
+        transcript=transcript,
+        draft=InterviewGuideDraft(**draft),
+    )
+
+
+@router.post(
+    "/{project_id}/stakeholder-slot-draft/refine",
+    response_model=StakeholderSlotDraftResponse,
+)
+def refine_stakeholder_slot_draft(
+    project_id: str,
+    data: StakeholderSlotDraft,
+    db: Session = Depends(get_db),
+):
+    """Complete and improve an unsaved stakeholder-role draft."""
+    project = project_service.get_project(db, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    if not data.role_label.strip():
+        raise HTTPException(status_code=400, detail="請先填寫角色名稱，再使用 AI 優化。")
+
+    from app.models.stakeholder_slot import StakeholderSlot
+
+    existing_labels = [
+        row.role_label
+        for row in db.query(StakeholderSlot).filter(StakeholderSlot.project_id == project_id).all()
+    ]
+    try:
+        draft = stakeholder_plan_service.assist_slot_draft(
+            project,
+            current_draft=data.model_dump(),
+            existing_role_labels=existing_labels,
+        )
+    except Exception as exc:
+        logger.exception("Stakeholder role refinement failed: %s", exc)
+        raise HTTPException(
+            status_code=502,
+            detail=_ai_assist_error_detail(exc, "AI 優化失敗，請稍後再試。"),
+        ) from exc
+
+    return StakeholderSlotDraftResponse(draft=StakeholderSlotDraft(**draft))
 
 
 @router.post("/{project_id}/stakeholder-slots", status_code=status.HTTP_201_CREATED)

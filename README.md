@@ -30,14 +30,19 @@ InsightGuide 是一款 AI 驅動的需求訪談輔助系統，透過 OpenAI Real
 | 指令 | 說明 |
 |------|------|
 | `./insightguide.sh` | 互動式控制中心 |
+| `./insightguide.sh start` | 啟動所有服務（已運行的服務不會重啟） |
 | `./insightguide.sh launch` | 啟動所有服務並開啟瀏覽器 |
 | `./insightguide.sh restart` | 完整重啟所有服務 |
+| `./insightguide.sh restart backend` | 只重啟後端（也可指定 `celery` / `frontend`） |
 | `./insightguide.sh status` | 檢查服務狀態與健康度 |
 | `./insightguide.sh logs` | 查看近期 log |
 | `./insightguide.sh tail` | 持續追蹤 log |
 | `./insightguide.sh stop` | 停止所有服務 |
 
-macOS 使用者也可以雙擊 `InsightGuide.command` 以 Finder 啟動。
+macOS 使用者也可以雙擊 `InsightGuide.command` 啟動，或雙擊 `StopInsightGuide.command` 關閉所有服務。
+啟動器會在需要時開啟 Docker Desktop，並等待 PostgreSQL、Redis、MinIO、後端、Celery 與前端就緒。
+
+在新的 Mac 上，可雙擊 `InstallInsightGuide.command` 安裝 Homebrew、Node.js、Python 3.11、Docker Desktop、LibreOffice、Poppler 與全部專案依賴。
 
 **服務端口**：
 - 前端：http://localhost:5174
@@ -119,6 +124,7 @@ macOS 使用者也可以雙擊 `InsightGuide.command` 以 Finder 啟動。
 |------|------|
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 系統架構與技術規格 |
 | [docs/QUICKSTART.md](docs/QUICKSTART.md) | 快速啟動指南 |
+| [docs/FUNCTIONAL_TEST_PLAN.md](docs/FUNCTIONAL_TEST_PLAN.md) | 全系統功能測試案例、優先級與自動化里程碑 |
 | [docs/REFACTORING_PLAN.md](docs/REFACTORING_PLAN.md) | 歷史：已完成的多訪談架構重構計劃 |
 | [docs/improvement_plan_v2.md](docs/improvement_plan_v2.md) | 歷史：已完成的逐字稿與卡片匹配改進計劃 |
 | [docs/knowledge/](docs/knowledge/) | AI 模型設定與功能知識文件 |

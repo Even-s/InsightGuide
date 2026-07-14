@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { generateInterviewGuide, type StakeholderPlan, type InterviewGuide } from '@/api/projects'
+import { useAnimatedExit } from '@/hooks/useAnimatedExit'
 
 interface StartInterviewModalProps {
   plan: StakeholderPlan
@@ -13,20 +14,25 @@ interface StartInterviewModalProps {
 export function StartInterviewModal({ plan, projectId, guideStatuses, onClose, onGuideGenerated }: StartInterviewModalProps) {
   const navigate = useNavigate()
   const [loadingPreps, setLoadingPreps] = useState(false)
+  const { isExiting, exit } = useAnimatedExit(onClose)
+  const handleClose = () => {
+    if (loadingPreps || isExiting) return
+    exit()
+  }
 
   return (
-    <div className="fixed inset-0 bg-black/30 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-white rounded-xl p-6 w-full max-w-md shadow-natural" onClick={e => e.stopPropagation()}>
+    <div className={`fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4 ${isExiting ? 'motion-backdrop-out pointer-events-none' : 'motion-backdrop-in'}`} onClick={handleClose}>
+      <div className={`w-full max-w-md rounded-xl bg-white p-6 shadow-natural ${isExiting ? 'motion-modal-out' : 'motion-modal-in'}`} onClick={e => e.stopPropagation()}>
         <h3 className="text-lg font-semibold text-natural-800 mb-2">開始新訪談</h3>
         <p className="text-sm text-natural-500 mb-4">選擇受訪者後開始訪談。若尚未產生訪談大綱，將先自動產生。</p>
 
         {plan.profiles.filter(p => p.status !== 'unavailable').length === 0 ? (
-          <div className="text-sm text-natural-500 py-4 text-center">
+          <div className="motion-fade-in text-sm text-natural-500 py-4 text-center">
             尚無可用受訪者，請先新增受訪者。
           </div>
         ) : (
           <div className="space-y-2 max-h-60 overflow-y-auto">
-            {plan.profiles.filter(p => p.status !== 'unavailable').map(profile => {
+            {plan.profiles.filter(p => p.status !== 'unavailable').map((profile, profileIndex) => {
               const guide = guideStatuses[profile.id]
               return (
                 <button
@@ -39,8 +45,10 @@ export function StartInterviewModal({ plan, projectId, guideStatuses, onClose, o
                         finalGuide = await generateInterviewGuide(projectId, profile.id)
                         onGuideGenerated(profile.id, finalGuide)
                       }
-                      onClose()
-                      navigate(`/interview/${finalGuide.document_id}?projectId=${projectId}&stakeholderId=${profile.id}`)
+                      exit(() => {
+                        onClose()
+                        navigate(`/interview/${finalGuide.document_id}?projectId=${projectId}&stakeholderId=${profile.id}`)
+                      })
                     } catch (err) {
                       console.error('Failed to start interview:', err)
                       alert('訪談大綱產生失敗，請稍後再試')
@@ -49,7 +57,8 @@ export function StartInterviewModal({ plan, projectId, guideStatuses, onClose, o
                     }
                   }}
                   disabled={loadingPreps}
-                  className="w-full p-3 text-left bg-cream-50 rounded-xl hover:bg-sage-50 hover:border-sage-200 border border-cream-200 transition-colors disabled:opacity-50"
+                  className="motion-surface-in w-full p-3 text-left bg-cream-50 rounded-xl hover:bg-sage-50 hover:border-sage-200 border border-cream-200 transition-colors disabled:opacity-50"
+                  style={{ animationDelay: `${profileIndex * 40}ms` }}
                 >
                   <div className="flex items-center justify-between">
                     <div>
@@ -82,7 +91,8 @@ export function StartInterviewModal({ plan, projectId, guideStatuses, onClose, o
         )}
         <div className="flex gap-3 mt-4">
           <button
-            onClick={onClose}
+            onClick={handleClose}
+            disabled={loadingPreps || isExiting}
             className="px-3 py-2 text-sm text-natural-500 bg-cream-100 rounded-lg hover:bg-cream-200 ml-auto"
           >
             取消

@@ -1,274 +1,117 @@
 #!/bin/bash
-# InsightGuide app-style launcher.
+# InsightGuide local development control center.
 
 set -e
 
-export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
-
 ROOT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=bin/common.sh
+source "$ROOT_DIR/bin/common.sh"
 cd "$ROOT_DIR"
-
-FRONTEND_URL="http://localhost:5174"
-BACKEND_URL="http://localhost:8002"
-API_DOCS_URL="http://localhost:8002/docs"
-DOCKER_COMPOSE_FILE="$ROOT_DIR/docker-compose.yml"
-
-bold() {
-    printf "\033[1m%s\033[0m\n" "$1"
-}
-
-info() {
-    printf "   %s\n" "$1"
-}
-
-http_ok() {
-    curl -s -m 2 "$1" >/dev/null 2>&1
-}
-
-compose() {
-    if command -v docker-compose >/dev/null 2>&1; then
-        docker-compose -f "$DOCKER_COMPOSE_FILE" "$@"
-    else
-        docker compose "$@"
-    fi
-}
 
 open_url() {
     local url="${1:-$FRONTEND_URL}"
-
-    if command -v open >/dev/null 2>&1; then
+    if command_exists open; then
         open "$url"
-    elif command -v xdg-open >/dev/null 2>&1; then
+    elif command_exists xdg-open; then
         xdg-open "$url" >/dev/null 2>&1 &
     else
-        info "Open this URL in your browser: $url"
+        info "請在瀏覽器開啟：$url"
     fi
-}
-
-wait_for_http() {
-    local name="$1"
-    local url="$2"
-    local attempts="${3:-20}"
-
-    for _ in $(seq 1 "$attempts"); do
-        if http_ok "$url"; then
-            info "✅ $name is ready"
-            return 0
-        fi
-        sleep 1
-    done
 }
 
 print_header() {
     echo ""
     bold "InsightGuide"
-    echo "Local app control center"
-    echo "Frontend: $FRONTEND_URL"
-    echo "Backend:  $BACKEND_URL"
+    echo "Local development control center"
     echo ""
 }
 
 quick_status() {
     local backend_state="down"
     local frontend_state="down"
-    local docker_state="down"
-
-    if http_ok "$BACKEND_URL/health"; then
-        backend_state="ready"
-    fi
-
-    if http_ok "$FRONTEND_URL"; then
-        frontend_state="ready"
-    fi
-
-    if command -v docker >/dev/null 2>&1 && docker ps --filter "name=insightguide" --format "{{.Names}}" 2>/dev/null | grep -q "insightguide"; then
-        docker_state="running"
-    fi
-
+    local celery_state="down"
+    http_ok "$BACKEND_URL/health" && backend_state="ready"
+    http_ok "$FRONTEND_URL" && frontend_state="ready"
+    celery_ok && celery_state="ready"
     printf "   Backend:  %s\n" "$backend_state"
+    printf "   Celery:   %s\n" "$celery_state"
     printf "   Frontend: %s\n" "$frontend_state"
-    printf "   Docker:   %s\n" "$docker_state"
-}
-
-check_environment() {
-    local missing=""
-
-    if [ ! -d "$ROOT_DIR/backend/venv" ]; then
-        missing="${missing}  - backend/venv 不存在（Python 虛擬環境未建立）\n"
-    fi
-
-    if [ ! -f "$ROOT_DIR/backend/.env" ]; then
-        missing="${missing}  - backend/.env 不存在（環境變數未設定）\n"
-    elif grep -q "^OPENAI_API_KEY=sk-\.\.\." "$ROOT_DIR/backend/.env" 2>/dev/null; then
-        missing="${missing}  - backend/.env 中 OPENAI_API_KEY 尚未填入\n"
-    fi
-
-    if [ ! -d "$ROOT_DIR/frontend/node_modules" ]; then
-        missing="${missing}  - frontend/node_modules 不存在（前端依賴未安裝）\n"
-    fi
-
-    if ! command -v docker >/dev/null 2>&1; then
-        missing="${missing}  - docker 未安裝\n"
-    fi
-
-    if [ -n "$missing" ]; then
-        echo ""
-        bold "⚠️  環境尚未就緒："
-        printf "$missing"
-        echo ""
-        info "請先執行首次安裝："
-        info "  ./insightguide.sh setup"
-        echo ""
-        return 1
-    fi
-    return 0
 }
 
 start_app() {
-    print_header
-    bold "Checking InsightGuide..."
-    quick_status
-    echo ""
-
-    if ! check_environment; then
-        return 1
-    fi
-
-    if http_ok "$BACKEND_URL/health" && http_ok "$FRONTEND_URL"; then
-        bold "InsightGuide is already running."
-    else
-        bold "Starting InsightGuide services..."
-        "$ROOT_DIR/bin/restart-all.sh"
-    fi
-
-    if [ "$1" = "--open" ]; then
-        echo ""
-        bold "Opening InsightGuide..."
-        open_url "$FRONTEND_URL"
-    fi
+    "$ROOT_DIR/bin/restart-all.sh" start
 }
 
-restart_app() {
-    print_header
-    bold "Restarting InsightGuide services..."
-    "$ROOT_DIR/bin/restart-all.sh"
+restart_component() {
+    local component="${1:-all}"
 
-    if [ "$1" = "--open" ]; then
-        echo ""
-        bold "Opening InsightGuide..."
-        open_url "$FRONTEND_URL"
-    fi
-}
-
-stop_app() {
-    print_header
-    bold "Stopping InsightGuide services..."
-    "$ROOT_DIR/bin/stop-services.sh"
-}
-
-restart_backend() {
-    bold "Restarting Backend..."
-    info "Stopping old backend process..."
-    pkill -f "uvicorn app.main:app.*--port 8002" 2>/dev/null || true
-    lsof -ti:8002 | xargs kill -9 2>/dev/null || true
-    sleep 1
-
-    info "Starting new backend process..."
-    cd "$ROOT_DIR/backend"
-    source venv/bin/activate
-    nohup python -m uvicorn app.main:app --host 0.0.0.0 --port 8002 --reload > "$ROOT_DIR/logs/backend.log" 2>&1 &
-    echo $! > "$ROOT_DIR/logs/backend.pid"
-    cd "$ROOT_DIR"
-
-    wait_for_http "Backend" "$BACKEND_URL/health"
-    bold "Backend restart complete."
-}
-
-restart_frontend() {
-    bold "Restarting Frontend..."
-    info "Stopping old frontend process..."
-    pkill -f "frontend/node_modules/.bin/vite" 2>/dev/null || true
-    lsof -ti:5174 | xargs kill -9 2>/dev/null || true
-    sleep 1
-
-    info "Starting new frontend process..."
-    cd "$ROOT_DIR/frontend"
-    nohup npm run dev > "$ROOT_DIR/logs/frontend.log" 2>&1 &
-    echo $! > "$ROOT_DIR/logs/frontend.pid"
-    cd "$ROOT_DIR"
-
-    wait_for_http "Frontend" "$FRONTEND_URL"
-    bold "Frontend restart complete."
-}
-
-restart_service() {
-    case "$1" in
-        backend) restart_backend ;;
-        frontend) restart_frontend ;;
-        *) restart_app ;;
+    case "$component" in
+        all)
+            "$ROOT_DIR/bin/restart-all.sh" restart
+            ;;
+        backend)
+            wait_for_docker
+            compose up -d postgres redis minio
+            stop_service backend
+            start_service backend "$ROOT_DIR/backend" \
+                "env DEBUG=false venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port $BACKEND_PORT --reload"
+            wait_for_http "後端" "$BACKEND_URL/health" 30
+            ;;
+        frontend)
+            stop_service frontend
+            start_service frontend "$ROOT_DIR/frontend" "npm run dev"
+            wait_for_http "前端" "$FRONTEND_URL" 30
+            ;;
+        celery)
+            wait_for_docker
+            compose up -d redis
+            stop_service celery
+            start_service celery "$ROOT_DIR/backend" \
+                "env DEBUG=false venv/bin/celery -A app.workers.celery_app worker --loglevel=info --pool=solo"
+            wait_for_celery 15
+            ;;
+        *)
+            echo "Unknown service: $component" >&2
+            echo "Available services: all, backend, celery, frontend" >&2
+            exit 2
+            ;;
     esac
 }
 
-show_status() {
-    print_header
-    "$ROOT_DIR/bin/status.sh"
-}
-
 show_logs() {
-    print_header
-    bold "Recent logs"
-
-    mkdir -p logs
-    for log_name in backend celery frontend; do
-        local log_file="logs/${log_name}.log"
+    for name in backend celery frontend; do
         echo ""
-        bold "$log_name"
-        if [ -f "$log_file" ]; then
-            tail -40 "$log_file"
-        else
-            info "No log file yet: $log_file"
+        bold "$name"
+        tail -40 "$LOG_DIR/${name}.log" 2>/dev/null || info "No log yet"
+        if [ -s "$LOG_DIR/${name}.err" ]; then
+            tail -20 "$LOG_DIR/${name}.err"
         fi
     done
 }
 
 tail_logs() {
-    print_header
+    touch "$LOG_DIR/backend.log" "$LOG_DIR/celery.log" "$LOG_DIR/frontend.log"
     bold "Following logs. Press Ctrl-C to stop."
-    mkdir -p logs
-    touch logs/backend.log logs/celery.log logs/frontend.log
-    tail -f logs/backend.log logs/celery.log logs/frontend.log
+    tail -f "$LOG_DIR/backend.log" "$LOG_DIR/celery.log" "$LOG_DIR/frontend.log"
 }
 
 doctor() {
     print_header
-    bold "Environment check"
-
-    for cmd in docker curl npm; do
-        if command -v "$cmd" >/dev/null 2>&1; then
-            info "$cmd: ok ($(command -v "$cmd"))"
+    bold "Environment"
+    for cmd in docker curl npm node python3; do
+        if command_exists "$cmd"; then
+            ok "$cmd: $(command -v "$cmd")"
         else
-            info "$cmd: missing"
+            fail "$cmd: missing" || true
         fi
     done
-
-    if [ -d backend/venv ]; then
-        info "backend/venv: ok"
+    [ -x backend/venv/bin/python ] && ok "backend/venv" || warn "backend/venv missing"
+    [ -f backend/.env ] && ok "backend/.env" || warn "backend/.env missing"
+    [ -d frontend/node_modules ] && ok "frontend/node_modules" || warn "frontend/node_modules missing"
+    if docker info >/dev/null 2>&1; then
+        ok "Docker daemon: ready"
     else
-        info "backend/venv: missing"
-    fi
-
-    if [ -d frontend/node_modules ]; then
-        info "frontend/node_modules: ok"
-    else
-        info "frontend/node_modules: missing"
-    fi
-
-    echo ""
-    bold "Docker compose services"
-    if command -v docker >/dev/null 2>&1; then
-        compose -f docker-compose.yml ps 2>/dev/null || info "Docker compose is not ready."
-    else
-        info "Docker is not installed or not on PATH."
+        warn "Docker daemon: not running"
     fi
 }
 
@@ -277,8 +120,8 @@ interactive_menu() {
         print_header
         quick_status
         echo ""
-        echo "1. Launch and open"
-        echo "2. Restart and open"
+        echo "1. Start"
+        echo "2. Restart"
         echo "3. Open in browser"
         echo "4. Status"
         echo "5. Recent logs"
@@ -291,60 +134,57 @@ interactive_menu() {
         read -r choice
 
         case "$choice" in
-            1) start_app --open ;;
-            2) restart_app --open ;;
-            3) open_url "$FRONTEND_URL" ;;
-            4) show_status ;;
+            1) start_app ;;
+            2) restart_component all ;;
+            3) open_url ;;
+            4) "$ROOT_DIR/bin/status.sh" ;;
             5) show_logs ;;
             6) tail_logs ;;
-            7) stop_app ;;
+            7) "$ROOT_DIR/bin/stop-services.sh" ;;
             8) doctor ;;
             9) exit 0 ;;
             *) echo "Unknown action: $choice" ;;
         esac
 
         echo ""
-        printf "Press Enter to return to InsightGuide control center..."
+        printf "Press Enter to continue..."
         read -r _
     done
 }
 
 usage() {
     cat <<EOF
-InsightGuide app-style launcher
+InsightGuide local development control center
 
 Usage:
-  ./insightguide.sh                 Open the interactive control center
-  ./insightguide.sh setup           First-time install (dependencies + DB + env)
-  ./insightguide.sh launch          Start services if needed, then open InsightGuide
-  ./insightguide.sh start           Start services if needed
-  ./insightguide.sh restart [all|backend|frontend]
-  ./insightguide.sh stop            Stop all services
-  ./insightguide.sh status          Show detailed service status
-  ./insightguide.sh open            Open InsightGuide in the browser
-  ./insightguide.sh docs            Open FastAPI docs
-  ./insightguide.sh logs            Show recent backend/celery/frontend logs
-  ./insightguide.sh tail            Follow backend/celery/frontend logs
-  ./insightguide.sh doctor          Check local dependencies
+  ./insightguide.sh                         Interactive control center
+  ./insightguide.sh setup                   First-time installation
+  ./insightguide.sh start                   Start all services if needed
+  ./insightguide.sh launch                  Start all services and open the app
+  ./insightguide.sh restart [service]       Restart all, backend, celery, or frontend
+  ./insightguide.sh stop                    Stop all services
+  ./insightguide.sh status                  Show live service status
+  ./insightguide.sh open                    Open the frontend
+  ./insightguide.sh docs                    Open FastAPI docs
+  ./insightguide.sh logs                    Show recent logs
+  ./insightguide.sh tail                    Follow logs
+  ./insightguide.sh doctor                  Check local dependencies
 EOF
 }
 
 case "${1:-menu}" in
     menu) interactive_menu ;;
     setup) "$ROOT_DIR/bin/setup.sh" ;;
-    launch) start_app --open ;;
     start) start_app ;;
-    restart) restart_service "${2:-all}" ;;
-    stop) stop_app ;;
-    status) show_status ;;
-    open) open_url "$FRONTEND_URL" ;;
-    docs) open_url "$API_DOCS_URL" ;;
+    launch) start_app; open_url ;;
+    restart) restart_component "${2:-all}" ;;
+    stop) "$ROOT_DIR/bin/stop-services.sh" ;;
+    status) "$ROOT_DIR/bin/status.sh" ;;
+    open) open_url ;;
+    docs) open_url "$BACKEND_URL/docs" ;;
     logs) show_logs ;;
     tail) tail_logs ;;
     doctor) doctor ;;
     help|--help|-h) usage ;;
-    *)
-        usage
-        exit 1
-        ;;
+    *) usage; exit 2 ;;
 esac

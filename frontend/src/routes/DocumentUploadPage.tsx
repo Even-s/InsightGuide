@@ -1,5 +1,5 @@
 /**
- * Home Page - New Project Creation
+ * New Project Page
  *
  * Users create a new project by entering a title and description.
  * Voice input: records user's spoken description, then AI parses it into
@@ -107,16 +107,36 @@ export default function DocumentUploadPage() {
 
   return (
     <div className="flex min-h-screen flex-col bg-cream-100">
-      <nav className="mx-auto flex w-full max-w-7xl flex-none items-center justify-between px-8 py-5">
-        <span className="text-2xl font-medium leading-relaxed tracking-wide text-natural-700">
-          InsightGuide
-        </span>
+      <nav className="mx-auto flex w-full max-w-7xl flex-none items-center justify-between px-4 py-5 sm:px-8">
         <button
-          onClick={() => navigate('/projects')}
-          className="rounded-lg px-4 py-2 text-sm leading-relaxed tracking-wide text-sage-600 underline transition-colors hover:bg-cream-50 hover:text-sage-700"
+          type="button"
+          onClick={() => navigate('/')}
+          className="text-xl font-medium leading-relaxed tracking-wide text-natural-700 transition-colors hover:text-sage-600 sm:text-2xl"
         >
-          所有專案
+          InsightGuide
         </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => navigate('/')}
+            className="inline-flex items-center gap-1.5 rounded-xl px-2.5 py-2.5 text-sm font-medium text-natural-500 transition-colors hover:bg-cream-50 hover:text-sage-600 focus:outline-none focus:ring-2 focus:ring-sage-300 focus:ring-offset-2 focus:ring-offset-cream-100 sm:px-3.5"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+            </svg>
+            回首頁
+          </button>
+          <button
+            type="button"
+            onClick={() => navigate('/projects')}
+            className="inline-flex items-center gap-2 rounded-xl border border-cream-300 bg-white px-3 py-2.5 text-sm font-medium text-natural-600 shadow-sm transition-all hover:border-sage-200 hover:bg-sage-50 hover:text-sage-600 focus:outline-none focus:ring-2 focus:ring-sage-300 focus:ring-offset-2 focus:ring-offset-cream-100 sm:px-4"
+          >
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M4 6.5A2.5 2.5 0 016.5 4h3l2 2h6A2.5 2.5 0 0120 8.5v9a2.5 2.5 0 01-2.5 2h-11A2.5 2.5 0 014 17V6.5z" />
+            </svg>
+            管理專案
+          </button>
+        </div>
       </nav>
 
       <main className="mx-auto w-full max-w-2xl flex-1 px-8 pb-12 pt-6">
@@ -207,7 +227,7 @@ export default function DocumentUploadPage() {
 
           {/* Error */}
           {localError && (
-            <div className="bg-red-50 rounded-xl p-4 border border-red-200">
+            <div className="motion-status-in bg-red-50 rounded-xl p-4 border border-red-200">
               <p className="text-sm text-red-700">{localError}</p>
             </div>
           )}
@@ -226,7 +246,7 @@ export default function DocumentUploadPage() {
 
         {/* Recent projects */}
         {recentProjects.length > 0 && (
-          <div className="mt-14">
+          <div className="motion-reveal-in mt-14">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-sm font-medium text-natural-500 tracking-wide">近期專案</h3>
               <button
@@ -237,11 +257,12 @@ export default function DocumentUploadPage() {
               </button>
             </div>
             <div className="space-y-2">
-              {recentProjects.map(p => (
+              {recentProjects.map((p, projectIndex) => (
                 <button
                   key={p.id}
                   onClick={() => navigate(`/projects/${p.id}`)}
-                  className="w-full flex items-center justify-between px-5 py-3.5 bg-white border border-cream-200 rounded-xl hover:border-sage-300 hover:shadow-sm transition-all text-left"
+                  className="motion-surface-in w-full flex items-center justify-between px-5 py-3.5 bg-white border border-cream-200 rounded-xl hover:border-sage-300 hover:shadow-sm transition-all text-left"
+                  style={{ animationDelay: `${projectIndex * 40}ms` }}
                 >
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-medium text-natural-800 truncate">{p.title}</p>

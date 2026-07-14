@@ -23,6 +23,11 @@ export function useSlotManagement({ projectId, plan, loadData }: UseSlotManageme
   const [newSlotLabel, setNewSlotLabel] = useState('')
   const [newSlotCategory, setNewSlotCategory] = useState('business')
   const [newSlotRationale, setNewSlotRationale] = useState('')
+  const [newSlotPriority, setNewSlotPriority] = useState('required')
+  const [newSlotMinInterviews, setNewSlotMinInterviews] = useState(1)
+  const [newSlotFirstWave, setNewSlotFirstWave] = useState(false)
+  const [newSlotExpectedContributions, setNewSlotExpectedContributions] = useState('')
+  const [newSlotKeyQuestions, setNewSlotKeyQuestions] = useState('')
 
   const handleSkipSlot = async (slotId: string) => {
     try {
@@ -75,12 +80,21 @@ export function useSlotManagement({ projectId, plan, loadData }: UseSlotManageme
         role_category: newSlotCategory,
         role_label: newSlotLabel.trim(),
         rationale: newSlotRationale.trim() || undefined,
-        priority: 'required',
+        expected_contributions: newSlotExpectedContributions.split(',').map(s => s.trim()).filter(Boolean),
+        key_questions_to_cover: newSlotKeyQuestions.split('\n').map(s => s.trim()).filter(Boolean),
+        priority: newSlotPriority,
+        min_interviews: newSlotMinInterviews,
+        first_wave: newSlotFirstWave,
       })
       setShowAddSlot(false)
       setNewSlotLabel('')
       setNewSlotCategory('business')
       setNewSlotRationale('')
+      setNewSlotPriority('required')
+      setNewSlotMinInterviews(1)
+      setNewSlotFirstWave(false)
+      setNewSlotExpectedContributions('')
+      setNewSlotKeyQuestions('')
       loadData()
     } catch (err) {
       console.error('Failed to add slot:', err)
@@ -100,7 +114,7 @@ export function useSlotManagement({ projectId, plan, loadData }: UseSlotManageme
   const handleUpdateSlot = async (slotId: string) => {
     try {
       await updateStakeholderSlot(slotId, {
-        rationale: editForm.rationale || undefined,
+        rationale: editForm.rationale,
         expected_contributions: editForm.expectedContributions.split(',').map(s => s.trim()).filter(Boolean),
         key_questions_to_cover: editForm.keyQuestions.split('\n').map(s => s.trim()).filter(Boolean),
         priority: editForm.priority,
@@ -125,6 +139,16 @@ export function useSlotManagement({ projectId, plan, loadData }: UseSlotManageme
     setNewSlotCategory,
     newSlotRationale,
     setNewSlotRationale,
+    newSlotPriority,
+    setNewSlotPriority,
+    newSlotMinInterviews,
+    setNewSlotMinInterviews,
+    newSlotFirstWave,
+    setNewSlotFirstWave,
+    newSlotExpectedContributions,
+    setNewSlotExpectedContributions,
+    newSlotKeyQuestions,
+    setNewSlotKeyQuestions,
     handleSkipSlot,
     handleUnskipSlot,
     handleMoveSlot,

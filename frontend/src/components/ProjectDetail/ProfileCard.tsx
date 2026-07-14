@@ -15,7 +15,7 @@ export function ProfileCard({ profile, projectId, guide, onDelete, onShowGuideSe
   const guideReady = guide && guide.card_count > 0
 
   return (
-    <div className="p-3 bg-white rounded-xl border border-cream-200 hover:border-cream-300 shadow-natural transition-colors">
+    <div className="motion-surface-in p-3 bg-white rounded-xl border border-cream-200 hover:border-cream-300 shadow-natural transition-colors">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium ${

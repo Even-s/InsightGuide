@@ -1,34 +1,23 @@
 #!/bin/bash
+# Stop the complete local InsightGuide stack.
 
-# Stop InsightGuide services
-echo "🛑 Stopping InsightGuide services..."
+set -e
 
-# Stop Docker containers
-echo "📦 Stopping Docker containers..."
-docker-compose -f docker-compose.yml down
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# shellcheck source=common.sh
+source "$SCRIPT_DIR/common.sh"
 
-# Stop backend, celery, and frontend using saved PIDs
-if [ -f logs/backend.pid ]; then
-    BACKEND_PID=$(cat logs/backend.pid)
-    kill $BACKEND_PID 2>/dev/null && echo "Backend stopped (PID: $BACKEND_PID)" || echo "Backend not running"
-    rm logs/backend.pid
+bold "停止 InsightGuide"
+info "停止前端、Celery 與後端..."
+stop_application_services
+ok "應用程序已停止"
+
+if command_exists docker && docker info >/dev/null 2>&1; then
+    info "停止 Docker 基礎服務..."
+    compose stop postgres redis minio
+    ok "Docker 基礎服務已停止"
+else
+    warn "Docker daemon 未啟動，跳過容器停止"
 fi
 
-if [ -f logs/celery.pid ]; then
-    CELERY_PID=$(cat logs/celery.pid)
-    kill $CELERY_PID 2>/dev/null && echo "Celery worker stopped (PID: $CELERY_PID)" || echo "Celery not running"
-    rm logs/celery.pid
-fi
-
-if [ -f logs/frontend.pid ]; then
-    FRONTEND_PID=$(cat logs/frontend.pid)
-    kill $FRONTEND_PID 2>/dev/null && echo "Frontend stopped (PID: $FRONTEND_PID)" || echo "Frontend not running"
-    rm logs/frontend.pid
-fi
-
-# Fallback: kill by port
-lsof -ti:8002 | xargs kill -9 2>/dev/null || true
-lsof -ti:5174 | xargs kill -9 2>/dev/null || true
-pkill -f "celery.*worker" 2>/dev/null || true
-
-echo "✅ All services stopped!"
+bold "✅ InsightGuide 已停止"

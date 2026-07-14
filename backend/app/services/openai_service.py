@@ -136,7 +136,7 @@ class OpenAIService:
             return ""
 
         # If JSON response format, try to parse
-        if response_format and response_format.get("type") == "json_object":
+        if response_format and response_format.get("type") in ("json_object", "json_schema"):
             try:
                 return json.loads(content)
             except json.JSONDecodeError as e:
