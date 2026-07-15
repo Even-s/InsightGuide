@@ -342,7 +342,7 @@ export default function EditorPage() {
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <Button variant="secondary" onClick={handleOpenSessionPanel}>管理訪談</Button>
+          <Button variant="secondary" onClick={handleOpenSessionPanel}>訪談紀錄</Button>
           <Button onClick={() => window.location.assign(`/interview/${documentId}${projectId ? `?projectId=${projectId}` : ''}`)}>開始訪談</Button>
         </div>
       </header>
@@ -457,7 +457,7 @@ export default function EditorPage() {
           <div className="absolute inset-0 bg-black/20" onClick={() => setShowSessionPanel(false)} />
           <aside className="relative w-96 bg-white shadow-xl overflow-y-auto">
             <div className="sticky top-0 flex items-center justify-between border-b border-cream-300 bg-white px-5 py-4">
-              <h2 className="text-base font-semibold text-natural-700">訪談記錄</h2>
+              <h2 className="text-base font-semibold text-natural-700">訪談紀錄</h2>
               <button
                 type="button"
                 onClick={() => setShowSessionPanel(false)}
@@ -472,7 +472,7 @@ export default function EditorPage() {
               {sessionsLoading ? (
                 <p className="text-sm text-natural-400 text-center py-8">載入中...</p>
               ) : sessions.length === 0 ? (
-                <p className="text-sm text-natural-400 text-center py-8">尚無訪談記錄</p>
+                <p className="text-sm text-natural-400 text-center py-8">尚無訪談紀錄</p>
               ) : (
                 <div className="space-y-3">
                   {sessions.map((session) => (
@@ -497,13 +497,22 @@ export default function EditorPage() {
                       </p>
                       <div className="flex gap-2">
                         {session.status === 'ended' && (
-                          <button
-                            type="button"
-                            onClick={() => window.location.assign(`/interview/${documentId}/report/${session.id}`)}
-                            className="rounded border border-cream-300 px-2 py-1 text-xs text-natural-500 hover:bg-cream-100"
-                          >
-                            查看報告
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => window.location.assign(`/sessions/${session.id}/insight-memo`)}
+                              className="rounded bg-sage-500 px-2 py-1 text-xs font-medium text-white hover:bg-sage-600"
+                            >
+                              訪談紀錄
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => window.location.assign(`/interview/${documentId}/report/${session.id}`)}
+                              className="rounded border border-cream-300 px-2 py-1 text-xs text-natural-500 hover:bg-cream-100"
+                            >
+                              查看報告
+                            </button>
+                          </>
                         )}
                         {(session.status === 'interviewing' || session.status === 'paused') && (
                           <button

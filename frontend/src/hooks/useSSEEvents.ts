@@ -42,6 +42,10 @@ interface ActiveCardChangedEvent {
   source: string;
 }
 
+interface ActiveCardClearedEvent {
+  card_id?: string;
+}
+
 interface UseSSEEventsOptions {
   onCardListening?: (data: SSEEvent) => void;
   onCardCovered?: (data: SSEEvent) => void;
@@ -52,7 +56,7 @@ interface UseSSEEventsOptions {
   onQuestionCardCandidates?: (data: QuestionCandidatesEvent) => void;
   onActiveCardChanged?: (data: ActiveCardChangedEvent) => void;
   onCardManuallyCompleted?: (data: SSEEvent) => void;
-  onActiveCardCleared?: () => void;
+  onActiveCardCleared?: (data: ActiveCardClearedEvent) => void;
   onMatchingError?: (data: { error: string; utterance_id: string; timestamp: string }) => void;
 }
 
@@ -129,8 +133,9 @@ export function useSSEEvents(sessionId: string, options: UseSSEEventsOptions = {
       optionsRef.current.onCardManuallyCompleted?.(data);
     });
 
-    eventSource.addEventListener('ACTIVE_CARD_CLEARED', () => {
-      optionsRef.current.onActiveCardCleared?.();
+    eventSource.addEventListener('ACTIVE_CARD_CLEARED', (e) => {
+      const data: ActiveCardClearedEvent = JSON.parse(e.data);
+      optionsRef.current.onActiveCardCleared?.(data);
     });
 
     eventSource.addEventListener('MATCHING_ERROR', (e) => {

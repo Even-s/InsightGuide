@@ -25,6 +25,8 @@ class InterviewSessionSchema(BaseModel):
         "failed",
     ]
     currentSectionId: Optional[str] = None
+    activeCardId: Optional[str] = None
+    activeCardHintId: Optional[str] = None
     startedAt: Optional[datetime] = None
     endedAt: Optional[datetime] = None
     pausedAt: Optional[datetime] = None

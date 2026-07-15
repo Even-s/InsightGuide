@@ -106,6 +106,13 @@ def is_question_like(text: str) -> bool:
     if not stripped:
         return False
 
+    # A completed transcript that explicitly ends in a question mark is a
+    # stronger signal than answer-like wording inside the sentence. For
+    # example, interview questions commonly contain phrases such as
+    # "通常會" that also appear in real answers.
+    if stripped.endswith(("?", "？")):
+        return True
+
     has_question_signal = stripped.endswith(_QUESTION_ENDINGS) or any(
         marker in stripped for marker in _QUESTION_MARKERS
     )

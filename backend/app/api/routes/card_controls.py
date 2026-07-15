@@ -198,14 +198,22 @@ async def clear_active_card(session_id: str, db: Session = Depends(get_db)):
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
+    cleared_card_id = session.active_card_id
     session.active_card_id = None
     session.active_card_hint_id = None
     session.active_card_source = "cleared"
+    session.active_card_confirmed_at = None
     session.pending_answer_buffer = None
     db.commit()
 
-    event_service.publish_sync(session_id, {"type": "ACTIVE_CARD_CLEARED"})
-    return {"ok": True}
+    event_service.publish_sync(
+        session_id,
+        {
+            "type": "ACTIVE_CARD_CLEARED",
+            "card_id": cleared_card_id,
+        },
+    )
+    return {"ok": True, "cardId": cleared_card_id}
 
 
 @router.post("/{session_id}/cards/{card_id}/manual-complete")

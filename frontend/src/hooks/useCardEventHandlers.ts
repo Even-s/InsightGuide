@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { interviewAPI } from '@/api/interview'
 import { useSSEEvents } from '@/hooks/useSSEEvents'
-import type { CardState } from '@/types/interview'
+import type { CardState, SessionStatus } from '@/types/interview'
 import type { CardStatus } from '@/types/questionCard'
 import {
   statusFromEvent,
@@ -14,12 +14,16 @@ interface UseCardEventHandlersOptions {
   documentId: string
   currentThemeId: string | undefined
   currentSectionId: string | undefined
+  initialActiveCardId?: string | null
+  initialDetectedCardId?: string | null
+  sessionStatus?: SessionStatus
 }
 
 export interface CardEventHandlersResult {
   cardStates: CardState[]
   candidateCards: Array<{ cardId: string; questionText: string; focusText: string; score: number }>
   activeCardId: string | null
+  detectedCardId: string | null
   bufferedAnswerCount: number
   followupQueue: string[]
   skippedCards: Set<string>
@@ -38,11 +42,15 @@ export function useCardEventHandlers({
   documentId,
   currentThemeId,
   currentSectionId,
+  initialActiveCardId,
+  initialDetectedCardId,
+  sessionStatus,
 }: UseCardEventHandlersOptions): CardEventHandlersResult {
   const [cardStates, setCardStates] = useState<CardState[]>([])
   const [, setCardsLoading] = useState(true)
   const [candidateCards, setCandidateCards] = useState<Array<{ cardId: string; questionText: string; focusText: string; score: number }>>([])
   const [activeCardId, setActiveCardId] = useState<string | null>(null)
+  const [detectedCardId, setDetectedCardId] = useState<string | null>(null)
   const [bufferedAnswerCount, setBufferedAnswerCount] = useState(0)
   const [followupQueue, setFollowupQueue] = useState<string[]>([])
   const [skippedCards, setSkippedCards] = useState<Set<string>>(new Set())
@@ -83,6 +91,51 @@ export function useCardEventHandlers({
     )
   }, [])
 
+  const updateCriterionFromEvent = useCallback((
+    cardId: string,
+    criterionId: string,
+    status: string,
+    evidenceQuote: string | null,
+  ) => {
+    setCardStates((previous) =>
+      previous.map((cardState) => {
+        if (cardState.questionCard.id !== cardId) return cardState
+
+        const existingEvidence = cardState.evidence && typeof cardState.evidence === 'object'
+          ? cardState.evidence as Record<string, unknown>
+          : {}
+        const satisfiedCriteria = new Set(
+          Array.isArray(existingEvidence.satisfiedCriteria)
+            ? existingEvidence.satisfiedCriteria.filter((id): id is string => typeof id === 'string')
+            : [],
+        )
+        if (status === 'satisfied') satisfiedCriteria.add(criterionId)
+
+        const existingEvaluations = Array.isArray(existingEvidence.criterionEvaluations)
+          ? existingEvidence.criterionEvaluations.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+          : []
+        const nextEvaluation = {
+          ...(existingEvaluations.find(item => item.criterion_id === criterionId) ?? {}),
+          criterion_id: criterionId,
+          status,
+          evidence_quotes: evidenceQuote ? [evidenceQuote] : [],
+        }
+
+        return {
+          ...cardState,
+          evidence: {
+            ...existingEvidence,
+            satisfiedCriteria: [...satisfiedCriteria],
+            criterionEvaluations: [
+              ...existingEvaluations.filter(item => item.criterion_id !== criterionId),
+              nextEvaluation,
+            ],
+          },
+        }
+      }),
+    )
+  }, [])
+
   const loadCardStates = useCallback(async () => {
     try {
       setCardsLoading(true)
@@ -95,19 +148,40 @@ export function useCardEventHandlers({
 
   useEffect(() => {
     loadCardStates()
-  }, [loadCardStates])
+  }, [loadCardStates, sessionStatus])
+
+  useEffect(() => {
+    if (initialActiveCardId !== undefined) setActiveCardId(initialActiveCardId)
+    if (initialDetectedCardId !== undefined) {
+      setDetectedCardId(
+        initialDetectedCardId && initialDetectedCardId !== initialActiveCardId
+          ? initialDetectedCardId
+          : null,
+      )
+    }
+  }, [initialActiveCardId, initialDetectedCardId])
 
   useSSEEvents(sessionId, {
-    onCardListening: (data) => updateCardFromEvent(data.card_id, statusFromEvent(data, 'listening'), data.confidence, data.evidence, data.evidenceTranscript),
-    onCardCovered: (data) => updateCardFromEvent(data.card_id, statusFromEvent(data, 'sufficient'), data.confidence, data.evidence, data.evidenceTranscript),
+    onCardListening: (data) => {
+      updateCardFromEvent(data.card_id, statusFromEvent(data, 'listening'), data.confidence, data.evidence, data.evidenceTranscript)
+      if (data.card_id) setDetectedCardId(data.card_id)
+    },
+    onCardCovered: (data) => {
+      updateCardFromEvent(data.card_id, statusFromEvent(data, 'sufficient'), data.confidence, data.evidence, data.evidenceTranscript)
+      setDetectedCardId(previous => previous === data.card_id ? null : previous)
+    },
     onCardProbablyCovered: (data) => updateCardFromEvent(data.card_id, statusFromEvent(data, 'probably_sufficient'), data.confidence, data.evidence, data.evidenceTranscript),
     onCardAtRisk: (data) => updateCardFromEvent(data.card_id, statusFromEvent(data, 'at_risk'), data.confidence, data.evidence, data.evidenceTranscript),
     onCardSkipped: (data) => updateCardFromEvent(data.card_id, statusFromEvent(data, 'skipped'), data.confidence, data.evidence, data.evidenceTranscript),
+    onCardEvidenceAdded: (data) => {
+      updateCriterionFromEvent(data.card_id, data.criterion_id, data.status, data.evidence_quote)
+    },
     onQuestionCardCandidates: (data) => {
       setCandidateCards(data.candidates)
     },
     onActiveCardChanged: (data) => {
       setActiveCardId(data.card_id)
+      setDetectedCardId(null)
       setCandidateCards([])
       setBufferedAnswerCount(0)
       updateCardFromEvent(data.card_id, 'listening', 0, undefined, undefined)
@@ -115,9 +189,13 @@ export function useCardEventHandlers({
     onCardManuallyCompleted: (data) => {
       updateCardFromEvent(data.card_id, statusFromEvent(data, 'sufficient'), 1.0, data.evidence, data.evidenceTranscript)
       setActiveCardId((prev) => prev === data.card_id ? null : prev)
+      setDetectedCardId((prev) => prev === data.card_id ? null : prev)
     },
     onActiveCardCleared: () => {
       setActiveCardId(null)
+      setDetectedCardId(null)
+      setCandidateCards([])
+      setBufferedAnswerCount(0)
     },
     onMatchingError: (data) => {
       console.error('Topic matching error received:', data)
@@ -169,6 +247,7 @@ export function useCardEventHandlers({
     cardStates,
     candidateCards,
     activeCardId,
+    detectedCardId,
     bufferedAnswerCount,
     followupQueue,
     skippedCards,

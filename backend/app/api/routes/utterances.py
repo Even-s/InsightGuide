@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.api.routes.interview_helpers import convert_utterance_to_schema
 from app.db.session import get_db
 from app.schemas.interview import PartialTranscriptMatchCreate, UtteranceCreate, UtteranceSchema
+from app.services.evaluation.utterance_classifier import is_question_like
 from app.services.interview_service import interview_service
 
 logger = logging.getLogger(__name__)
@@ -154,11 +155,7 @@ def process_utterance_evaluation_background(
         eval_elapsed = (time.perf_counter() - eval_start) * 1000
 
         # If question was detected and no card was auto-activated, emit candidates
-        if (
-            not updates
-            and not asked_card_id
-            and answer_evaluation_engine._is_question_like(transcript)
-        ):
+        if not updates and not asked_card_id and is_question_like(transcript):
             candidates = answer_evaluation_engine.find_candidate_cards(
                 db, session_id, section_id or "", transcript, top_k=3
             )
@@ -181,7 +178,9 @@ def process_utterance_evaluation_background(
             activation_score = update.get("activation_score", 0.0)
 
             # Determine event type
-            if new_status == "sufficient":
+            if update.get("topic_detected"):
+                event_type = "CARD_TOPIC_DETECTED"
+            elif new_status == "sufficient":
                 event_type = "CARD_COVERED"
             elif new_status == "probably_sufficient":
                 event_type = "CARD_PROBABLY_COVERED"

@@ -154,8 +154,11 @@ class AnswerEvaluationEngine:
                 f"section={section_id}, speaker={speaker}, text='{utterance_text[:50]}...'"
             )
 
-            # Split: question → route to card; answer → evaluate completion
-            if is_question_like(utterance_text):
+            # The frontend-provided card is an explicit routing decision and
+            # must win over heuristic utterance classification. This prevents
+            # question wording such as "通常會...？" from being evaluated as
+            # an answer merely because it contains an answer-like marker.
+            if asked_card_id or is_question_like(utterance_text):
                 return self._route_question_to_card(
                     db, session_id, utterance_id, utterance_text, section_id, asked_card_id
                 )
@@ -270,13 +273,31 @@ class AnswerEvaluationEngine:
                     "evidence_transcript": None,
                     "judgment": {"response_status": "question_only", "suggested_followup": ""},
                     "evaluation_seq": evaluation_seq,
+                    "topic_detected": True,
                 }
             ]
 
-        # Card already active — just update hint, no state change needed
+        # The card may already be listening from an earlier hint. Return a
+        # detection-only update so the frontend can still show which card the
+        # latest question matched without mutating its progress state.
         if session:
             db.commit()
-        return []
+        return [
+            {
+                "card_id": card.id,
+                "card_state_id": card_state.id,
+                "old_status": old_status,
+                "new_status": old_status,
+                "confidence": float(card_state.confidence or 0),
+                "activation_score": float(card_state.activation_score or 1),
+                "completion_score": float(card_state.completion_score or 0),
+                "evidence": card_state.evidence,
+                "evidence_transcript": card_state.evidence_transcript,
+                "judgment": {"response_status": "question_only", "suggested_followup": ""},
+                "evaluation_seq": None,
+                "topic_detected": True,
+            }
+        ]
 
     def _find_best_matching_card(
         self,
@@ -426,8 +447,9 @@ class AnswerEvaluationEngine:
     ) -> List[Dict[str, Any]]:
         """Evaluate an answer for completion.
 
-        When active_card_id is user-confirmed, evaluation is EXCLUSIVE to that card.
-        Other cards cannot accumulate completion from answer utterances.
+        When a manual active card or AI-detected card hint exists, evaluation
+        is EXCLUSIVE to that card. Other cards cannot accumulate completion
+        from the same answer utterance.
         """
         from app.models.interview_session import InterviewSession
 
@@ -447,20 +469,32 @@ class AnswerEvaluationEngine:
             )
             return []
 
-        # EXCLUSIVE MODE: when active_card_id is user-confirmed, only evaluate that card
-        is_exclusive = active_card_id and active_source in ("user_confirmed", "manual_selected")
+        # Once either the user or the question router has selected a card, the
+        # following answer belongs to that card only. A manually selected card
+        # still wins over the AI hint via active_hint_id above.
+        is_manual_selection = active_card_id and active_source in (
+            "user_confirmed",
+            "manual_selected",
+        )
+        evaluation_card_id = active_card_id if is_manual_selection else active_hint_id
+        is_exclusive = bool(evaluation_card_id)
 
         if is_exclusive:
-            # Only load and evaluate the active card
+            # Only load and evaluate the selected/detected card. If it is no
+            # longer evaluable, stop instead of leaking the answer to a pending
+            # sibling card.
             candidate_cards = self._load_candidate_cards(
                 db,
                 session_id,
                 section_id,
-                active_card_id=active_card_id,
+                active_card_id=evaluation_card_id,
                 statuses=["listening", "probably_sufficient", "at_risk"],
             )
             if not candidate_cards:
-                logger.info(f"Active card {active_card_id} not in evaluable state; skipping")
+                logger.info(
+                    "Selected card %s not in evaluable state; skipping",
+                    evaluation_card_id,
+                )
                 return []
 
             filtered_candidates = [
@@ -471,7 +505,11 @@ class AnswerEvaluationEngine:
             if not filtered_candidates:
                 return []
 
-            logger.info(f"Exclusive mode: evaluating only active card {active_card_id}")
+            logger.info(
+                "Exclusive mode: evaluating only %s card %s",
+                "manual" if is_manual_selection else "AI-detected",
+                evaluation_card_id,
+            )
         else:
             # NON-EXCLUSIVE: evaluate all candidates (legacy/no-active-card mode)
             candidate_cards = self._load_candidate_cards(
@@ -535,7 +573,14 @@ class AnswerEvaluationEngine:
             card_state = card_data["state"]
             conf = judgment.get("confidence", 0)
 
-            if not is_exclusive and conf > 0 and card_state.status == "pending":
+            if not is_exclusive and card_state.status == "pending":
+                response_status = judgment.get("response_status")
+                if conf < 0.35 or response_status in {
+                    "question_only",
+                    "not_started",
+                    "not_yet",
+                }:
+                    continue
                 if conf < max_confidence:
                     continue
                 if has_advanced_pending:

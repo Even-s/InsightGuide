@@ -43,6 +43,8 @@ export interface InterviewSession {
   stakeholderProfileId?: string
   status: SessionStatus
   currentSectionId?: string
+  activeCardId?: string | null
+  activeCardHintId?: string | null
   startedAt?: string
   endedAt?: string
   pausedAt?: string | null

@@ -12,7 +12,9 @@ import TranscriptDisplay from './TranscriptDisplay'
 import FollowupPromptPanel from './FollowupPromptPanel'
 import ThemeCardsList from './ThemeCardsList'
 import CandidateSuggestionBar from './CandidateSuggestionBar'
+import AudioDiagnosticsPanel from './AudioDiagnosticsPanel'
 import { formatThemeTitle } from '@/utils/interviewCopy'
+import type { AudioProcessingProfile } from '@/hooks/useAudioDiagnostics'
 
 interface PresenterLayoutProps {
   sessionId: string
@@ -21,6 +23,8 @@ interface PresenterLayoutProps {
 
 export default function PresenterLayout({ sessionId, documentId }: PresenterLayoutProps) {
   const [slideOrientation] = useState<'landscape' | 'portrait' | 'unknown'>('unknown')
+  const [audioDiagnosticsEnabled, setAudioDiagnosticsEnabled] = useState(false)
+  const [audioProcessingProfile, setAudioProcessingProfile] = useState<AudioProcessingProfile>('standard')
   const { layoutConfig } = useResponsiveLayout(slideOrientation)
   const hasRequestedInitialPreparationRef = useRef(false)
 
@@ -52,6 +56,7 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
     cardStates,
     candidateCards,
     activeCardId,
+    detectedCardId,
     bufferedAnswerCount,
     followupPrompt,
     followupQueueLength,
@@ -65,6 +70,9 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
     documentId,
     currentThemeId: currentTheme?.id,
     currentSectionId: currentSection?.id,
+    initialActiveCardId: session?.activeCardId,
+    initialDetectedCardId: session?.activeCardHintId,
+    sessionStatus: session?.status,
   })
 
   // Keep cardStatesRef in sync
@@ -82,6 +90,7 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
     isRecording,
     isTranscribing,
     realtimeError,
+    audioDiagnostics,
     recordingStartedAtRef,
     finalRecordingBlobRef,
     setIsDiarizing,
@@ -90,11 +99,14 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
     startTranscription,
     stopTranscription,
     stopRecording,
+    resetAudioDiagnostics,
   } = useTranscriptProcessing({
     sessionId,
     refs,
     candidateCards,
     onBufferedAnswer: () => setBufferedAnswerCount(prev => prev + 1),
+    diagnosticsEnabled: audioDiagnosticsEnabled,
+    audioProcessingProfile: audioDiagnosticsEnabled ? audioProcessingProfile : 'standard',
   })
 
   const scriptReadiness = { isReady: true, isPreparing: false, error: null as string | null }
@@ -272,6 +284,18 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
       ) : (
         <>
           <main className="relative flex min-h-0 flex-1 overflow-hidden">
+            <AudioDiagnosticsPanel
+              enabled={audioDiagnosticsEnabled}
+              profile={audioProcessingProfile}
+              diagnostics={audioDiagnostics}
+              profileLocked={realtimeStatus === 'connecting' || realtimeStatus === 'connected'}
+              onEnabledChange={(enabled) => {
+                setAudioDiagnosticsEnabled(enabled)
+                if (!enabled) setAudioProcessingProfile('standard')
+              }}
+              onProfileChange={setAudioProcessingProfile}
+              onReset={resetAudioDiagnostics}
+            />
             <button
               type="button"
               onClick={previousTheme}
@@ -309,6 +333,7 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
                   currentTheme={currentTheme}
                   cardStates={cardStates}
                   activeCardId={activeCardId}
+                  detectedCardId={detectedCardId}
                   sessionId={sessionId}
                   setActiveCardId={setActiveCardId}
                   updateCardFromEvent={updateCardFromEvent}

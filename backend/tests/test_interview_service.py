@@ -34,6 +34,7 @@ class TestInterviewService:
         db.refresh = Mock()
         db.add = Mock()
         db.delete = Mock()
+        db.query.return_value.filter.return_value.all.return_value = []
         return db
 
     @pytest.fixture
@@ -288,13 +289,51 @@ class TestInterviewService:
 
         update_data = InterviewSessionUpdate(status="interviewing")
 
-        session = interview_service.update_session(
-            db=mock_db, session_id="session-123", update_data=update_data
-        )
+        with patch.object(interview_service, "_reset_card_progress_for_new_round") as reset:
+            session = interview_service.update_session(
+                db=mock_db, session_id="session-123", update_data=update_data
+            )
 
         assert session.status == "interviewing"
         assert session.started_at is not None
+        reset.assert_called_once_with(mock_db, sample_interview_session)
         mock_db.commit.assert_called_once()
+
+    def test_reset_card_progress_for_new_round_clears_stale_state(
+        self,
+        mock_db,
+        sample_interview_session,
+        sample_card_state,
+    ):
+        sample_card_state.status = "listening"
+        sample_card_state.confidence = 1.0
+        sample_card_state.activation_score = 1.0
+        sample_card_state.completion_score = 1.0
+        sample_card_state.completion_source = "manual"
+        sample_card_state.answered_at = datetime.utcnow()
+        sample_card_state.evidence_transcript = "stale transcript"
+        sample_card_state.evidence = {"satisfiedCriteria": ["criterion_0"]}
+        sample_interview_session.active_card_id = "card-1"
+        sample_interview_session.active_card_hint_id = "card-1"
+        sample_interview_session.pending_answer_buffer = ["utt-1"]
+        mock_db.query.return_value.filter.return_value.all.return_value = [sample_card_state]
+
+        interview_service._reset_card_progress_for_new_round(
+            mock_db,
+            sample_interview_session,
+        )
+
+        assert sample_card_state.status == "pending"
+        assert sample_card_state.confidence is None
+        assert sample_card_state.activation_score == 0
+        assert sample_card_state.completion_score == 0
+        assert sample_card_state.completion_source is None
+        assert sample_card_state.answered_at is None
+        assert sample_card_state.evidence_transcript is None
+        assert sample_card_state.evidence is None
+        assert sample_interview_session.active_card_id is None
+        assert sample_interview_session.active_card_hint_id is None
+        assert sample_interview_session.pending_answer_buffer is None
 
     def test_update_session_status_to_paused(self, mock_db, sample_interview_session):
         """Test updating session status to paused."""
@@ -339,11 +378,13 @@ class TestInterviewService:
 
         update_data = InterviewSessionUpdate(status="interviewing")
 
-        session = interview_service.update_session(
-            db=mock_db, session_id="session-123", update_data=update_data
-        )
+        with patch.object(interview_service, "_reset_card_progress_for_new_round") as reset:
+            session = interview_service.update_session(
+                db=mock_db, session_id="session-123", update_data=update_data
+            )
 
         assert session.status == "interviewing"
+        reset.assert_not_called()
         # Pause duration should be accumulated
         assert session.paused_duration_seconds > 0
         assert session.paused_at is None

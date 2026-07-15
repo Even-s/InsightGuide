@@ -75,6 +75,7 @@ class TestQuestionOnlyActivation:
             "是否有考慮過其他方案呢？",
             "哪些因素會影響決策？",
             "為什麼選擇這個方法？",
+            "收到掛號後，櫃檯通常會查哪些資料來確認呢？",
         ]
         for q in questions:
             assert is_question_like(q), f"Should detect question: {q}"

@@ -5,6 +5,16 @@ import { useTranscriptProcessing } from './useTranscriptProcessing'
 
 const mockMatchPartialTranscript = vi.fn().mockResolvedValue(undefined)
 const mockCreateUtterance = vi.fn().mockResolvedValue(undefined)
+const mockFindAskedCard = vi.fn().mockReturnValue(null)
+let realtimeCallbacks: {
+  onTranscriptDelta?: (delta: string, itemId?: string) => void
+  onTranscriptCompleted?: (payload: {
+    transcript: string
+    itemId?: string
+    startedAt?: string
+    endedAt?: string
+  }) => void
+} = {}
 
 vi.mock('@/api/interview', () => ({
   interviewAPI: {
@@ -14,14 +24,19 @@ vi.mock('@/api/interview', () => ({
 }))
 
 vi.mock('@/hooks/useRealtimeTranscription', () => ({
-  useRealtimeTranscription: () => ({
-    status: 'idle',
-    isRecording: false,
-    isTranscribing: false,
-    startTranscription: vi.fn(),
-    stopTranscription: vi.fn(),
-    error: null,
-  }),
+  useRealtimeTranscription: (callbacks: typeof realtimeCallbacks) => {
+    realtimeCallbacks = callbacks
+    return {
+      status: 'idle',
+      isRecording: false,
+      isTranscribing: false,
+      startTranscription: vi.fn(),
+      stopTranscription: vi.fn(),
+      error: null,
+      diagnostics: {},
+      resetDiagnostics: vi.fn(),
+    }
+  },
 }))
 
 vi.mock('@/hooks/useMediaRecorder', () => ({
@@ -36,7 +51,7 @@ vi.mock('@/utils/chineseConverter', () => ({
 }))
 
 vi.mock('@/components/PresenterMode/presenterUtils', () => ({
-  findAskedCard: () => null,
+  findAskedCard: (...args: unknown[]) => mockFindAskedCard(...args),
   getActiveCardId: () => 'card-1',
 }))
 
@@ -53,6 +68,8 @@ describe('useTranscriptProcessing', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.useFakeTimers()
+    realtimeCallbacks = {}
+    mockFindAskedCard.mockReturnValue(null)
   })
 
   afterEach(() => {
@@ -152,5 +169,37 @@ describe('useTranscriptProcessing', () => {
 
     expect(result.current.recordingStartedAtRef.current).toBeNull()
     expect(result.current.finalRecordingBlobRef.current).toBeNull()
+  })
+
+  it('keeps a richer streaming question when the completed transcript is truncated', async () => {
+    renderHook(() =>
+      useTranscriptProcessing({
+        sessionId: 'session-1',
+        refs: createMockRefs(),
+        candidateCards: [],
+        onBufferedAnswer: vi.fn(),
+      }),
+    )
+
+    const fullQuestion = '收到一筆掛號後，櫃台通常會先查哪些資料，再做哪些確認？'
+    mockFindAskedCard.mockReturnValue('card-2')
+
+    await act(async () => {
+      realtimeCallbacks.onTranscriptDelta?.(fullQuestion, 'item-1')
+      realtimeCallbacks.onTranscriptCompleted?.({
+        transcript: '目前我們認為',
+        itemId: 'item-1',
+      })
+    })
+
+    expect(mockCreateUtterance).toHaveBeenCalledWith(
+      'session-1',
+      fullQuestion,
+      'theme-1',
+      'item-1',
+      undefined,
+      undefined,
+      'card-2',
+    )
   })
 })

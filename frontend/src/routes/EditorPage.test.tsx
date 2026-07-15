@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import type { DocumentStatus } from '@/api/documents'
@@ -106,5 +106,28 @@ describe('EditorPage', () => {
     await waitFor(() => {
       expect(screen.getByText('正在分析文件')).toBeInTheDocument()
     })
+  })
+
+  it('provides an interview-record entry for every ended session', async () => {
+    const apiClient = (await import('@/api/client')).default
+    renderEditorPage()
+    await screen.findByText('訪談開場')
+
+    vi.mocked(apiClient.get).mockResolvedValueOnce({
+      data: {
+        sessions: [{
+          id: 'session-1',
+          status: 'ended',
+          startedAt: '2026-07-14T08:00:00Z',
+          endedAt: '2026-07-14T09:00:00Z',
+          createdAt: '2026-07-14T08:00:00Z',
+        }],
+      },
+    })
+
+    fireEvent.click(screen.getByRole('button', { name: '訪談紀錄' }))
+
+    expect(await screen.findByRole('heading', { name: '訪談紀錄' })).toBeInTheDocument()
+    expect(screen.getAllByRole('button', { name: '訪談紀錄' })).toHaveLength(2)
   })
 })

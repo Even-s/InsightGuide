@@ -5,12 +5,18 @@ import { useMediaRecorder } from '@/hooks/useMediaRecorder'
 import type { PresenterSessionRefs } from './usePresenterSessionRefs'
 import { simplifiedToTraditional } from '@/utils/chineseConverter'
 import { findAskedCard, getActiveCardId } from '@/components/PresenterMode/presenterUtils'
+import type {
+  AudioDiagnosticsSnapshot,
+  AudioProcessingProfile,
+} from '@/hooks/useAudioDiagnostics'
 
 interface UseTranscriptProcessingOptions {
   sessionId: string
   refs: PresenterSessionRefs
   candidateCards: Array<{ cardId: string; questionText: string; focusText: string; score: number }>
   onBufferedAnswer: () => void
+  diagnosticsEnabled?: boolean
+  audioProcessingProfile?: AudioProcessingProfile
 }
 
 export interface TranscriptProcessingResult {
@@ -23,6 +29,7 @@ export interface TranscriptProcessingResult {
   isRecording: boolean
   isTranscribing: boolean
   realtimeError: Error | null
+  audioDiagnostics: AudioDiagnosticsSnapshot
   recordingStartedAtRef: React.MutableRefObject<string | null>
   finalRecordingBlobRef: React.MutableRefObject<Blob | null>
   setIsDiarizing: (v: boolean) => void
@@ -32,6 +39,33 @@ export interface TranscriptProcessingResult {
   startTranscription: () => void
   stopTranscription: () => void
   stopRecording: () => Promise<Blob | null>
+  resetAudioDiagnostics: () => void
+}
+
+export function selectCompletedTranscript(
+  completedTranscript: string,
+  streamedTranscript: string,
+) {
+  const completed = completedTranscript.trim()
+  const streamed = streamedTranscript.trim()
+
+  if (!streamed) return completed
+  if (!completed) return streamed
+
+  const additionalLength = streamed.length - completed.length
+  const substantiallyRicher =
+    additionalLength >= Math.max(8, Math.ceil(completed.length * 0.5))
+  const streamedLooksLikeQuestion = /[？?嗎呢]\s*$/.test(streamed)
+  const completedLooksLikeQuestion = /[？?嗎呢]\s*$/.test(completed)
+
+  if (
+    substantiallyRicher ||
+    (streamedLooksLikeQuestion && !completedLooksLikeQuestion && additionalLength > 0)
+  ) {
+    return streamed
+  }
+
+  return completed
 }
 
 export function useTranscriptProcessing({
@@ -39,6 +73,8 @@ export function useTranscriptProcessing({
   refs,
   candidateCards,
   onBufferedAnswer,
+  diagnosticsEnabled = false,
+  audioProcessingProfile = 'standard',
 }: UseTranscriptProcessingOptions): TranscriptProcessingResult {
   const [transcriptHistory, setTranscriptHistory] = useState<string[]>([])
   const [pendingTranscript, setPendingTranscript] = useState('')
@@ -113,7 +149,7 @@ export function useTranscriptProcessing({
     startedAt?: string
     endedAt?: string
   }) => {
-    let text = payload.transcript.trim()
+    let text = selectCompletedTranscript(payload.transcript, partialTranscriptRef.current)
     const activeTheme = refs.currentThemeRef.current
     const activeSlide = refs.currentSectionRef.current
     const activeId = activeTheme?.id ?? activeSlide?.id
@@ -169,7 +205,11 @@ export function useTranscriptProcessing({
     startTranscription,
     stopTranscription,
     error: realtimeError,
+    diagnostics: audioDiagnostics,
+    resetDiagnostics: resetAudioDiagnostics,
   } = useRealtimeTranscription({
+    diagnosticsEnabled,
+    audioProcessingProfile,
     onMediaStreamReady: (stream) => {
       if (import.meta.env.VITE_DISABLE_DIARIZATION === 'true') return
       recordingStartedAtRef.current = recordingStartedAtRef.current ?? new Date().toISOString()
@@ -221,6 +261,7 @@ export function useTranscriptProcessing({
     isRecording,
     isTranscribing,
     realtimeError,
+    audioDiagnostics,
     recordingStartedAtRef,
     finalRecordingBlobRef,
     setIsDiarizing,
@@ -230,5 +271,6 @@ export function useTranscriptProcessing({
     startTranscription,
     stopTranscription,
     stopRecording,
+    resetAudioDiagnostics,
   }
 }

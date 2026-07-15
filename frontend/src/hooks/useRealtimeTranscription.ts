@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { realtimeAPI } from '@/api/realtime'
+import {
+  getAudioConstraints,
+  useAudioDiagnostics,
+  type AudioProcessingProfile,
+} from '@/hooks/useAudioDiagnostics'
 
 const OPENAI_REALTIME_WEBRTC_URL = 'https://api.openai.com/v1/realtime/calls'
 
@@ -30,6 +35,8 @@ interface UseRealtimeTranscriptionOptions {
   onTranscriptCompleted?: (payload: TranscriptCompletedPayload) => void
   onSpeechStarted?: () => void
   onMediaStreamReady?: (stream: MediaStream) => void
+  diagnosticsEnabled?: boolean
+  audioProcessingProfile?: AudioProcessingProfile
 }
 
 function getErrorMessage(error: unknown) {
@@ -76,6 +83,8 @@ export function useRealtimeTranscription({
   onTranscriptCompleted,
   onSpeechStarted,
   onMediaStreamReady,
+  diagnosticsEnabled = false,
+  audioProcessingProfile = 'standard',
 }: UseRealtimeTranscriptionOptions = {}) {
   const [status, _setStatus] = useState<RealtimeTranscriptionStatus>('idle')
   const statusRef = useRef<RealtimeTranscriptionStatus>('idle')
@@ -100,6 +109,14 @@ export function useRealtimeTranscription({
     onSpeechStarted,
     onMediaStreamReady,
   })
+  const {
+    snapshot: audioDiagnostics,
+    observeStream: observeDiagnosticStream,
+    observePeerConnection: observeDiagnosticPeerConnection,
+    recordRealtimeEvent: recordDiagnosticEvent,
+    updateConnectionState: updateDiagnosticConnectionState,
+    reset: resetAudioDiagnostics,
+  } = useAudioDiagnostics(diagnosticsEnabled, audioProcessingProfile)
 
   useEffect(() => {
     callbacksRef.current = {
@@ -111,6 +128,8 @@ export function useRealtimeTranscription({
   }, [onMediaStreamReady, onSpeechStarted, onTranscriptCompleted, onTranscriptDelta])
 
   const cleanupConnection = useCallback(() => {
+    observeDiagnosticPeerConnection(null)
+    observeDiagnosticStream(null)
     dataChannelRef.current?.close()
     dataChannelRef.current = null
 
@@ -134,7 +153,7 @@ export function useRealtimeTranscription({
 
     setIsRecording(false)
     setIsTranscribing(false)
-  }, [])
+  }, [observeDiagnosticPeerConnection, observeDiagnosticStream])
 
   const emitCompletedTranscript = useCallback((transcript: string, itemId?: string, eventId?: string) => {
     const text = transcript.trim()
@@ -186,6 +205,7 @@ export function useRealtimeTranscription({
   const handleRealtimeEvent = useCallback((message: RealtimeEvent) => {
     switch (message.type) {
       case 'input_audio_buffer.speech_started':
+        recordDiagnosticEvent('speech_started')
         setIsTranscribing(false)
         if (deltaBufferRef.current.trim()) {
           flushDeltaBuffer()
@@ -196,6 +216,7 @@ export function useRealtimeTranscription({
         break
 
       case 'input_audio_buffer.speech_stopped':
+        recordDiagnosticEvent('speech_stopped')
         setIsTranscribing(true)
         if (deltaBufferRef.current.trim()) {
           flushDeltaBuffer()
@@ -204,6 +225,7 @@ export function useRealtimeTranscription({
 
       case 'conversation.item.input_audio_transcription.delta':
         if (message.delta) {
+          recordDiagnosticEvent('transcript_delta')
           firstDeltaAtRef.current = firstDeltaAtRef.current ?? new Date().toISOString()
           deltaBufferRef.current += message.delta
           deltaItemIdRef.current = message.item_id ?? deltaItemIdRef.current
@@ -222,11 +244,13 @@ export function useRealtimeTranscription({
         deltaItemIdRef.current = undefined
 
         if (message.transcript?.trim()) {
+          recordDiagnosticEvent('transcript_completed', message.transcript.trim())
           emitCompletedTranscript(message.transcript, message.item_id, message.event_id)
         }
         break
 
       case 'conversation.item.input_audio_transcription.failed': {
+        recordDiagnosticEvent('transcript_failed', message.error?.message)
         setIsTranscribing(false)
         const realtimeError = new Error(message.error?.message ?? 'Realtime transcription failed')
         setError(realtimeError)
@@ -235,6 +259,7 @@ export function useRealtimeTranscription({
       }
 
       case 'error': {
+        recordDiagnosticEvent('realtime_error', message.error?.message)
         const realtimeError = new Error(message.error?.message ?? 'Realtime API error')
         setError(realtimeError)
         setStatus('error')
@@ -244,7 +269,7 @@ export function useRealtimeTranscription({
       default:
         break
     }
-  }, [emitCompletedTranscript, flushDeltaBuffer, scheduleDeltaFlush])
+  }, [emitCompletedTranscript, flushDeltaBuffer, recordDiagnosticEvent, scheduleDeltaFlush])
 
   const startTranscription = useCallback(async () => {
     if (peerConnectionRef.current) return
@@ -265,11 +290,7 @@ export function useRealtimeTranscription({
 
       const session = await realtimeAPI.createTranscriptionSession()
       const mediaStream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: false,
-          autoGainControl: true,
-        },
+        audio: getAudioConstraints(audioProcessingProfile),
       })
 
       if (startTokenRef.current !== startToken) {
@@ -278,6 +299,7 @@ export function useRealtimeTranscription({
       }
 
       callbacksRef.current.onMediaStreamReady?.(mediaStream)
+      observeDiagnosticStream(mediaStream)
 
       const peerConnection = new RTCPeerConnection()
       const dataChannel = peerConnection.createDataChannel('oai-events')
@@ -305,6 +327,7 @@ export function useRealtimeTranscription({
       }
 
       peerConnection.onconnectionstatechange = () => {
+        updateDiagnosticConnectionState(peerConnection.connectionState)
         if (peerConnection.connectionState === 'connected') {
           setStatus('connected')
           setIsRecording(true)
@@ -327,6 +350,7 @@ export function useRealtimeTranscription({
       peerConnectionRef.current = peerConnection
       dataChannelRef.current = dataChannel
       mediaStreamRef.current = mediaStream
+      observeDiagnosticPeerConnection(peerConnection)
 
       const offer = await peerConnection.createOffer()
       await peerConnection.setLocalDescription(offer)
@@ -355,7 +379,14 @@ export function useRealtimeTranscription({
       setError(new Error(getErrorMessage(err)))
       setStatus('error')
     }
-  }, [cleanupConnection, handleRealtimeEvent])
+  }, [
+    audioProcessingProfile,
+    cleanupConnection,
+    handleRealtimeEvent,
+    observeDiagnosticPeerConnection,
+    observeDiagnosticStream,
+    updateDiagnosticConnectionState,
+  ])
 
   const stopTranscription = useCallback(() => {
     startTokenRef.current += 1
@@ -378,6 +409,8 @@ export function useRealtimeTranscription({
     isRecording,
     isTranscribing,
     error,
+    diagnostics: audioDiagnostics,
+    resetDiagnostics: resetAudioDiagnostics,
     startTranscription,
     stopTranscription,
     mediaStream: mediaStreamRef.current,

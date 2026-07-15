@@ -185,6 +185,63 @@ class TestAnswerEvaluationEngine:
 
         assert len(updates) == 0
 
+    def test_process_utterance_asked_card_id_bypasses_question_classifier(self, mock_db):
+        """An explicit frontend match must route even with answer-like wording."""
+        with patch.object(answer_evaluation_engine, "_route_question_to_card") as mock_route:
+            mock_route.return_value = [{"card_id": "card-123"}]
+
+            updates = answer_evaluation_engine.process_utterance(
+                db=mock_db,
+                session_id="session-123",
+                utterance_id="utt-123",
+                utterance_text="基本上我們覺得櫃檯通常會查哪些資料來確認",
+                section_id="section-789",
+                speaker="interviewee",
+                asked_card_id="card-123",
+            )
+
+        assert updates == [{"card_id": "card-123"}]
+        mock_route.assert_called_once_with(
+            mock_db,
+            "session-123",
+            "utt-123",
+            "基本上我們覺得櫃檯通常會查哪些資料來確認",
+            "section-789",
+            "card-123",
+        )
+
+    def test_route_question_emits_detection_for_already_listening_card(
+        self,
+        mock_db,
+        sample_interview_session,
+        sample_card_state,
+        sample_question_card,
+    ):
+        """Repeated questions still notify the UI which card was detected."""
+        query = Mock()
+        query.filter.return_value = query
+        query.first.side_effect = [
+            sample_interview_session,
+            sample_card_state,
+            sample_question_card,
+            sample_interview_session,
+        ]
+        mock_db.query.return_value = query
+
+        updates = answer_evaluation_engine._route_question_to_card(
+            mock_db,
+            "session-123",
+            "utt-123",
+            "What are the main business objectives?",
+            "section-789",
+            "card-123",
+        )
+
+        assert updates[0]["topic_detected"] is True
+        assert updates[0]["old_status"] == "listening"
+        assert updates[0]["new_status"] == "listening"
+        assert sample_interview_session.active_card_hint_id == "card-123"
+
     @patch("app.services.answer_evaluation_engine.answer_evaluation_engine._load_candidate_cards")
     def test_process_utterance_error_handling(self, mock_load, mock_db):
         """Test error handling during utterance processing."""
@@ -415,6 +472,9 @@ class TestQuestionGuardAndReduceState:
 
     def test_is_question_like_chinese_question_mark(self):
         assert is_question_like("你有哪些情境是需要馬上有人幫忙的呢？") is True
+
+    def test_is_question_like_question_mark_overrides_answer_marker(self):
+        assert is_question_like("收到掛號後，櫃檯通常會查哪些資料來確認呢？") is True
 
     def test_is_question_like_english_question_mark(self):
         assert is_question_like("What scenarios need help?") is True
@@ -744,6 +804,50 @@ class TestExclusiveActiveCardMode:
             # No updates should happen — other cards are NOT evaluated
             assert updates == []
 
+    def test_ai_detected_hint_is_evaluated_exclusively(self, mock_db):
+        """An answer after AI question routing must stay on the detected card."""
+        from app.models.interview_session import InterviewSession
+
+        mock_session = Mock(spec=InterviewSession)
+        mock_session.active_card_id = None
+        mock_session.active_card_source = None
+        mock_session.active_card_hint_id = "qcard_hint"
+        mock_session.pending_answer_buffer = None
+
+        mock_db.query.return_value.filter.return_value.first.return_value = mock_session
+
+        with (
+            patch.object(answer_evaluation_engine, "_load_candidate_cards") as mock_load,
+            patch.object(answer_evaluation_engine, "_batch_judge_answer_sufficiency") as mock_judge,
+            patch.object(answer_evaluation_engine, "_build_structured_context") as mock_ctx,
+            patch.object(answer_evaluation_engine, "_update_card_state") as mock_update,
+            patch("app.services.answer_evaluation_engine.question_rubric_service") as mock_rubric,
+        ):
+            mock_rubric.get_rubric_if_cached.return_value = {"criteria": []}
+            hint_card = Mock(id="qcard_hint", question_text="Q1", focus_text="F1", coverage_rule={})
+            hint_state = Mock(
+                id="s1", status="listening", session_id="session_1", question_card_id="qcard_hint"
+            )
+            mock_load.return_value = [{"card": hint_card, "state": hint_state}]
+            mock_ctx.return_value = "context"
+            mock_judge.return_value = [
+                {"confidence": 0.5, "is_covered": False, "response_status": "responded"}
+            ]
+            mock_update.return_value = {"card_id": "qcard_hint", "new_status": "listening"}
+
+            updates = answer_evaluation_engine._evaluate_answer(
+                mock_db, "session_1", "utt_1", "回答內容", "theme_1", "interviewee"
+            )
+
+            mock_load.assert_called_once_with(
+                mock_db,
+                "session_1",
+                "theme_1",
+                active_card_id="qcard_hint",
+                statuses=["listening", "probably_sufficient", "at_risk"],
+            )
+            assert [update["card_id"] for update in updates] == ["qcard_hint"]
+
     def test_non_exclusive_when_no_active_card(self, mock_db):
         """Without active_card_id, system evaluates all candidates (legacy mode)."""
         from app.models.interview_session import InterviewSession
@@ -799,6 +903,49 @@ class TestExclusiveActiveCardMode:
             # In non-exclusive mode, multiple cards are loaded/filtered
             mock_load.assert_called_once()
             mock_filter.assert_called_once()
+
+    def test_low_confidence_question_only_does_not_activate_pending_card(self, mock_db):
+        """A weak stray fragment must not highlight an unrelated pending card."""
+        from app.models.interview_session import InterviewSession
+
+        mock_session = Mock(spec=InterviewSession)
+        mock_session.active_card_id = None
+        mock_session.active_card_source = None
+        mock_session.active_card_hint_id = None
+        mock_session.pending_answer_buffer = None
+        mock_db.query.return_value.filter.return_value.first.return_value = mock_session
+
+        with (
+            patch.object(answer_evaluation_engine, "_load_candidate_cards") as mock_load,
+            patch.object(answer_evaluation_engine, "_prefilter_candidates") as mock_filter,
+            patch.object(answer_evaluation_engine, "_batch_judge_answer_sufficiency") as mock_judge,
+            patch.object(answer_evaluation_engine, "_build_structured_context") as mock_ctx,
+            patch.object(answer_evaluation_engine, "_update_card_state") as mock_update,
+            patch("app.services.answer_evaluation_engine.question_rubric_service") as mock_rubric,
+        ):
+            mock_rubric.get_rubric_if_cached.return_value = {"criteria": []}
+            card = Mock(id="qcard_1", question_text="Q1", focus_text="F1", coverage_rule={})
+            state = Mock(
+                id="s1", status="pending", session_id="session_1", question_card_id="qcard_1"
+            )
+            candidate = {"card": card, "state": state}
+            mock_load.return_value = [candidate]
+            mock_filter.return_value = [candidate]
+            mock_ctx.return_value = "context"
+            mock_judge.return_value = [
+                {
+                    "confidence": 0.01,
+                    "is_covered": False,
+                    "response_status": "question_only",
+                }
+            ]
+
+            updates = answer_evaluation_engine._evaluate_answer(
+                mock_db, "session_1", "utt_1", "目前我們認為", "theme_1", "interviewee"
+            )
+
+            assert updates == []
+            mock_update.assert_not_called()
 
     def test_cleared_active_card_returns_to_non_exclusive(self, mock_db):
         """After clearing active card (source='cleared'), system returns to non-exclusive."""

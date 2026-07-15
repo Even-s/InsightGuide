@@ -10,6 +10,8 @@ from sqlalchemy import and_, asc, desc
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.models.card_coverage_evaluation import CardCoverageEvaluation
+from app.models.card_criterion_evidence import CardCriterionEvidence
 from app.models.document import Document
 from app.models.interview_session import InterviewCardState, InterviewSession
 from app.models.live_utterance import LiveUtterance
@@ -60,6 +62,60 @@ class InterviewService:
                 (ended_at - session.paused_at).total_seconds()
             )
         session.paused_at = None
+
+    def _reset_card_progress_for_new_round(
+        self,
+        db: Session,
+        session: InterviewSession,
+    ) -> None:
+        """Clear provisional card progress before the first interview start.
+
+        Role-filtered states are preserved, while every interviewable card is
+        returned to a clean pending state. The related evaluation ledgers must
+        be cleared as well; otherwise old criterion evidence would immediately
+        rebuild stale completion on the next answer.
+        """
+        preserved_statuses = {
+            "not_applicable_for_role",
+            "needs_different_stakeholder",
+            "disabled",
+        }
+        card_states = (
+            db.query(InterviewCardState).filter(InterviewCardState.session_id == session.id).all()
+        )
+
+        for card_state in card_states:
+            if card_state.status not in preserved_statuses:
+                card_state.status = "pending"
+            card_state.confidence = None
+            card_state.activation_score = 0
+            card_state.completion_score = 0
+            card_state.completion_source = None
+            card_state.manual_note = None
+            card_state.answered_at = None
+            card_state.evidence_transcript = None
+            card_state.evidence = None
+            card_state.updated_at = datetime.utcnow()
+
+        db.query(CardCoverageEvaluation).filter(
+            CardCoverageEvaluation.session_id == session.id
+        ).delete(synchronize_session=False)
+        db.query(CardCriterionEvidence).filter(
+            CardCriterionEvidence.session_id == session.id
+        ).delete(synchronize_session=False)
+
+        session.active_card_id = None
+        session.active_card_hint_id = None
+        session.active_card_source = None
+        session.active_card_confirmed_at = None
+        session.pending_answer_buffer = None
+        session.card_coverage_status = "provisional"
+
+        logger.info(
+            "Reset card progress for new interview round session=%s cards=%s",
+            session.id,
+            len(card_states),
+        )
 
     def create_session(
         self, db: Session, user_id: str, session_data: InterviewSessionCreate
@@ -254,6 +310,14 @@ class InterviewService:
         if update_data.status:
             old_status = session.status
             now = datetime.utcnow()
+
+            if update_data.status == "interviewing" and old_status in [
+                "idle",
+                "ready",
+                "preparing",
+            ]:
+                self._reset_card_progress_for_new_round(db, session)
+
             session.status = update_data.status
 
             # Set timestamps based on status transitions
