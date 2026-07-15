@@ -19,7 +19,9 @@ class StakeholderSlot(Base):
     __tablename__ = "stakeholder_slots"
 
     id = Column(String, primary_key=True)
-    project_id = Column(String, ForeignKey("projects.id"), nullable=False, index=True)
+    project_id = Column(
+        String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
 
     role_category = Column(String, nullable=False)
     role_label = Column(String, nullable=False)

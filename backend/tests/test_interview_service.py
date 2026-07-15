@@ -11,9 +11,9 @@ from fastapi import HTTPException
 
 from app.models.document import Document
 from app.models.interview_session import InterviewCardState, InterviewSession
+from app.models.live_utterance import LiveUtterance
 from app.models.prep_session import PrepSession
 from app.models.question_card import QuestionCard
-from app.models.utterance import Utterance
 from app.schemas.interview import (
     InterviewCardStateUpdate,
     InterviewSessionCreate,
@@ -108,6 +108,102 @@ class TestInterviewService:
         """Test that the service initializes correctly."""
         assert interview_service is not None
         assert isinstance(interview_service, InterviewService)
+
+    def test_completed_card_releases_matching_routing_state(self):
+        session = InterviewSession(
+            id="session-123",
+            prep_session_id="prep-123",
+            document_id="doc-123",
+            user_id="user-123",
+            status="interviewing",
+            active_card_id="card-1",
+            active_card_hint_id="card-1",
+            active_card_source="user_confirmed",
+            active_card_confirmed_at=datetime.utcnow(),
+            pending_answer_buffer=["utterance-1"],
+            created_at=datetime.utcnow(),
+        )
+
+        cleared = interview_service.clear_completed_card_routing(session, "card-1")
+
+        assert cleared is True
+        assert session.active_card_id is None
+        assert session.active_card_hint_id is None
+        assert session.active_card_source == "completed"
+        assert session.active_card_confirmed_at is None
+        assert session.pending_answer_buffer is None
+
+    def test_completed_card_does_not_clear_another_cards_routing_state(self):
+        session = InterviewSession(
+            id="session-123",
+            prep_session_id="prep-123",
+            document_id="doc-123",
+            user_id="user-123",
+            status="interviewing",
+            active_card_id="card-2",
+            active_card_hint_id="card-2",
+            active_card_source="user_confirmed",
+            created_at=datetime.utcnow(),
+        )
+
+        cleared = interview_service.clear_completed_card_routing(session, "card-1")
+
+        assert cleared is False
+        assert session.active_card_id == "card-2"
+        assert session.active_card_hint_id == "card-2"
+        assert session.active_card_source == "user_confirmed"
+
+    def test_continuation_card_state_carries_completed_progress(self):
+        answered_at = datetime.utcnow()
+        source = InterviewCardState(
+            id="state-source",
+            session_id="session-source",
+            question_card_id="card-1",
+            status="sufficient",
+            confidence=0.92,
+            activation_score=0.8,
+            completion_score=0.92,
+            completion_source="ai",
+            answered_at=answered_at,
+            evidence_transcript="第一次訪談的證據",
+            evidence={"satisfiedCriteria": ["criterion-1"]},
+            created_at=answered_at,
+            updated_at=answered_at,
+        )
+
+        carried = interview_service._build_card_state("session-continued", "card-1", source)
+
+        assert carried.session_id == "session-continued"
+        assert carried.status == "sufficient"
+        assert float(carried.completion_score) == pytest.approx(0.92)
+        assert carried.evidence_transcript == "第一次訪談的證據"
+        assert carried.evidence == {"satisfiedCriteria": ["criterion-1"]}
+        assert carried.evidence is not source.evidence
+
+    def test_continuation_start_does_not_reset_carried_card_progress(self):
+        session = InterviewSession(
+            id="session-continued",
+            prep_session_id="prep-123",
+            document_id="doc-123",
+            user_id="user-123",
+            interview_round_id="round-1",
+            continued_from_session_id="session-source",
+            status="idle",
+            created_at=datetime.utcnow(),
+        )
+        db = Mock()
+        db.query.return_value.filter.return_value.first.return_value = session
+
+        with patch.object(interview_service, "_reset_card_progress_for_new_round") as reset:
+            updated = interview_service.update_session(
+                db,
+                session.id,
+                InterviewSessionUpdate(status="interviewing"),
+            )
+
+        reset.assert_not_called()
+        assert updated.status == "interviewing"
+        assert updated.started_at is not None
 
     def test_calculate_active_duration_not_started(self, sample_interview_session):
         """Test duration calculation when session not started."""
@@ -204,6 +300,7 @@ class TestInterviewService:
 
         # Verify session was added
         mock_db.add.assert_called()
+        mock_db.flush.assert_called_once()
         mock_db.commit.assert_called()
 
     def test_create_session_prep_session_not_found(self, mock_db):
@@ -265,6 +362,23 @@ class TestInterviewService:
 
         assert exc_info.value.status_code == 400
         assert "analyzed" in str(exc_info.value.detail).lower()
+
+    def test_create_session_rejects_frozen_historical_guide(
+        self, mock_db, sample_prep_session, sample_document
+    ):
+        """A completed round must not be reused for another interview session."""
+        sample_document.is_frozen = True
+        mock_db.query().filter().first.side_effect = [sample_prep_session, sample_document]
+
+        with pytest.raises(HTTPException) as exc_info:
+            interview_service.create_session(
+                db=mock_db,
+                user_id="user-123",
+                session_data=InterviewSessionCreate(prepSessionId="prep-123", documentId="doc-123"),
+            )
+
+        assert exc_info.value.status_code == 409
+        assert "new interview round" in str(exc_info.value.detail).lower()
 
     def test_get_session_success(self, mock_db, sample_interview_session):
         """Test successful session retrieval."""
@@ -504,15 +618,26 @@ class TestInterviewService:
 
         mock_db.add.assert_called()
         mock_db.commit.assert_called()
+        assert utterance.speaker == "realtime"
 
     def test_get_utterances_all(self, mock_db, sample_interview_session):
         """Test getting all utterances for a session."""
         utterances = [
-            Utterance(
-                id="utt-1", session_id="session-123", speaker="interviewer", transcript="Question?"
+            LiveUtterance(
+                id="utt-1",
+                session_id="session-123",
+                speaker="realtime",
+                transcript="Question?",
+                sequence_index=0,
+                is_partial=False,
             ),
-            Utterance(
-                id="utt-2", session_id="session-123", speaker="interviewee", transcript="Answer"
+            LiveUtterance(
+                id="utt-2",
+                session_id="session-123",
+                speaker="realtime",
+                transcript="Answer",
+                sequence_index=1,
+                is_partial=False,
             ),
         ]
 

@@ -49,7 +49,6 @@ vi.mock('@/hooks/useTranscriptProcessing', () => ({
     pendingTranscript: '',
     transcriptionError: null,
     isPreparingToPresent: false,
-    isDiarizing: false,
     realtimeStatus: 'idle',
     isRecording: false,
     isTranscribing: false,
@@ -70,21 +69,14 @@ vi.mock('@/hooks/useTranscriptProcessing', () => ({
       events: [],
       analyserError: null,
     },
-    recordingStartedAtRef: { current: null },
-    finalRecordingBlobRef: { current: null },
-    setIsDiarizing: vi.fn(),
     setTranscriptionError: vi.fn(),
     setIsPreparingToPresent: vi.fn(),
     handleStartRequested: vi.fn(),
     startTranscription: vi.fn(),
     stopTranscription: vi.fn(),
-    stopRecording: vi.fn().mockResolvedValue(null),
+    flushTranscriptSaves: vi.fn().mockResolvedValue(undefined),
     resetAudioDiagnostics: vi.fn(),
   }),
-}))
-
-vi.mock('@/api/client', () => ({
-  apiClient: { post: vi.fn() },
 }))
 
 vi.mock('@/api/interview', () => ({

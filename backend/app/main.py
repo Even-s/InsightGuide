@@ -11,11 +11,11 @@ from fastapi.responses import JSONResponse
 from app.api.routes import (
     auth,
     brd,
-    diarize,
     documents,
     events,
     evidence_matrix,
     insight_memos,
+    interview_rounds,
     interview_sessions,
     prep_sessions,
     projects,
@@ -91,9 +91,9 @@ app.include_router(
     prefix="/api/brd",
     tags=["brd"],
 )
-app.include_router(diarize.router, prefix="/api/realtime", tags=["diarize"])
 app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
 app.include_router(insight_memos.router, prefix="/api", tags=["insight-memos"])
+app.include_router(interview_rounds.router, prefix="/api", tags=["interview-rounds"])
 app.include_router(evidence_matrix.router, prefix="/api", tags=["evidence-matrix"])
 
 

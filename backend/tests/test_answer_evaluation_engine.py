@@ -781,6 +781,51 @@ class TestExclusiveActiveCardMode:
             assert len(updates) == 1
             assert updates[0]["card_id"] == "qcard_active"
 
+    def test_sufficient_answer_releases_completed_active_card(self, mock_db):
+        """A completed card must stop owning later transcript segments."""
+        from app.models.interview_session import InterviewSession
+
+        mock_session = Mock(spec=InterviewSession)
+        mock_session.active_card_id = "qcard_active"
+        mock_session.active_card_source = "user_confirmed"
+        mock_session.active_card_hint_id = "qcard_active"
+        mock_session.active_card_confirmed_at = datetime.utcnow()
+        mock_session.pending_answer_buffer = None
+        mock_db.query.return_value.filter.return_value.first.return_value = mock_session
+
+        with (
+            patch.object(answer_evaluation_engine, "_load_candidate_cards") as mock_load,
+            patch.object(answer_evaluation_engine, "_batch_judge_answer_sufficiency") as mock_judge,
+            patch.object(answer_evaluation_engine, "_build_structured_context") as mock_ctx,
+            patch.object(answer_evaluation_engine, "_update_card_state") as mock_update,
+            patch("app.services.answer_evaluation_engine.question_rubric_service") as mock_rubric,
+        ):
+            mock_rubric.get_rubric_if_cached.return_value = {"criteria": []}
+            active_card = Mock(
+                id="qcard_active", question_text="Q1", focus_text="F1", coverage_rule={}
+            )
+            active_state = Mock(
+                id="s1", status="listening", session_id="session_1", question_card_id="qcard_active"
+            )
+            mock_load.return_value = [{"card": active_card, "state": active_state}]
+            mock_ctx.return_value = "context"
+            mock_judge.return_value = [
+                {"confidence": 1.0, "is_covered": True, "response_status": "responded"}
+            ]
+            mock_update.return_value = {
+                "card_id": "qcard_active",
+                "new_status": "sufficient",
+            }
+
+            answer_evaluation_engine._evaluate_answer(
+                mock_db, "session_1", "utt_1", "完整回答", "theme_1", "interviewee"
+            )
+
+        assert mock_session.active_card_id is None
+        assert mock_session.active_card_hint_id is None
+        assert mock_session.active_card_source == "completed"
+        assert mock_session.active_card_confirmed_at is None
+
     def test_exclusive_mode_does_not_evaluate_other_cards(self, mock_db):
         """Other pending cards should not receive any completion in exclusive mode."""
         from app.models.interview_session import InterviewSession

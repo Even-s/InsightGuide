@@ -1,4 +1,8 @@
-# 訪談逐字稿、Q&A 與卡片主題匹配系統最終版改進計劃書
+# 訪談逐字稿、Q&A 與卡片主題匹配系統改進計劃書（歷史封存）
+
+> 此文件描述已退役的 diarization 雙軌方案。自 2026-07-15 起，系統只保存
+> Realtime transcript，舊 diarization、revision、alignment、speaker Q&A 資料表
+> 已由破壞性 migration 移除。請以 `docs/ARCHITECTURE.md` 為現行架構依據。
 
 > **Status: COMPLETED (2026-06)**
 >

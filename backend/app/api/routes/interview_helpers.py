@@ -25,6 +25,10 @@ def convert_session_to_schema(session, db: Optional[Session] = None) -> Intervie
         prepSessionId=session.prep_session_id,
         documentId=session.document_id,
         userId=session.user_id,
+        projectId=session.project_id,
+        stakeholderProfileId=session.stakeholder_profile_id,
+        interviewRoundId=session.interview_round_id,
+        continuedFromSessionId=session.continued_from_session_id,
         status=session.status,
         currentSectionId=session.current_section_id,
         activeCardId=session.active_card_id,
@@ -41,28 +45,17 @@ def convert_session_to_schema(session, db: Optional[Session] = None) -> Intervie
 
 
 def convert_utterance_to_schema(utterance) -> UtteranceSchema:
-    """Convert utterance model to schema.
-
-    Handles LiveUtterance, FinalUtterance, and legacy Utterance.
-    """
+    """Convert any transcript row to the speaker-neutral public schema."""
     realtime_id = getattr(utterance, "realtime_event_id", None) or getattr(
         utterance, "realtime_item_id", None
     )
     section_id = getattr(utterance, "section_id", None) or getattr(utterance, "theme_id", None)
 
-    # FinalUtterance uses speaker_role/speaker_display_name instead of speaker
-    speaker = (
-        getattr(utterance, "speaker", None)
-        or getattr(utterance, "speaker_role", None)
-        or getattr(utterance, "speaker_display_name", None)
-        or "unknown"
-    )
-
     return UtteranceSchema(
         id=utterance.id,
         sessionId=utterance.session_id,
         sectionId=section_id,
-        speaker=speaker,
+        speaker="realtime",
         transcript=utterance.transcript,
         startedAt=getattr(utterance, "started_at", None),
         endedAt=getattr(utterance, "ended_at", None),

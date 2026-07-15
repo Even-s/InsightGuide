@@ -374,6 +374,8 @@ export interface InsightMemo {
   sessionId: string
   projectId?: string
   stakeholderProfileId?: string
+  interviewSeriesId?: string
+  interviewRoundId?: string
   interviewDate?: string
   interviewDurationMinutes?: number
   topicsCovered: string[]
@@ -602,6 +604,9 @@ export async function generateProjectBRD(projectId: string): Promise<{
 export interface InterviewGuide {
   document_id: string
   prep_session_id: string
+  interview_round_id?: string
+  guide_version?: number
+  is_frozen?: boolean
   themes: Array<{
     id: string
     theme_number: number

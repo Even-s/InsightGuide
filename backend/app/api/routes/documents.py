@@ -26,6 +26,10 @@ def convert_document_to_response(document, db: Session) -> DocumentResponse:
         id=document.id,
         user_id=document.user_id,
         project_id=document.project_id,
+        stakeholder_profile_id=document.stakeholder_profile_id,
+        interview_round_id=document.interview_round_id,
+        guide_version=document.guide_version or 1,
+        is_frozen=bool(document.is_frozen),
         title=document.title,
         source_file_url=document.source_file_url,
         file_type=document.file_type,
@@ -286,6 +290,12 @@ async def get_interview_plan(document_id: str, db: Session = Depends(get_db)):
 async def delete_document(document_id: str, db: Session = Depends(get_db)):
     """Delete a document and all associated files and data."""
     logger.info(f"Deleting document {document_id}")
+    document = document_service.get_document(db, document_id)
+    if document.is_frozen:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Historical interview guides cannot be deleted directly.",
+        )
     document_service.delete_document(db, document_id)
     return None
 

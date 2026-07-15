@@ -245,6 +245,7 @@ class QuestionCardService:
                 coverage_rule["answerTarget"] = rubric.get("answerTarget", "")
                 card.coverage_rule = coverage_rule
                 from sqlalchemy.orm.attributes import flag_modified
+
                 flag_modified(card, "coverage_rule")
                 db.commit()
                 db.refresh(card)

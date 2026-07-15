@@ -69,6 +69,7 @@ data/
 
 # Docker
 docker-compose.override.yml
+deploy/ec2/backups/
 
 # OS
 Thumbs.db

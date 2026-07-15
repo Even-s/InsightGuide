@@ -3,6 +3,7 @@
 from datetime import datetime
 
 from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base
@@ -17,9 +18,26 @@ class InterviewSession(Base):
     prep_session_id = Column(String, ForeignKey("prep_sessions.id"), nullable=False, index=True)
     document_id = Column(String, ForeignKey("documents.id"), nullable=False, index=True)
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
-    project_id = Column(String, ForeignKey("projects.id"), nullable=True, index=True)
+    project_id = Column(
+        String, ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     stakeholder_profile_id = Column(
-        String, ForeignKey("stakeholder_profiles.id"), nullable=True, index=True
+        String,
+        ForeignKey("stakeholder_profiles.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    interview_round_id = Column(
+        String,
+        ForeignKey("interview_rounds.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    continued_from_session_id = Column(
+        String,
+        ForeignKey("interview_sessions.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
     )
     interview_objective = Column(Text, nullable=True)
     interview_scope = Column(
@@ -44,17 +62,8 @@ class InterviewSession(Base):
     )  # system_suggested | user_confirmed | manual_selected | cleared
     active_card_confirmed_at = Column(DateTime, nullable=True)
     pending_answer_buffer = Column(
-        JSON, nullable=True
+        JSONB, nullable=True
     )  # list of utterance_ids waiting for card confirmation
-
-    # Transcript management (Phase 1: Data flow separation)
-    transcript_status = Column(String, nullable=False, default="live_only")
-    # live_only | diarizing | finalized | diarize_failed
-    final_transcript_revision_id = Column(
-        String, ForeignKey("transcript_revisions.id"), nullable=True
-    )
-    card_coverage_status = Column(String, nullable=False, default="provisional")
-    # provisional | finalizing | finalized | failed
 
     # Relationships
     prep_session = relationship("PrepSession", back_populates="interview_sessions")
@@ -68,21 +77,12 @@ class InterviewSession(Base):
         back_populates="interview_sessions",
         foreign_keys=[stakeholder_profile_id],
     )
+    interview_round = relationship("InterviewRound", back_populates="interview_sessions")
     card_states = relationship(
         "InterviewCardState", back_populates="session", cascade="all, delete-orphan"
     )
-    utterances = relationship("Utterance", back_populates="session", cascade="all, delete-orphan")
     live_utterances = relationship(
         "LiveUtterance", back_populates="session", cascade="all, delete-orphan"
-    )
-    transcript_revisions = relationship(
-        "TranscriptRevision",
-        back_populates="session",
-        foreign_keys="[TranscriptRevision.session_id]",
-        cascade="all, delete-orphan",
-    )
-    final_utterances = relationship(
-        "FinalUtterance", back_populates="session", cascade="all, delete-orphan"
     )
     ai_usage_events = relationship(
         "AIUsageEvent", back_populates="interview_session", cascade="all, delete-orphan"
@@ -115,7 +115,7 @@ class InterviewCardState(Base):
     confidence = Column(Numeric(4, 3), nullable=True)
     activation_score = Column(Numeric(4, 3), nullable=False, server_default="0")
     completion_score = Column(Numeric(4, 3), nullable=False, server_default="0")
-    completion_source = Column(String, nullable=True)  # ai | manual | final
+    completion_source = Column(String, nullable=True)  # ai | manual
     manual_note = Column(Text, nullable=True)
     answered_at = Column(DateTime, nullable=True)
     evidence_transcript = Column(Text, nullable=True)

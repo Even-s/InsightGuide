@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 from collections import defaultdict
+from contextlib import suppress
 from datetime import datetime
 from typing import Any, Dict, Set
 
@@ -32,6 +33,8 @@ class EventService:
         self._async_redis_client = async_redis.Redis.from_url(
             settings.REDIS_URL, decode_responses=True
         )
+        self._redis_tasks: Dict[str, asyncio.Task] = {}
+        self._redis_pubsubs: Dict[str, Any] = {}
 
     def redis_channel(self, session_id: str) -> str:
         """Return the Redis pub/sub channel used for this event stream."""
@@ -55,6 +58,7 @@ class EventService:
         queue = asyncio.Queue(maxsize=100)
         self._connections[session_id].add(queue)
         self._queue_loops[queue] = asyncio.get_running_loop()
+        await self._start_redis_listener(session_id)
 
         logger.info(
             f"Client subscribed to session {session_id} "
@@ -82,7 +86,54 @@ class EventService:
             # Clean up empty session
             if not self._connections[session_id]:
                 del self._connections[session_id]
+                await self._stop_redis_listener(session_id)
         self._queue_loops.pop(queue, None)
+
+    async def _start_redis_listener(self, session_id: str) -> None:
+        """Use one Redis subscription per active session, regardless of client count."""
+        if session_id in self._redis_tasks:
+            return
+
+        pubsub = self._async_redis_client.pubsub()
+        try:
+            await pubsub.subscribe(self.redis_channel(session_id))
+        except Exception as exc:
+            logger.warning("Failed to subscribe SSE session %s to Redis: %s", session_id, exc)
+            with suppress(Exception):
+                await pubsub.aclose()
+            return
+
+        self._redis_pubsubs[session_id] = pubsub
+        self._redis_tasks[session_id] = asyncio.create_task(
+            self._redis_listener(session_id, pubsub),
+            name=f"sse-redis-{session_id}",
+        )
+
+    async def _stop_redis_listener(self, session_id: str) -> None:
+        task = self._redis_tasks.pop(session_id, None)
+        pubsub = self._redis_pubsubs.pop(session_id, None)
+        if task:
+            task.cancel()
+            with suppress(asyncio.CancelledError):
+                await task
+        if pubsub:
+            with suppress(Exception):
+                await pubsub.unsubscribe(self.redis_channel(session_id))
+            with suppress(Exception):
+                await pubsub.aclose()
+
+    async def _redis_listener(self, session_id: str, pubsub: Any) -> None:
+        try:
+            async for message in pubsub.listen():
+                if message.get("type") != "message":
+                    continue
+                payload = message.get("data")
+                if isinstance(payload, str):
+                    self._deliver_local(session_id, payload)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("Redis SSE listener stopped for %s: %s", session_id, exc)
 
     async def publish(self, session_id: str, event: Dict[str, Any]):
         """
@@ -99,10 +150,6 @@ class EventService:
             ...     'timestamp': '2026-05-25T...'
             ... })
         """
-        if session_id not in self._connections:
-            logger.debug(f"No subscribers for session {session_id}")
-            return
-
         # Add timestamp if not present
         if "timestamp" not in event:
             event["timestamp"] = datetime.utcnow().isoformat()
@@ -110,14 +157,24 @@ class EventService:
         # Format as SSE message
         sse_data = self._format_sse_message(event)
 
+        redis_delivered = 0
         try:
-            await self._async_redis_client.publish(self.redis_channel(session_id), sse_data)
+            redis_delivered = await self._async_redis_client.publish(
+                self.redis_channel(session_id), sse_data
+            )
         except Exception as e:
             logger.warning(f"Failed to publish {event.get('type')} to Redis: {e}")
 
-        # Send to all queues
+        if redis_delivered and session_id in self._redis_tasks:
+            return
+        self._deliver_local(session_id, sse_data)
+
+    def _deliver_local(self, session_id: str, sse_data: str) -> None:
+        """Deliver once to queues in this process (Redis listener or fallback)."""
+        if session_id not in self._connections:
+            return
         dead_queues = set()
-        for queue in self._connections[session_id]:
+        for queue in tuple(self._connections[session_id]):
             try:
                 queue.put_nowait(sse_data)
             except asyncio.QueueFull:
@@ -131,9 +188,7 @@ class EventService:
         for queue in dead_queues:
             self._connections[session_id].discard(queue)
 
-        logger.debug(
-            f"Published {event.get('type')} to {len(self._connections[session_id])} clients"
-        )
+        logger.debug(f"Delivered SSE payload to {len(self._connections[session_id])} local clients")
 
     def publish_sync(self, session_id: str, event: Dict[str, Any]):
         """
@@ -148,12 +203,15 @@ class EventService:
 
         sse_data = self._format_sse_message(event)
 
+        redis_delivered = 0
         try:
-            self._redis_client.publish(self.redis_channel(session_id), sse_data)
+            redis_delivered = self._redis_client.publish(self.redis_channel(session_id), sse_data)
         except Exception as e:
             logger.warning(f"Failed to publish {event.get('type')} to Redis: {e}")
 
         if session_id not in self._connections:
+            return
+        if redis_delivered and session_id in self._redis_tasks:
             return
 
         for queue in self._connections[session_id]:

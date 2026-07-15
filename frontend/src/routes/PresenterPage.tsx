@@ -57,12 +57,15 @@ export default function PresenterPage() {
       // Auto-detect project/stakeholder from document if not provided
       let resolvedProjectId = projectId
       let resolvedStakeholderId = stakeholderId
+      let resolvedRoundId = searchParams.get('roundId') || undefined
 
-      if (!resolvedProjectId) {
+      if (!resolvedProjectId || !resolvedStakeholderId || !resolvedRoundId) {
         try {
           const docRes = await apiClient.get(`/api/documents/${documentId!}`)
           const doc = docRes.data
-          resolvedProjectId = doc.projectId || doc.project_id
+          resolvedProjectId ||= doc.projectId || doc.project_id
+          resolvedStakeholderId ||= doc.stakeholderProfileId || doc.stakeholder_profile_id
+          resolvedRoundId ||= doc.interviewRoundId || doc.interview_round_id
         } catch { /* document lookup failed */ }
       }
 
@@ -90,6 +93,7 @@ export default function PresenterPage() {
         const existing = sessions.find((s: InterviewSession) =>
           s.documentId === documentId &&
           s.status !== 'ended' &&
+          (!resolvedRoundId || s.interviewRoundId === resolvedRoundId) &&
           (!resolvedStakeholderId || s.stakeholderProfileId === resolvedStakeholderId)
         )
         if (existing) {
@@ -120,6 +124,7 @@ export default function PresenterPage() {
       const created = await interviewAPI.createSession(documentId!, prepSessionId, {
         projectId: resolvedProjectId,
         stakeholderProfileId: resolvedStakeholderId,
+        interviewRoundId: resolvedRoundId,
       })
 
       // Redirect to session-based URL so refresh won't re-create

@@ -25,6 +25,24 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _ensure_document_editable(db: Session, document_id: str) -> None:
+    """Reject every mutation against a guide that has entered interview history."""
+    from app.models.document import Document
+
+    document = db.query(Document).filter(Document.id == document_id).first()
+    if document and document.is_frozen:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This interview guide is frozen. Create a new interview round to make changes.",
+        )
+
+
+def _ensure_card_editable(db: Session, question_card_id: str):
+    card = question_card_service.get_question_card(db, question_card_id)
+    _ensure_document_editable(db, card.document_id)
+    return card
+
+
 def convert_card_to_schema(card) -> QuestionCardSchema:
     """Convert a QuestionCard model instance to schema."""
     # Parse coverage rule
@@ -83,6 +101,7 @@ async def create_question_card(question_card: QuestionCardCreate, db: Session = 
     # Check if sectionId is actually an interview theme ID
     theme = db.query(InterviewTheme).filter(InterviewTheme.id == section_id).first()
     if theme:
+        _ensure_document_editable(db, theme.document_id)
         card = question_card_service.create_question_card(
             db=db,
             document_id=theme.document_id,
@@ -96,6 +115,7 @@ async def create_question_card(question_card: QuestionCardCreate, db: Session = 
         from app.services.section_service import section_service
 
         section = section_service.get_section(db, section_id)
+        _ensure_document_editable(db, section.document_id)
         card = question_card_service.create_question_card(
             db=db,
             document_id=section.document_id,
@@ -130,6 +150,7 @@ async def update_question_card(
 ):
     """Update question card. This is used in Editor Mode for customization."""
     logger.info(f"Updating question card {question_card_id}")
+    _ensure_card_editable(db, question_card_id)
     card = question_card_service.update_question_card(db, question_card_id, update_data)
     return convert_card_to_schema(card)
 
@@ -138,6 +159,7 @@ async def update_question_card(
 async def regenerate_question_card_followup(question_card_id: str, db: Session = Depends(get_db)):
     """Regenerate the suggested followup for a single question card."""
     logger.info(f"Regenerating suggested followup for question card {question_card_id}")
+    _ensure_card_editable(db, question_card_id)
     card = question_card_service.regenerate_question_card_followup(db, question_card_id)
     return convert_card_to_schema(card)
 
@@ -146,6 +168,7 @@ async def regenerate_question_card_followup(question_card_id: str, db: Session =
 async def delete_question_card(question_card_id: str, db: Session = Depends(get_db)):
     """Delete a question card."""
     logger.info(f"Deleting question card {question_card_id}")
+    _ensure_card_editable(db, question_card_id)
     question_card_service.delete_question_card(db, question_card_id)
     return None
 
@@ -166,6 +189,8 @@ async def reorder_question_cards(
 ):
     """Reorder question cards for a section."""
     logger.info(f"Reordering {len(card_order)} question cards for section {section_id}")
+    for card_id in card_order:
+        _ensure_card_editable(db, card_id)
     cards = question_card_service.reorder_question_cards(db, section_id, card_order)
     return [convert_card_to_schema(card) for card in cards]
 
@@ -189,6 +214,7 @@ async def generate_role_targeting(card_id: str, db: Session = Depends(get_db)):
     card = db.query(QuestionCard).filter(QuestionCard.id == card_id).first()
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
+    _ensure_document_editable(db, card.document_id)
 
     targeting = ai_question_generator.generate_role_targeting(
         question_text=card.question_text,
@@ -211,6 +237,7 @@ async def generate_all_role_targeting(document_id: str, db: Session = Depends(ge
     from app.models.question_card import QuestionCard
     from app.services.ai_question_generator import ai_question_generator
 
+    _ensure_document_editable(db, document_id)
     cards = (
         db.query(QuestionCard)
         .filter(

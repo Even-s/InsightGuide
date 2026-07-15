@@ -8,9 +8,9 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.interview_session import InterviewCardState, InterviewSession
+from app.models.live_utterance import LiveUtterance
 from app.models.question_card import QuestionCard
 from app.models.section import Section
-from app.models.utterance import Utterance
 from app.services.interview_service import interview_service
 
 logger = logging.getLogger(__name__)
@@ -18,6 +18,19 @@ logger = logging.getLogger(__name__)
 
 class ReportAnalyticsService:
     """Service for generating comprehensive session analytics."""
+
+    @staticmethod
+    def _load_transcript_utterances(db: Session, session_id: str) -> list:
+        """Load the canonical Realtime transcript."""
+        return (
+            db.query(LiveUtterance)
+            .filter(
+                LiveUtterance.session_id == session_id,
+                LiveUtterance.is_partial == False,
+            )
+            .order_by(LiveUtterance.sequence_index)
+            .all()
+        )
 
     def generate_comprehensive_report(self, db: Session, session_id: str) -> Dict[str, Any]:
         """
@@ -169,12 +182,7 @@ class ReportAnalyticsService:
             )
 
         # Get all utterances
-        utterances = (
-            db.query(Utterance)
-            .filter(Utterance.session_id == session_id)
-            .order_by(Utterance.created_at)
-            .all()
-        )
+        utterances = self._load_transcript_utterances(db, session_id)
 
         for utterance in utterances:
             timeline.append(
@@ -183,7 +191,8 @@ class ReportAnalyticsService:
                     "type": "utterance",
                     "description": f"Spoke: {utterance.transcript[:50]}...",
                     "transcript": utterance.transcript,
-                    "section_id": utterance.section_id,
+                    "section_id": getattr(utterance, "section_id", None)
+                    or getattr(utterance, "theme_id", None),
                 }
             )
 
@@ -286,7 +295,7 @@ class ReportAnalyticsService:
         duration = self._calculate_duration(session)
 
         # Get utterances
-        utterances = db.query(Utterance).filter(Utterance.session_id == session.id).all()
+        utterances = self._load_transcript_utterances(db, session.id)
 
         total_characters = sum(self._count_chinese_characters(u.transcript) for u in utterances)
         avg_utterance_characters = total_characters / len(utterances) if len(utterances) > 0 else 0
@@ -300,11 +309,12 @@ class ReportAnalyticsService:
             )
 
         # Count unique sections visited. The report keeps the legacy field name.
-        slides_visited = (
-            db.query(func.count(func.distinct(Utterance.section_id)))
-            .filter(Utterance.session_id == session.id, Utterance.section_id.isnot(None))
-            .scalar()
-            or 0
+        slides_visited = len(
+            {
+                getattr(utterance, "section_id", None) or getattr(utterance, "theme_id", None)
+                for utterance in utterances
+                if getattr(utterance, "section_id", None) or getattr(utterance, "theme_id", None)
+            }
         )
 
         metrics = {
@@ -331,17 +341,18 @@ class ReportAnalyticsService:
         """
         logger.debug(f"Calculating slide timing for session {session_id}")
 
-        utterances = (
-            db.query(Utterance)
-            .filter(Utterance.session_id == session_id, Utterance.section_id.isnot(None))
-            .order_by(Utterance.created_at)
-            .all()
-        )
+        utterances = [
+            utterance
+            for utterance in self._load_transcript_utterances(db, session_id)
+            if getattr(utterance, "section_id", None) or getattr(utterance, "theme_id", None)
+        ]
 
         section_times = {}
 
         for i, utterance in enumerate(utterances):
-            section_id = utterance.section_id
+            section_id = getattr(utterance, "section_id", None) or getattr(
+                utterance, "theme_id", None
+            )
             if section_id not in section_times:
                 section_times[section_id] = {
                     "first_utterance": utterance.created_at,

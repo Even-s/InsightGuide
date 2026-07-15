@@ -2,7 +2,7 @@
 
 ## 概述
 
-使用 Server-Sent Events (SSE) 實現 prep session 狀態的實時更新，讓用戶可以即時看到文件分析進度和狀態變更。
+後端提供 Prep Session 的 Server-Sent Events (SSE) 端點，可傳遞狀態事件。文件分析的逐步進度目前走 Document event channel；現行管理後台尚未訂閱 Prep Session SSE，而是以 REST 載入與手動刷新資料。
 
 ## 功能
 
@@ -24,63 +24,51 @@ GET /api/prep-sessions/{prep_session_id}/events
      "type": "PREP_STATUS_CHANGED",
      "prepSessionId": "doc_64c30ba7a2c5",
      "status": "ready",
-     "deckId": "doc_64c30ba7a2c5",
+     "documentId": "doc_64c30ba7a2c5",
      "timestamp": "2026-05-26T12:00:00.000Z"
    }
    ```
 
-2. **ANALYSIS_PROGRESS** - 文件分析進度（未來功能）
+2. **ANALYSIS_PROGRESS** - 文件分析進度目前發布至 Document channel
    ```json
    {
      "type": "ANALYSIS_PROGRESS",
-     "prepSessionId": "doc_64c30ba7a2c5",
-     "currentSlide": 5,
-     "totalSlides": 21,
-     "percentage": 23.8,
+     "message": "正在為訪談單元產生提問重點...",
+     "phase": "cards",
+     "current_theme": 2,
+     "total_themes": 5,
+     "percentage": 40,
      "timestamp": "2026-05-26T12:00:00.000Z"
    }
+   ```
+
+   訂閱端點為：
+
+   ```text
+   GET /api/documents/{document_id}/events
    ```
 
 #### 事件發布
 
-在 `document_analysis_worker.py` 中，當文件分析完成時：
-- 更新 prep session 狀態從 `preparing` -> `ready`
-- 發布 `PREP_STATUS_CHANGED` 事件到所有訂閱的客戶端
+在 `document_analysis_worker.py` 中：
+
+- 文件分析過程會向 Document channel 發布 `ANALYSIS_PROGRESS`、`THEME_CARDS_CREATED` 與 `ANALYSIS_COMPLETE`。
+- 分析完成後會把相關 Prep Session 狀態更新為 `ready`。
+- `PREP_STATUS_CHANGED` 事件由 Prep Session 路由的狀態修正流程發布；一般分析完成通知仍以 Document channel 的 `ANALYSIS_COMPLETE` 為準。
 
 ### 前端
 
-#### Hook: `usePrepSessionEvents`
+#### 目前前端行為
 
-位置：`frontend/src/hooks/usePrepSessionEvents.ts`
+目前沒有 `usePrepSessionEvents` Hook。
 
-**使用方式：**
+`PrepSessionListPage.tsx` 是系統管理頁面，會：
 
-```tsx
-import { usePrepSessionEvents } from '@/hooks/usePrepSessionEvents';
+- 進入頁面時以 REST 載入專案、受訪者與 Session。
+- 使用者按下「刷新」時重新載入資料。
+- 不會自動為 preparing 狀態建立 EventSource。
 
-function MyComponent({ prepSessionId }) {
-  usePrepSessionEvents(prepSessionId, {
-    onPrepStatusChanged: (event) => {
-      console.log('Status changed:', event.status);
-    },
-    onAnalysisProgress: (event) => {
-      console.log('Progress:', event.percentage);
-    },
-    onError: (error) => {
-      console.error('SSE error:', error);
-    }
-  });
-
-  return <div>...</div>;
-}
-```
-
-#### PrepSessionListPage 整合
-
-在 `PrepSessionListPage.tsx` 中：
-- 自動為所有 `preparing` 狀態的 prep sessions 建立 SSE 連接
-- 當收到 `PREP_STATUS_CHANGED` 事件時，更新列表中的狀態
-- 重新載入統計數據
+若未來需要即時更新，應新增專用 Hook，並選擇訂閱全域 Prep Session channel 或各 Document channel，避免同一頁同時建立重複 Redis/SSE 訂閱。
 
 ## 架構
 
@@ -91,7 +79,8 @@ function MyComponent({ prepSessionId }) {
 │                     │
 │  1. 分析完成         │
 │  2. 更新 DB status  │
-│  3. 發布 SSE 事件   │
+│  3. 發布 Document   │
+│     SSE 事件        │
 └──────────┬──────────┘
            │
            │ publish to Redis
@@ -105,8 +94,8 @@ function MyComponent({ prepSessionId }) {
            ↓
 ┌─────────────────────┐       ┌─────────────────────┐
 │  SSE Endpoint       │◄──────│  Frontend Client    │
-│  /prep-sessions/    │       │  (EventSource)      │
-│  {id}/events        │       │                     │
+│  /documents/        │       │  (EventSource)      │
+│  {id}/events        │       │  editor/progress UI │
 └─────────────────────┘       └─────────────────────┘
 ```
 
@@ -115,16 +104,11 @@ function MyComponent({ prepSessionId }) {
 ### 手動測試
 
 1. 上傳一個新的文件（會創建 `preparing` 狀態的 prep session）
-2. 打開 Prep Sessions 頁面
-3. 觀察列表中的狀態
-4. 當分析完成時，狀態會自動從 `preparing` 變成 `ready`
+2. 訂閱 `/api/documents/{document_id}/events`
+3. 觀察 `ANALYSIS_PROGRESS` 與 `ANALYSIS_COMPLETE`
+4. 回到系統管理後台按下「刷新」，確認 Prep Session 狀態已變成 `ready`
 
-### 使用測試腳本
-
-```bash
-cd /Users/cfh00914977/Project/InsightGuide
-python scripts/integration_tests/test_prep_session_sse.py
-```
+目前沒有獨立的 Prep Session SSE integration test script；自動化時應直接針對上述兩個 SSE 端點建立 API integration test。
 
 ### 使用 curl 測試
 
@@ -138,5 +122,4 @@ curl -N -H "Accept: text/event-stream" \
 - Backend: `app/api/routes/prep_sessions.py`
 - Worker: `app/workers/document_analysis_worker.py`
 - Event Service: `app/services/event_service.py`
-- Frontend Hook: `frontend/src/hooks/usePrepSessionEvents.ts`
 - Frontend Page: `frontend/src/routes/PrepSessionListPage.tsx`

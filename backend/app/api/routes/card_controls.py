@@ -225,7 +225,7 @@ async def manual_complete_card(
     from datetime import datetime
 
     from app.models.card_coverage_evaluation import CardCoverageEvaluation
-    from app.models.interview_session import InterviewCardState
+    from app.models.interview_session import InterviewCardState, InterviewSession
     from app.services.event_service import event_service
 
     note = body.get("note", "")
@@ -250,13 +250,15 @@ async def manual_complete_card(
     card_state.answered_at = datetime.utcnow()
     card_state.updated_at = datetime.utcnow()
 
+    session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
+    if session:
+        interview_service.clear_completed_card_routing(session, card_id)
+
     # Write audit record
     coverage_eval = CardCoverageEvaluation(
         id=f"cce_{uuid.uuid4().hex[:12]}",
         session_id=session_id,
         card_id=card_id,
-        basis_type="live",
-        transcript_revision_id=None,
         state="sufficient",
         confidence=1.0,
         covered_element_ids=[],

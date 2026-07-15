@@ -8,7 +8,6 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.models.interview_insight_memo import InterviewInsightMemo
 from app.models.requirement_evidence_matrix import EvidenceMatrixEntry, RequirementEvidenceMatrix
 from app.models.stakeholder_profile import StakeholderProfile
 
@@ -38,21 +37,14 @@ class EvidenceMatrixService:
         return matrix
 
     def update_matrix(self, db: Session, project_id: str) -> RequirementEvidenceMatrix:
-        """Incrementally update the evidence matrix from all completed Insight Memos."""
+        """Rebuild the matrix from one canonical cumulative memo per round."""
         matrix = self.get_or_create_matrix(db, project_id)
         matrix.status = "updating"
         db.flush()
 
-        # Load all completed memos for this project
-        memos = (
-            db.query(InterviewInsightMemo)
-            .filter(
-                InterviewInsightMemo.project_id == project_id,
-                InterviewInsightMemo.status == "completed",
-            )
-            .order_by(InterviewInsightMemo.interview_date)
-            .all()
-        )
+        from app.services.interview_round_aggregate_service import interview_round_aggregate_service
+
+        memos = interview_round_aggregate_service.latest_memos_for_project(db, project_id)
 
         if not memos:
             matrix.status = "draft"
@@ -183,7 +175,10 @@ class EvidenceMatrixService:
 
             result = openai_service.chat_completion(
                 messages=[
-                    {"role": "system", "content": "你是專案需求整合分析師。你的任務是對比來自不同利害關係人的需求描述，判斷哪些語意相同（合併），哪些有衝突（標記），哪些獨立。合併時保留最完整的描述。只回傳 JSON。"},
+                    {
+                        "role": "system",
+                        "content": "你是專案需求整合分析師。你的任務是對比來自不同利害關係人的需求描述，判斷哪些語意相同（合併），哪些有衝突（標記），哪些獨立。合併時保留最完整的描述。只回傳 JSON。",
+                    },
                     {"role": "user", "content": prompt},
                 ],
                 model="gpt-5.4-mini",

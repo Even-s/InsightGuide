@@ -26,4 +26,3 @@ class Section(Base):
     question_cards = relationship(
         "QuestionCard", back_populates="section", cascade="all, delete-orphan"
     )
-    utterances = relationship("Utterance", back_populates="section")

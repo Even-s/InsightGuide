@@ -27,7 +27,7 @@ class InterviewTheme(Base):
     theme_number = Column(Integer, nullable=False)
     title = Column(String, nullable=False)
     rationale = Column(Text, nullable=False, default="")
-    brd_mapping = Column(ARRAY(String), nullable=False, server_default="{}")
+    brd_mapping = Column(ARRAY(String), nullable=True, server_default="{}")
     priority = Column(Integer, nullable=False, default=99)
     estimated_minutes = Column(Integer, nullable=True)
     source_section_ids = Column(ARRAY(String), nullable=True)

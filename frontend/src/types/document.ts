@@ -11,12 +11,16 @@ export type DocumentStatus =
   | 'analyzed'
   | 'failed'
 
-export type FileType = 'pdf' | 'docx' | 'doc' | 'md' | 'txt'
+export type FileType = 'pdf' | 'docx' | 'doc' | 'md' | 'txt' | 'generated'
 
 export interface Document {
   id: string
   userId: string
   project_id?: string
+  stakeholder_profile_id?: string
+  interview_round_id?: string
+  guide_version?: number
+  is_frozen?: boolean
   title: string
   sourceFileUrl: string
   fileType: FileType

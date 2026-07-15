@@ -18,6 +18,10 @@ class DocumentResponse(BaseModel):
     id: str
     user_id: str
     project_id: Optional[str] = None
+    stakeholder_profile_id: Optional[str] = None
+    interview_round_id: Optional[str] = None
+    guide_version: int = 1
+    is_frozen: bool = False
     title: str
     source_file_url: str
     file_type: str  # pdf, docx, doc, md, txt

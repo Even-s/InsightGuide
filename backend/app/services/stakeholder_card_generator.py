@@ -10,9 +10,13 @@ import logging
 import uuid
 from typing import Any, Dict, List, Optional
 
+from sqlalchemy import case
 from sqlalchemy.orm import Session
 
 from app.models.document import Document
+from app.models.interview_round import InterviewRound
+from app.models.interview_series import InterviewSeries
+from app.models.interview_session import InterviewSession
 from app.models.interview_theme import InterviewTheme
 from app.models.prep_session import PrepSession
 from app.models.project import Project
@@ -32,6 +36,7 @@ class StakeholderCardGenerator:
         db: Session,
         project_id: str,
         stakeholder_profile_id: str,
+        interview_round: InterviewRound,
         options: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Generate question cards for a specific stakeholder.
@@ -72,8 +77,23 @@ class StakeholderCardGenerator:
                 db.query(StakeholderSlot).filter(StakeholderSlot.id == stakeholder.slot_id).first()
             )
 
-        # Step 1: Get or create virtual document
-        document = self._get_or_create_virtual_document(db, project, stakeholder)
+        # Step 1: Get or create an isolated guide document for this round.
+        document = self._get_or_create_round_document(db, project, stakeholder, interview_round)
+
+        historical_session_exists = (
+            db.query(InterviewSession.id)
+            .filter(InterviewSession.document_id == document.id)
+            .first()
+            is not None
+        )
+        if document.is_frozen or historical_session_exists:
+            if not document.is_frozen:
+                document.is_frozen = True
+                db.commit()
+            raise ValueError(
+                "This interview guide already has interview sessions and is immutable. "
+                "Create a new interview round instead."
+            )
 
         # Step 2: Get or create prep session
         prep_session = self._get_or_create_prep_session(db, document, project.user_id)
@@ -164,6 +184,8 @@ class StakeholderCardGenerator:
         # Always mark as ready, even if some themes had fallback cards
         prep_session.status = "ready"
         document.status = "analyzed"
+        interview_round.guide_document_id = document.id
+        interview_round.status = "guide_ready"
 
         db.commit()
 
@@ -174,6 +196,9 @@ class StakeholderCardGenerator:
         return {
             "document_id": document.id,
             "prep_session_id": prep_session.id,
+            "interview_round_id": document.interview_round_id,
+            "guide_version": document.guide_version or 1,
+            "is_frozen": bool(document.is_frozen),
             "themes": [
                 {
                     "id": theme.id,
@@ -198,11 +223,23 @@ class StakeholderCardGenerator:
         """
         document = (
             db.query(Document)
+            .join(InterviewRound, InterviewRound.guide_document_id == Document.id)
+            .join(InterviewSeries, InterviewSeries.id == InterviewRound.series_id)
             .filter(
-                Document.stakeholder_profile_id == stakeholder_profile_id,
+                InterviewSeries.project_id == project_id,
+                InterviewSeries.stakeholder_profile_id == stakeholder_profile_id,
                 Document.source_file_url == "generated",
             )
-            .first()
+            .order_by(
+                case(
+                    (InterviewRound.status.in_(["draft", "guide_ready"]), 0),
+                    else_=1,
+                ),
+                InterviewRound.updated_at.desc(),
+                InterviewRound.round_number.desc(),
+            )
+            .limit(1)
+            .one_or_none()
         )
 
         if not document:
@@ -227,6 +264,9 @@ class StakeholderCardGenerator:
         return {
             "document_id": document.id,
             "prep_session_id": prep_session.id,
+            "interview_round_id": document.interview_round_id,
+            "guide_version": document.guide_version or 1,
+            "is_frozen": bool(document.is_frozen),
             "themes": [
                 {
                     "id": theme.id,
@@ -240,37 +280,42 @@ class StakeholderCardGenerator:
             "status": prep_session.status,
         }
 
-    def _get_or_create_virtual_document(
-        self, db: Session, project: Project, stakeholder: StakeholderProfile
+    def _get_or_create_round_document(
+        self,
+        db: Session,
+        project: Project,
+        stakeholder: StakeholderProfile,
+        interview_round: InterviewRound,
     ) -> Document:
-        """Get or create a virtual document for the stakeholder."""
-        existing = (
-            db.query(Document)
-            .filter(
-                Document.stakeholder_profile_id == stakeholder.id,
-                Document.source_file_url == "generated",
+        """Create one immutable guide document per interview round."""
+        if interview_round.guide_document_id:
+            existing = (
+                db.query(Document).filter(Document.id == interview_round.guide_document_id).first()
             )
-            .first()
+            if existing:
+                return existing
+
+        document_title = (
+            f"{project.title} - {stakeholder.name} 第 {interview_round.round_number} 輪訪談大綱"
         )
-
-        if existing:
-            return existing
-
-        document_title = f"{project.title} - {stakeholder.name} 訪談大綱"
         document = Document(
             id=f"doc_{uuid.uuid4().hex[:12]}",
             user_id=project.user_id,
             project_id=project.id,
             stakeholder_profile_id=stakeholder.id,
+            interview_round_id=interview_round.id,
+            guide_version=interview_round.round_number,
+            is_frozen=False,
             title=document_title,
             source_file_url="generated",
             file_type="generated",
             status="analyzing",
         )
         db.add(document)
+        db.flush()
+        interview_round.guide_document_id = document.id
         db.commit()
         db.refresh(document)
-
         return document
 
     def _get_or_create_prep_session(

@@ -7,10 +7,25 @@ import { ProfileCard } from './ProfileCard'
 
 const mocks = vi.hoisted(() => ({
   listSessions: vi.fn(),
+  listSeries: vi.fn(),
+  listRounds: vi.fn(),
+  createSeries: vi.fn(),
+  createRound: vi.fn(),
+  generateGuide: vi.fn(),
 }))
 
 vi.mock('@/api/interview', () => ({
   interviewAPI: { listSessions: mocks.listSessions },
+}))
+
+vi.mock('@/api/interviewRounds', () => ({
+  interviewRoundsAPI: {
+    listSeries: mocks.listSeries,
+    listRounds: mocks.listRounds,
+    createSeries: mocks.createSeries,
+    createRound: mocks.createRound,
+    generateGuide: mocks.generateGuide,
+  },
 }))
 
 const profile: StakeholderProfile = {
@@ -57,6 +72,36 @@ describe('ProfileCard', () => {
       ],
       total: 2,
     })
+    mocks.listSeries.mockResolvedValue([{
+      id: 'series-1',
+      projectId: 'project-1',
+      stakeholderProfileId: 'profile-1',
+      title: '掛號流程',
+      topicKey: 'default',
+      status: 'active',
+      roundsCount: 1,
+      createdAt: '2026-07-10T08:00:00Z',
+      updatedAt: '2026-07-14T09:00:00Z',
+    }])
+    mocks.listRounds.mockResolvedValue([{
+      id: 'round-1',
+      seriesId: 'series-1',
+      roundNumber: 1,
+      objective: '了解掛號流程',
+      generationMode: 'legacy',
+      sourceSessionIds: ['session-latest'],
+      focusTopics: [],
+      excludeCompletedQuestions: true,
+      guideDocumentId: 'document-1',
+      guideVersion: 1,
+      cardCount: 5,
+      status: 'completed',
+      sessionIds: ['session-latest'],
+      createdAt: '2026-07-14T08:00:00Z',
+      updatedAt: '2026-07-14T09:00:00Z',
+    }])
+    mocks.createRound.mockResolvedValue({ id: 'round-2' })
+    mocks.generateGuide.mockResolvedValue({ documentId: 'document-2' })
   })
 
   it('uses actual sessions to show the record entry when the profile counter is stale', async () => {
@@ -80,8 +125,43 @@ describe('ProfileCard', () => {
       </MemoryRouter>,
     )
 
-    fireEvent.click(await screen.findByRole('button', { name: '訪談紀錄' }))
+    fireEvent.click(await screen.findByRole('button', { name: '訪談紀錄（2）' }))
 
-    expect(await screen.findByText('受訪者訪談紀錄')).toBeInTheDocument()
+    expect(await screen.findByRole('heading', { name: '王小明的訪談規劃' })).toBeInTheDocument()
+    const roundDialog = screen.getByRole('dialog', { name: '訪談輪次' })
+    expect(roundDialog.parentElement).toBe(document.body)
+    expect(roundDialog).toHaveClass('z-[100]')
+    expect(screen.getByText('掛號流程 · 第 1 輪')).toBeInTheDocument()
+  })
+
+  it('does not show next-round creation on an assigned participant card', async () => {
+    render(
+      <MemoryRouter initialEntries={['/projects/project-1']}>
+        <Routes>
+          <Route
+            path="/projects/:projectId"
+            element={(
+              <ProfileCard
+                profile={profile}
+                projectId="project-1"
+                guide={{
+                  document_id: 'document-1',
+                  prep_session_id: 'prep-1',
+                  themes: [],
+                  card_count: 5,
+                  status: 'ready',
+                  is_frozen: true,
+                }}
+                onDelete={vi.fn()}
+                onShowGuideSettings={vi.fn()}
+              />
+            )}
+          />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    expect(await screen.findByRole('button', { name: '查看目前大綱' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '開始下一輪訪談' })).not.toBeInTheDocument()
   })
 })

@@ -35,13 +35,11 @@ async def create_utterance(
     This endpoint receives transcripts from the frontend Realtime client
     and stores them for answer evaluation.
 
-    Phase 1: Now writes to live_utterances instead of utterances.
-    The endpoint URL remains the same for backwards compatibility.
+    Realtime segments are the canonical transcript. The endpoint URL and speaker
+    field remain compatible with older clients, but new segments use one neutral
+    source label instead of attempting speaker identification.
     """
-    # Speaker label is informational only (filled by diarize channel later).
-    # Evaluation is speaker-agnostic — any speech triggers card matching.
-    if not utterance.speaker:
-        utterance.speaker = "pending"
+    utterance.speaker = "realtime"
 
     logger.info(f"Creating utterance for session {session_id}: {utterance.transcript[:50]}...")
 
@@ -60,7 +58,7 @@ async def create_utterance(
             utterance_obj.id,
             utterance_obj.transcript,
             theme_id,
-            utterance_obj.speaker or "pending",
+            utterance_obj.speaker or "realtime",
             utterance.askedCardId,
         )
 
@@ -250,50 +248,17 @@ def process_utterance_evaluation_background(
         db.close()
 
 
-@router.patch("/{session_id}/utterances/{utterance_id}/speaker")
-async def update_utterance_speaker(
-    session_id: str,
-    utterance_id: str,
-    body: dict,
-    db: Session = Depends(get_db),
-):
-    """Update speaker label on an utterance (from diarization). Informational only."""
-    from app.models.utterance import Utterance
-
-    new_speaker = body.get("speaker")
-    if not new_speaker:
-        raise HTTPException(status_code=400, detail="speaker is required")
-
-    utterance = (
-        db.query(Utterance)
-        .filter(
-            Utterance.id == utterance_id,
-            Utterance.session_id == session_id,
-        )
-        .first()
-    )
-    if not utterance:
-        raise HTTPException(status_code=404, detail="Utterance not found")
-
-    old_speaker = utterance.speaker
-    utterance.speaker = new_speaker
-    db.commit()
-
-    return {"id": utterance_id, "speaker": new_speaker, "changed": old_speaker != new_speaker}
-
-
 @router.get("/{session_id}/utterances", response_model=List[UtteranceSchema])
 async def get_session_utterances(
     session_id: str,
     section_id: Optional[str] = Query(None, alias="sectionId"),
-    speaker: Optional[str] = Query(None),
     limit: int = Query(100, ge=1, le=1000),
     db: Session = Depends(get_db),
 ):
-    """Get utterances for an interview session, optionally filtered by section and/or speaker."""
+    """Get chronological Realtime transcript segments for an interview session."""
     logger.info(f"Retrieving utterances for session {session_id}")
     utterances = interview_service.get_utterances(
-        db=db, session_id=session_id, section_id=section_id, speaker=speaker, limit=limit
+        db=db, session_id=session_id, section_id=section_id, limit=limit
     )
     return [convert_utterance_to_schema(u) for u in utterances]
 

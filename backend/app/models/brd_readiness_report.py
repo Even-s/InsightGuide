@@ -18,7 +18,9 @@ class BRDReadinessReport(Base):
     __tablename__ = "brd_readiness_reports"
 
     id = Column(String, primary_key=True)
-    project_id = Column(String, ForeignKey("projects.id"), nullable=False, index=True)
+    project_id = Column(
+        String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
 
     is_ready = Column(Boolean, nullable=False, default=False)
     readiness_score = Column(Float, nullable=True)

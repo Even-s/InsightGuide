@@ -114,6 +114,19 @@ a:active,
   }
 }
 
+@keyframes ui-ai-card-glow {
+  0%, 100% {
+    box-shadow:
+      0 0 0 2px rgb(253 224 71 / 0.22),
+      0 0 18px rgb(250 204 21 / 0.24);
+  }
+  50% {
+    box-shadow:
+      0 0 0 3px rgb(253 224 71 / 0.34),
+      0 0 30px rgb(250 204 21 / 0.42);
+  }
+}
+
 .motion-fade-in {
   animation: ui-fade-in var(--motion-base) var(--motion-ease) both;
 }
@@ -167,6 +180,10 @@ a:active,
 
 .motion-modal-out {
   animation: ui-modal-out var(--motion-fast) ease-in both;
+}
+
+.motion-ai-card-glow {
+  animation: ui-ai-card-glow 1.8s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {

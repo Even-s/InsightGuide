@@ -8,11 +8,9 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.models.final_utterance import FinalUtterance
 from app.models.interview_insight_memo import InterviewInsightMemo
 from app.models.interview_session import InterviewSession
-from app.models.question_answer import QuestionAnswer
-from app.models.question_instance import QuestionInstance
+from app.models.live_utterance import LiveUtterance
 from app.models.stakeholder_profile import StakeholderProfile
 
 logger = logging.getLogger(__name__)
@@ -33,6 +31,16 @@ class InsightMemoService:
             .first()
         )
         if existing:
+            if session.interview_round_id:
+                from app.services.interview_round_aggregate_service import (
+                    interview_round_aggregate_service,
+                )
+
+                interview_round_aggregate_service.invalidate(
+                    db,
+                    session.interview_round_id,
+                    commit=False,
+                )
             db.delete(existing)
             db.flush()
 
@@ -45,21 +53,28 @@ class InsightMemoService:
                 .first()
             )
 
-        qa_records = self._load_qa_records(db, session_id)
-        transcript_text = self._load_transcript_text(db, session_id)
+        analysis_sessions = self._analysis_sessions(db, session)
+        analysis_session_ids = [item.id for item in analysis_sessions]
+        transcript_text = self._load_transcript_text(db, analysis_session_ids)
 
         # Calculate duration
-        duration_minutes = None
-        if session.started_at and session.ended_at:
-            delta = session.ended_at - session.started_at
-            duration_minutes = int(delta.total_seconds() / 60)
+        duration_seconds = 0
+        for source_session in analysis_sessions:
+            if source_session.started_at and source_session.ended_at:
+                duration_seconds += max(
+                    0,
+                    int((source_session.ended_at - source_session.started_at).total_seconds())
+                    - (source_session.paused_duration_seconds or 0),
+                )
+        duration_minutes = int(duration_seconds / 60) if duration_seconds else None
 
         # Generate insights using AI
         insights = self._ai_analyze_interview(
             stakeholder=stakeholder,
-            qa_records=qa_records,
+            qa_records=[],
             transcript_text=transcript_text,
             session=session,
+            visit_count=len(analysis_sessions),
         )
 
         # Build stakeholder summary
@@ -78,6 +93,10 @@ class InsightMemoService:
             session_id=session_id,
             project_id=session.project_id,
             stakeholder_profile_id=session.stakeholder_profile_id,
+            interview_round_id=session.interview_round_id,
+            interview_series_id=(
+                session.interview_round.series_id if session.interview_round else None
+            ),
             interview_date=session.started_at or session.created_at,
             interview_duration_minutes=duration_minutes,
             topics_covered=insights.get("topics_covered", []),
@@ -100,6 +119,13 @@ class InsightMemoService:
         db.add(memo)
         db.commit()
         db.refresh(memo)
+
+        if session.interview_round_id:
+            from app.services.interview_round_aggregate_service import (
+                interview_round_aggregate_service,
+            )
+
+            interview_round_aggregate_service.rebuild(db, session.interview_round_id)
 
         # Post-processing: update stakeholder plan if project exists
         if session.project_id:
@@ -132,62 +158,38 @@ class InsightMemoService:
             .all()
         )
 
-    def _load_qa_records(self, db: Session, session_id: str) -> List[Dict[str, Any]]:
-        """Load Q/A records from QuestionInstance + QuestionAnswer."""
-        questions = (
-            db.query(QuestionInstance)
-            .filter(QuestionInstance.session_id == session_id)
-            .order_by(QuestionInstance.sequence_index)
-            .all()
-        )
-
-        records = []
-        for q in questions:
-            answer = (
-                db.query(QuestionAnswer).filter(QuestionAnswer.question_instance_id == q.id).first()
+    def _analysis_sessions(self, db: Session, session: InterviewSession) -> List[InterviewSession]:
+        """Return this session and every earlier visit in the same round."""
+        if not session.interview_round_id:
+            return [session]
+        return (
+            db.query(InterviewSession)
+            .filter(
+                InterviewSession.interview_round_id == session.interview_round_id,
+                InterviewSession.created_at <= session.created_at,
             )
-
-            records.append(
-                {
-                    "question": q.asked_text,
-                    "question_type": q.question_type,
-                    "answer_summary": answer.answer_summary if answer else None,
-                    "answer_status": answer.answer_status if answer else "not_answered",
-                    "evidence_quotes": answer.evidence_quotes if answer else [],
-                    "confidence": answer.confidence if answer else None,
-                }
-            )
-
-        return records
-
-    def _load_transcript_text(self, db: Session, session_id: str) -> str:
-        """Load transcript as plain text for AI analysis."""
-        utterances = (
-            db.query(FinalUtterance)
-            .filter(FinalUtterance.session_id == session_id)
-            .order_by(FinalUtterance.sequence_index)
-            .limit(200)
+            .order_by(InterviewSession.created_at.asc(), InterviewSession.id.asc())
             .all()
-        )
+        ) or [session]
 
-        if not utterances:
-            from app.models.live_utterance import LiveUtterance
-
+    def _load_transcript_text(self, db: Session, session_ids: List[str]) -> str:
+        """Load all visit transcripts in a round for cumulative analysis."""
+        lines = []
+        for visit_index, session_id in enumerate(session_ids, 1):
             utterances = (
                 db.query(LiveUtterance)
                 .filter(
                     LiveUtterance.session_id == session_id,
                     LiveUtterance.is_partial == False,
                 )
-                .order_by(LiveUtterance.created_at)
+                .order_by(LiveUtterance.sequence_index)
                 .limit(200)
                 .all()
             )
 
-        lines = []
-        for u in utterances:
-            speaker = getattr(u, "speaker_display_name", None) or getattr(u, "speaker", "unknown")
-            lines.append(f"[{speaker}] {u.transcript}")
+            lines.append(f"## 第 {visit_index} 次訪談")
+            for utterance in utterances:
+                lines.append(utterance.transcript)
 
         return "\n".join(lines)
 
@@ -197,6 +199,7 @@ class InsightMemoService:
         qa_records: List[Dict],
         transcript_text: str,
         session: InterviewSession,
+        visit_count: int = 1,
     ) -> Dict[str, Any]:
         """Use AI to analyze interview and extract structured insights."""
         try:
@@ -226,6 +229,7 @@ class InsightMemoService:
 
             prompt = (
                 "你是專業的商業分析師。請分析以下訪談內容，產生結構化的訪談洞察紀錄。\n\n"
+                f"本次分析合併同一輪的 {visit_count} 次訪談，請綜合所有場次，不可只評估最後一場。\n\n"
                 f"{stakeholder_info}\n"
                 f"## Q/A 摘要\n{qa_text}\n\n"
                 f"## 逐字稿摘錄\n{transcript_excerpt}\n\n"

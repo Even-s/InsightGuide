@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 import pytest
 
 from app.models.interview_session import InterviewSession
-from app.models.utterance import Utterance
+from app.models.live_utterance import LiveUtterance
 from app.services.report_analytics_service import ReportAnalyticsService, report_analytics_service
 
 
@@ -80,24 +80,29 @@ class TestReportAnalyticsService:
         mock_interview_svc.calculate_active_duration.return_value = 1800
 
         utterances = [
-            Utterance(
+            LiveUtterance(
                 id="u1",
                 session_id="session-123",
-                speaker="interviewee",
+                speaker="realtime",
                 transcript="今天介紹機器學習的基本概念和應用場景",
+                sequence_index=0,
+                is_partial=False,
                 created_at=datetime.utcnow(),
             ),
-            Utterance(
+            LiveUtterance(
                 id="u2",
                 session_id="session-123",
-                speaker="interviewee",
+                speaker="realtime",
                 transcript="深度學習是機器學習的一個子領域",
+                sequence_index=1,
+                is_partial=False,
                 created_at=datetime.utcnow(),
             ),
         ]
 
         mock_query = Mock()
         mock_query.filter.return_value = mock_query
+        mock_query.order_by.return_value = mock_query
         mock_query.all.return_value = utterances
         mock_query.scalar.return_value = 3
         mock_db.query.return_value = mock_query

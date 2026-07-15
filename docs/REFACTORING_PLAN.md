@@ -1,5 +1,9 @@
 # InsightGuide 重構實行計劃書
 
+> 2026-07-15 更新：舊 diarization／speaker Q&A／alignment 架構已退役並由
+> Realtime-only transcript + InterviewRoundAggregate 取代。本文後段保留的
+> diarization 內容僅是歷史設計記錄，不代表目前實作。
+
 > **Status: COMPLETED (2026-06)**
 >
 > All 6 phases (Project → Stakeholder → RoleFilter → Brief → Memo → Matrix → Readiness) have been implemented.

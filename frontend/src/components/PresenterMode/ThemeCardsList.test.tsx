@@ -77,11 +77,12 @@ function renderCards(
   activeCardId: string | null,
   setActiveCardId = vi.fn(),
   detectedCardId: string | null = null,
+  cardStates: CardState[] = listeningCardStates,
 ) {
   const rendered = render(
     <ThemeCardsList
       currentTheme={currentTheme}
-      cardStates={listeningCardStates}
+      cardStates={cardStates}
       activeCardId={activeCardId}
       detectedCardId={detectedCardId}
       sessionId="session-1"
@@ -104,19 +105,47 @@ describe('ThemeCardsList active card controls', () => {
     expect(screen.queryByRole('button', { name: '取消目前問題' })).not.toBeInTheDocument()
   })
 
-  it('shows AI detection separately from the manually selected current card', () => {
-    const { unmount } = renderCards(null, vi.fn(), 'card-1')
+  it('uses the same unlabeled yellow glow for AI detection and manual selection', () => {
+    const { container, unmount } = renderCards(null, vi.fn(), 'card-1')
 
-    expect(screen.getByText('AI 偵測中')).toBeInTheDocument()
+    const detectedCard = container.querySelector('[data-ai-detected="true"]')
+    expect(detectedCard).toHaveClass('motion-ai-card-glow', 'border-yellow-300', 'bg-yellow-50')
+    expect(screen.queryByText('AI 偵測中')).not.toBeInTheDocument()
     expect(screen.queryByText('目前問題')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '設為目前問題' })).toBeInTheDocument()
 
     unmount()
-    renderCards('card-1', vi.fn(), 'card-1')
+    const manuallySelected = renderCards('card-1', vi.fn(), 'card-1')
 
-    expect(screen.getByText('目前問題')).toBeInTheDocument()
+    const currentCard = manuallySelected.container.querySelector('[data-current-card="true"]')
+    expect(currentCard).toHaveClass('motion-ai-card-glow', 'border-yellow-300', 'bg-yellow-50')
+    expect(screen.queryByText('目前問題')).not.toBeInTheDocument()
     expect(screen.queryByText('AI 偵測中')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '取消目前問題' })).toBeInTheDocument()
+  })
+
+  it('never shows yellow glow on a completed card with stale routing ids', () => {
+    const completedCardStates = listeningCardStates.map((cardState) => ({
+      ...cardState,
+      status: 'sufficient' as const,
+      questionCard: {
+        ...cardState.questionCard,
+        status: 'sufficient' as const,
+      },
+    }))
+
+    const { container } = renderCards(
+      'card-1',
+      vi.fn(),
+      'card-1',
+      completedCardStates,
+    )
+
+    const card = screen.getByText('目前如何處理掛號？').closest('div.rounded-2xl.border.bg-white')
+    expect(card).toBeInTheDocument()
+    expect(card).not.toHaveClass('motion-ai-card-glow', 'border-yellow-300', 'bg-yellow-50')
+    expect(container.querySelector('[data-current-card="true"]')).not.toBeInTheDocument()
+    expect(container.querySelector('[data-ai-detected="true"]')).not.toBeInTheDocument()
   })
 
   it('shows the completion criteria beneath the suggested question', () => {

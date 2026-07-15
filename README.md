@@ -8,14 +8,14 @@ InsightGuide 是一款 AI 驅動的需求訪談輔助系統，透過 OpenAI Real
 
 **版本**: v0.2.0
 **開發階段**: 核心功能完成，進入優化階段
-**最後更新**: 2026-06-30
+**最後更新**: 2026-07-15
 
 ### 實施統計
-- **後端服務**: 34 個 service files
-- **資料模型**: 25 個 models
+- **後端服務**: 31 個 service files
+- **資料模型**: 22 個 models
 - **API Routes**: 19 個 route files
-- **前端頁面**: 12 個 pages
-- **React Hooks**: 10 個 custom hooks
+- **前端頁面**: 13 個 pages
+- **React Hooks**: 11 個 custom hooks
 
 ---
 
@@ -42,7 +42,7 @@ InsightGuide 是一款 AI 驅動的需求訪談輔助系統，透過 OpenAI Real
 macOS 使用者也可以雙擊 `InsightGuide.command` 啟動，或雙擊 `StopInsightGuide.command` 關閉所有服務。
 啟動器會在需要時開啟 Docker Desktop，並等待 PostgreSQL、Redis、MinIO、後端、Celery 與前端就緒。
 
-在新的 Mac 上，可雙擊 `InstallInsightGuide.command` 安裝 Homebrew、Node.js、Python 3.11、Docker Desktop、LibreOffice、Poppler 與全部專案依賴。
+在新的 Mac 上，可雙擊 `InstallInsightGuide.command` 安裝 Homebrew、Node.js、Python 3.11、Docker Desktop 與全部專案依賴。
 
 **服務端口**：
 - 前端：http://localhost:5174
@@ -72,14 +72,15 @@ macOS 使用者也可以雙擊 `InsightGuide.command` 啟動，或雙擊 `StopIn
 
 ### 訪談後分析
 - **Insight Memo**：自動萃取痛點、需求線索、限制假設、未解問題
-- **Q/A Reconstruction**：整理每題實際問答內容
-- **正式逐字稿**：經 diarization 的 speaker-aware 逐字稿
+- **完整逐字稿**：直接保留 Realtime 完成辨識的逐字稿，不另行錄音或區分說話者
 - **訪談報告**：覆蓋率、時間軸、語速等分析
 
 ### 專案級管理（多訪談整合）
 - **Stakeholder Plan**：AI 建議角色槽位，追蹤訪談進度
 - **Role-based Card Filtering**：根據受訪者角色篩選適合的問題
 - **Interview Brief**：根據角色 + evidence gap 產生訪談前指引
+- **Interview Series / Round**：同一受訪者與主題可建立多輪獨立大綱，每輪可由多次 Session 續訪完成
+- **Round Aggregate**：每輪只對外提供一份最新版累積洞察、覆蓋與證據快照
 - **Evidence Matrix**：跨訪談需求整合與去重
 - **BRD Readiness**：評估證據充足度，守門 BRD 生成
 
@@ -110,8 +111,6 @@ macOS 使用者也可以雙擊 `InsightGuide.command` 啟動，或雙擊 `StopIn
 - Node.js 20+
 - Python 3.11+
 - Docker & Docker Compose
-- LibreOffice（文件轉換）
-- Poppler（PDF 處理）
 - OpenAI API Key
 
 詳細設定請參考 [`docs/QUICKSTART.md`](docs/QUICKSTART.md)。

@@ -27,6 +27,7 @@ async def list_interview_sessions(
     offset: int = Query(0, ge=0),
     project_id: Optional[str] = Query(None, alias="projectId"),
     document_id: Optional[str] = Query(None, alias="documentId"),
+    stakeholder_profile_id: Optional[str] = Query(None, alias="stakeholderProfileId"),
     db: Session = Depends(get_db),
 ):
     """
@@ -53,6 +54,7 @@ async def list_interview_sessions(
         offset=offset,
         project_id=project_id,
         document_id=document_id,
+        stakeholder_profile_id=stakeholder_profile_id,
     )
 
     return result
@@ -177,6 +179,11 @@ async def end_interview_session(
     update_data = InterviewSessionUpdate(status="ended")
     session = interview_service.update_session(db, session_id, update_data)
 
+    if session.interview_round_id:
+        from app.services.interview_round_aggregate_service import interview_round_aggregate_service
+
+        interview_round_aggregate_service.invalidate(db, session.interview_round_id)
+
     # Trigger Insight Memo generation in background
     if session.project_id:
         background_tasks.add_task(_generate_insight_memo_background, session_id)
@@ -195,7 +202,7 @@ def _generate_insight_memo_background(session_id: str):
         memo = insight_memo_service.generate_memo(db, session_id)
         logger.info(f"Generated insight memo {memo.id} for session {session_id}")
 
-        # Also refresh evidence matrix if project exists
+        # Refresh project outputs from the rebuilt round aggregate.
         if memo.project_id:
             evidence_matrix_service.update_matrix(db, memo.project_id)
             logger.info(f"Refreshed evidence matrix for project {memo.project_id}")

@@ -8,7 +8,6 @@ interface LogEvent {
   // session
   action?: string
   // utterance
-  speaker?: string
   transcript?: string
   // card_update
   cardId?: string
@@ -186,10 +185,7 @@ function EventContent({ event }: { event: LogEvent }) {
       return <p className="text-sm text-natural-700 font-medium">Session {event.action}</p>
     case 'utterance':
       return (
-        <div>
-          <span className="text-xs font-medium text-natural-500 uppercase">{event.speaker}</span>
-          <p className="text-sm text-natural-700 mt-0.5">{event.transcript}</p>
-        </div>
+        <p className="text-sm text-natural-700">{event.transcript}</p>
       )
     case 'card_update':
       return (

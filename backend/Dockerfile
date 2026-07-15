@@ -1,21 +1,8 @@
-# Backend + Worker Dockerfile with LibreOffice and Poppler
+# Backend + Worker Dockerfile
 FROM python:3.11-slim
 
 # Set working directory
 WORKDIR /app
-
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    # LibreOffice for PPTX to PDF conversion
-    libreoffice \
-    libreoffice-writer \
-    # Poppler for PDF to image conversion
-    poppler-utils \
-    # Additional dependencies
-    gcc \
-    g++ \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements
 COPY requirements.txt .

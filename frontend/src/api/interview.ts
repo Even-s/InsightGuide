@@ -52,13 +52,14 @@ export const interviewAPI = {
   async createSession(
     documentId: string,
     prepSessionId: string,
-    opts?: { projectId?: string; stakeholderProfileId?: string }
+    opts?: { projectId?: string; stakeholderProfileId?: string; interviewRoundId?: string }
   ): Promise<InterviewSession> {
     const response = await apiClient.post('/api/interview-sessions/', {
       prepSessionId,
       documentId,
       ...(opts?.projectId && { projectId: opts.projectId }),
       ...(opts?.stakeholderProfileId && { stakeholderProfileId: opts.stakeholderProfileId }),
+      ...(opts?.interviewRoundId && { interviewRoundId: opts.interviewRoundId }),
     });
     return response.data;
   },
@@ -152,7 +153,7 @@ export const interviewAPI = {
   async createUtterance(
     sessionId: string,
     transcript: string,
-    themeId: string,
+    themeId?: string,
     realtimeItemId?: string,
     startedAt?: string,
     endedAt?: string,
@@ -161,14 +162,6 @@ export const interviewAPI = {
     const response = await apiClient.post(
       `/api/interview-sessions/${sessionId}/utterances`,
       { transcript, themeId, sectionId: themeId, realtimeItemId, startedAt, endedAt, askedCardId }
-    );
-    return response.data;
-  },
-
-  async updateUtteranceSpeaker(sessionId: string, utteranceId: string, speaker: string) {
-    const response = await apiClient.patch(
-      `/api/interview-sessions/${sessionId}/utterances/${utteranceId}/speaker`,
-      { speaker }
     );
     return response.data;
   },

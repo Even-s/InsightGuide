@@ -5,17 +5,10 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-# Import Base and all models
+import app.models  # noqa: F401, E402
+
+# Import Base and the model package so every current table is registered.
 from app.db.session import Base
-from app.models.ai_usage_event import AIUsageEvent
-from app.models.brd import BRDDraft, Requirement
-from app.models.document import Document
-from app.models.interview_session import InterviewCardState, InterviewSession
-from app.models.prep_session import PrepSession
-from app.models.question_card import QuestionCard
-from app.models.section import Section
-from app.models.user import User
-from app.models.utterance import Utterance
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -29,6 +22,14 @@ if config.config_file_name is not None:
 # add your model's MetaData object here
 # for 'autogenerate' support
 target_metadata = Base.metadata
+
+
+def include_object(obj, name, type_, reflected, compare_to):
+    """Keep externally managed prompt-registry tables outside app migrations."""
+    if type_ == "table" and reflected and compare_to is None and name.startswith("prompt_"):
+        return False
+    return True
+
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
@@ -52,6 +53,7 @@ def run_migrations_offline() -> None:
     context.configure(
         url=url,
         target_metadata=target_metadata,
+        include_object=include_object,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
     )
@@ -75,7 +77,9 @@ def run_migrations_online() -> None:
 
     with connectable.connect() as connection:
         context.configure(
-            connection=connection, target_metadata=target_metadata
+            connection=connection,
+            target_metadata=target_metadata,
+            include_object=include_object,
         )
 
         with context.begin_transaction():

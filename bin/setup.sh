@@ -132,7 +132,7 @@ fi
 
 source venv/bin/activate
 pip install --quiet --upgrade pip
-pip install --quiet -r requirements.txt
+pip install --quiet -r requirements-dev.txt
 info "✅ Python 依賴安裝完成"
 echo ""
 

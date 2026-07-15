@@ -18,7 +18,7 @@ class Project(Base):
     __tablename__ = "projects"
 
     id = Column(String, primary_key=True)
-    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(String, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     title = Column(String, nullable=False)
     description = Column(Text, nullable=True)
     brd_scope = Column(JSON, nullable=True)
@@ -45,6 +45,9 @@ class Project(Base):
         back_populates="project",
         foreign_keys="[InterviewSession.project_id]",
         cascade="all, delete-orphan",
+    )
+    interview_series = relationship(
+        "InterviewSeries", back_populates="project", cascade="all, delete-orphan"
     )
     insight_memos = relationship(
         "InterviewInsightMemo", back_populates="project", cascade="all, delete-orphan"

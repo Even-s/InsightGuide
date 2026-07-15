@@ -150,33 +150,31 @@ export default function ThemeCardsList({ currentTheme, cardStates, activeCardId,
               <div className="space-y-3 p-3">
                 {groupCardStates.map(({ card, status, confidence, completionCriteria }, qi) => {
                   const isDone = completedStatuses.has(status)
-                  const isActive = activeCardId === card.id
-                  const isDetected = !isActive && detectedCardId === card.id
+                  // A completed card is terminal. Ignore stale routing IDs so
+                  // completion styling always wins over the yellow active glow.
+                  const isActive = !isDone && activeCardId === card.id
+                  const isDetected = !isDone && !isActive && detectedCardId === card.id
+                  const isHighlighted = isActive || isDetected
                   const currentAction = pendingCardAction?.cardId === card.id ? pendingCardAction.action : null
                   const itemProgress = isDone ? 100 : status === 'listening' ? 0 : Math.round((confidence ?? 0) * 100)
 
                   return (
-                    <div key={card.id} className={`rounded-2xl border bg-white p-4 shadow-sm transition-[border-color,background-color,box-shadow,opacity,transform] duration-500 ease-out ${isActive ? 'scale-[1.01] border-yellow-300 bg-yellow-50 shadow-yellow-100' : isDetected ? 'border-sage-300 bg-sage-50/70 shadow-sage-100' : isDone ? 'border-sage-200 bg-sage-50/60' : 'border-cream-300'}`}>
+                    <div
+                      key={card.id}
+                      data-ai-detected={isDetected || undefined}
+                      data-current-card={isActive || undefined}
+                      className={`rounded-2xl border bg-white p-4 shadow-sm transition-[border-color,background-color,box-shadow,opacity,transform] duration-500 ease-out ${isHighlighted ? 'motion-ai-card-glow scale-[1.01] border-yellow-300 bg-yellow-50' : isDone ? 'border-sage-200 bg-sage-50/60' : 'border-cream-300'}`}
+                    >
                       <div className="mb-3 flex items-center justify-between gap-3">
                         <div className="flex items-center gap-2">
                           <span className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-sm font-semibold transition-[background-color,color,transform,opacity] duration-500 ease-out ${
-                            isDone ? 'bg-sage-100 text-sage-500' : isActive ? 'bg-yellow-200 text-yellow-800 animate-pulse' : isDetected ? 'bg-sage-100 text-sage-600 animate-pulse' : 'bg-cream-200 text-natural-500'
+                            isDone ? 'bg-sage-100 text-sage-500' : isHighlighted ? 'bg-yellow-200 text-yellow-800 animate-pulse' : 'bg-cream-200 text-natural-500'
                           }`}>
                             {isDone ? '✓' : qi + 1}
                           </span>
                           <span className="rounded-lg bg-cream-200 px-2 py-0.5 text-xs font-semibold tracking-wide text-natural-500">
                             建議提問
                           </span>
-                          {isDetected && (
-                            <span className="rounded-lg bg-sage-100 px-2 py-0.5 text-xs font-semibold text-sage-600">
-                              AI 偵測中
-                            </span>
-                          )}
-                          {isActive && (
-                            <span className="rounded-lg bg-yellow-100 px-2 py-0.5 text-xs font-semibold text-yellow-800">
-                              目前問題
-                            </span>
-                          )}
                         </div>
                         {!isDone && card.importance === 'must' && (
                           <span className="shrink-0 rounded-lg bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">必問</span>
@@ -220,7 +218,7 @@ export default function ThemeCardsList({ currentTheme, cardStates, activeCardId,
                       <div className={`mt-2 overflow-hidden transition-[max-height,opacity] duration-500 ease-out ${isDone ? 'max-h-0 opacity-0' : 'max-h-4 opacity-100'}`}>
                         <div className="h-1 w-full overflow-hidden rounded-full bg-cream-300">
                           <div
-                            className={`h-1 rounded-full transition-[width,background-color,opacity] duration-700 ease-out ${isActive ? 'bg-yellow-400' : isDetected ? 'bg-sage-500' : 'bg-sage-400'}`}
+                            className={`h-1 rounded-full transition-[width,background-color,opacity] duration-700 ease-out ${isHighlighted ? 'bg-yellow-400' : 'bg-sage-400'}`}
                             style={{ width: `${itemProgress}%` }}
                           />
                         </div>

@@ -3,12 +3,10 @@
 import logging
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.services.report_analytics_service import report_analytics_service
-from app.services.report_export_service import report_export_service
 
 logger = logging.getLogger(__name__)
 
@@ -20,10 +18,8 @@ async def get_session_log(session_id: str, db: Session = Depends(get_db)):
     """Get a unified chronological timeline of everything that happened in a session."""
     from app.models.ai_usage_event import AIUsageEvent
     from app.models.card_coverage_evaluation import CardCoverageEvaluation
-    from app.models.final_utterance import FinalUtterance
     from app.models.interview_session import InterviewCardState, InterviewSession
     from app.models.live_utterance import LiveUtterance
-    from app.models.utterance import Utterance
 
     session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
     if not session:
@@ -44,56 +40,20 @@ async def get_session_log(session_id: str, db: Session = Depends(get_db)):
             {"type": "session", "action": "ended", "timestamp": session.ended_at.isoformat()}
         )
 
-    # Prefer final_utterances, then live_utterances, then old utterances
-    final_utts = (
-        db.query(FinalUtterance)
-        .filter(FinalUtterance.session_id == session_id)
-        .order_by(FinalUtterance.sequence_index)
+    live_utts = (
+        db.query(LiveUtterance)
+        .filter(LiveUtterance.session_id == session_id, LiveUtterance.is_partial == False)
+        .order_by(LiveUtterance.sequence_index)
         .all()
     )
-    if final_utts:
-        for u in final_utts:
-            events.append(
-                {
-                    "type": "utterance",
-                    "speaker": u.speaker_display_name or u.speaker_label,
-                    "transcript": u.transcript,
-                    "timestamp": (u.started_at or u.created_at).isoformat(),
-                }
-            )
-    else:
-        live_utts = (
-            db.query(LiveUtterance)
-            .filter(LiveUtterance.session_id == session_id, LiveUtterance.is_partial == False)
-            .order_by(LiveUtterance.created_at)
-            .all()
+    for u in live_utts:
+        events.append(
+            {
+                "type": "utterance",
+                "transcript": u.transcript,
+                "timestamp": (u.started_at or u.created_at).isoformat(),
+            }
         )
-        if live_utts:
-            for u in live_utts:
-                events.append(
-                    {
-                        "type": "utterance",
-                        "speaker": u.speaker,
-                        "transcript": u.transcript,
-                        "timestamp": (u.started_at or u.created_at).isoformat(),
-                    }
-                )
-        else:
-            old_utts = (
-                db.query(Utterance)
-                .filter(Utterance.session_id == session_id)
-                .order_by(Utterance.created_at)
-                .all()
-            )
-            for u in old_utts:
-                events.append(
-                    {
-                        "type": "utterance",
-                        "speaker": u.speaker,
-                        "transcript": u.transcript,
-                        "timestamp": (u.started_at or u.created_at).isoformat(),
-                    }
-                )
 
     # Card coverage: prefer CardCoverageEvaluation, fallback to InterviewCardState
     coverage_evals = (
@@ -109,7 +69,6 @@ async def get_session_log(session_id: str, db: Session = Depends(get_db)):
                     "type": "card_update",
                     "cardId": ce.card_id,
                     "status": ce.state,
-                    "basisType": ce.basis_type,
                     "confidence": float(ce.confidence) if ce.confidence else None,
                     "evidence": ce.evidence,
                     "timestamp": ce.created_at.isoformat(),
@@ -195,64 +154,22 @@ async def generate_session_outputs(session_id: str, db: Session = Depends(get_db
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
 
-@router.post("/{session_id}/report")
-async def generate_session_report(session_id: str, db: Session = Depends(get_db)):
-    """Generate post-interview analytics report.
-
-    Kept for compatibility with clients that already call POST.
-    """
-    return await get_session_report(session_id, db)
-
-
-@router.post("/{session_id}/report/export/{export_format}")
-async def export_session_report(
-    session_id: str,
-    export_format: str,
-    db: Session = Depends(get_db),
-):
-    """Export a session report as JSON or PDF and return a presigned download URL."""
-    logger.info(f"Exporting {export_format} session report for {session_id}")
-
-    if export_format not in {"json", "pdf"}:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="export_format must be either 'json' or 'pdf'",
-        )
-
-    try:
-        return report_export_service.export_report(db, session_id, export_format)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc))
-    except RuntimeError as exc:
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(exc))
-    except Exception as exc:
-        logger.error(f"Error exporting session report: {exc}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to export session report",
-        )
-
-
 @router.get("/{session_id}/analytics")
 async def get_session_analytics(session_id: str, db: Session = Depends(get_db)):
     """Get comprehensive analytics for a session - Phase 6.
 
     Returns:
-        - Transcription stats (live vs final utterance counts, alignment match rate)
-        - Card coverage stats (provisional vs final, drift analysis)
+        - Realtime transcription stats
+        - Realtime card coverage stats
         - Q/A stats (questions answered, card match rate)
         - AI usage stats (model call counts, tokens, costs)
         - Quality metrics (evidence quote rate, prefilter effectiveness)
     """
     from app.models.ai_usage_event import AIUsageEvent
     from app.models.card_coverage_evaluation import CardCoverageEvaluation
-    from app.models.final_utterance import FinalUtterance
-    from app.models.interview_session import InterviewSession
+    from app.models.interview_session import InterviewCardState, InterviewSession
     from app.models.live_utterance import LiveUtterance
-    from app.models.question_answer import QuestionAnswer
     from app.models.question_card import QuestionCard
-    from app.models.question_instance import QuestionInstance
-    from app.models.utterance_alignment import UtteranceAlignment
 
     session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
     if not session:
@@ -268,33 +185,6 @@ async def get_session_analytics(session_id: str, db: Session = Depends(get_db)):
         .count()
     )
 
-    final_count = db.query(FinalUtterance).filter(FinalUtterance.session_id == session_id).count()
-
-    speakers = (
-        db.query(func.count(func.distinct(FinalUtterance.speaker_label)))
-        .filter(FinalUtterance.session_id == session_id)
-        .scalar()
-        or 0
-    )
-
-    # Alignment match rate
-    total_alignments = (
-        db.query(UtteranceAlignment).filter(UtteranceAlignment.session_id == session_id).count()
-    )
-
-    matched_alignments = (
-        db.query(UtteranceAlignment)
-        .filter(
-            UtteranceAlignment.session_id == session_id,
-            UtteranceAlignment.final_utterance_id.isnot(None),
-        )
-        .count()
-    )
-
-    alignment_rate = (
-        round(matched_alignments / total_alignments, 3) if total_alignments > 0 else None
-    )
-
     # === Card Coverage Stats ===
     total_cards = (
         db.query(QuestionCard).filter(QuestionCard.document_id == session.document_id).count()
@@ -302,14 +192,11 @@ async def get_session_analytics(session_id: str, db: Session = Depends(get_db)):
         else 0
     )
 
-    def coverage_breakdown(basis_type):
-        """Get latest evaluation per card for given basis type."""
+    def coverage_breakdown():
+        """Get the latest Realtime evaluation for each card."""
         evals = (
             db.query(CardCoverageEvaluation)
-            .filter(
-                CardCoverageEvaluation.session_id == session_id,
-                CardCoverageEvaluation.basis_type == basis_type,
-            )
+            .filter(CardCoverageEvaluation.session_id == session_id)
             .all()
         )
 
@@ -329,88 +216,15 @@ async def get_session_analytics(session_id: str, db: Session = Depends(get_db)):
 
         return counts
 
-    prov = coverage_breakdown("live")
-    final = coverage_breakdown("final")
+    realtime_coverage = coverage_breakdown()
 
-    # Drift analysis (compare latest live vs latest final per card)
-    live_evals = (
-        db.query(CardCoverageEvaluation)
-        .filter(
-            CardCoverageEvaluation.session_id == session_id,
-            CardCoverageEvaluation.basis_type == "live",
-        )
-        .all()
+    card_states = (
+        db.query(InterviewCardState).filter(InterviewCardState.session_id == session_id).all()
     )
-
-    final_evals = (
-        db.query(CardCoverageEvaluation)
-        .filter(
-            CardCoverageEvaluation.session_id == session_id,
-            CardCoverageEvaluation.basis_type == "final",
-        )
-        .all()
+    answered_count = sum(
+        state.status in {"sufficient", "probably_sufficient", "manually_checked"}
+        for state in card_states
     )
-
-    # Build latest eval maps
-    latest_live = {}
-    for e in live_evals:
-        if e.card_id not in latest_live or e.evaluation_seq > latest_live[e.card_id].evaluation_seq:
-            latest_live[e.card_id] = e
-
-    latest_final = {}
-    for e in final_evals:
-        if (
-            e.card_id not in latest_final
-            or e.evaluation_seq > latest_final[e.card_id].evaluation_seq
-        ):
-            latest_final[e.card_id] = e
-
-    # Compare states
-    STATE_ORDER = {"pending": 0, "listening": 1, "probably_sufficient": 2, "sufficient": 3}
-    upgraded = 0
-    downgraded = 0
-    unchanged = 0
-
-    for card_id in set(latest_live.keys()) | set(latest_final.keys()):
-        live_state = latest_live.get(card_id)
-        final_state = latest_final.get(card_id)
-
-        if not live_state or not final_state:
-            unchanged += 1  # Only exists in one basis
-            continue
-
-        live_level = STATE_ORDER.get(live_state.state, 0)
-        final_level = STATE_ORDER.get(final_state.state, 0)
-
-        if final_level > live_level:
-            upgraded += 1
-        elif final_level < live_level:
-            downgraded += 1
-        else:
-            unchanged += 1
-
-    # === Q/A Stats ===
-    q_count = db.query(QuestionInstance).filter(QuestionInstance.session_id == session_id).count()
-
-    qa_statuses = (
-        db.query(QuestionAnswer.answer_status, func.count(QuestionAnswer.id))
-        .filter(QuestionAnswer.session_id == session_id)
-        .group_by(QuestionAnswer.answer_status)
-        .all()
-    )
-
-    qa_stats = {status: count for status, count in qa_statuses}
-
-    card_matched = (
-        db.query(QuestionInstance)
-        .filter(
-            QuestionInstance.session_id == session_id,
-            QuestionInstance.card_id.isnot(None),
-        )
-        .count()
-    )
-
-    card_match_rate = round(card_matched / q_count, 3) if q_count > 0 else None
 
     # === AI Usage Stats ===
     ai_events = db.query(AIUsageEvent).filter(AIUsageEvent.interview_session_id == session_id).all()
@@ -421,12 +235,11 @@ async def get_session_analytics(session_id: str, db: Session = Depends(get_db)):
     total_cost = sum(float(e.cost_usd) if e.cost_usd else 0 for e in ai_events)
 
     # === Quality Metrics ===
-    # Evidence quote rate (for final sufficient cards)
-    final_sufficient = (
+    # Evidence quote rate for Realtime sufficient-card evaluations.
+    sufficient_evaluations = (
         db.query(CardCoverageEvaluation)
         .filter(
             CardCoverageEvaluation.session_id == session_id,
-            CardCoverageEvaluation.basis_type == "final",
             CardCoverageEvaluation.state == "sufficient",
         )
         .all()
@@ -434,7 +247,7 @@ async def get_session_analytics(session_id: str, db: Session = Depends(get_db)):
 
     # Get latest sufficient per card
     latest_sufficient = {}
-    for e in final_sufficient:
+    for e in sufficient_evaluations:
         if (
             e.card_id not in latest_sufficient
             or e.evaluation_seq > latest_sufficient[e.card_id].evaluation_seq
@@ -452,28 +265,22 @@ async def get_session_analytics(session_id: str, db: Session = Depends(get_db)):
     return {
         "sessionId": session_id,
         "transcription": {
-            "liveUtteranceCount": live_count,
-            "finalUtteranceCount": final_count,
-            "speakerCount": speakers,
-            "transcriptStatus": session.transcript_status,
-            "alignmentMatchRate": alignment_rate,
+            "source": "realtime",
+            "utteranceCount": live_count,
+            "transcriptStatus": "realtime_only",
         },
         "cardCoverage": {
             "totalCards": total_cards,
-            "provisionalCoverage": prov,
-            "finalCoverage": final,
-            "provisionalToFinalDrift": {
-                "upgraded": upgraded,
-                "downgraded": downgraded,
-                "unchanged": unchanged,
-            },
+            "realtimeCoverage": realtime_coverage,
         },
         "qa": {
-            "totalQuestions": q_count,
-            "answered": qa_stats.get("answered", 0),
-            "partiallyAnswered": qa_stats.get("partially_answered", 0),
-            "notAnswered": qa_stats.get("not_answered", 0),
-            "cardMatchRate": card_match_rate,
+            "totalQuestions": len(card_states),
+            "answered": answered_count,
+            "partiallyAnswered": sum(
+                state.status == "probably_sufficient" for state in card_states
+            ),
+            "notAnswered": max(0, len(card_states) - answered_count),
+            "cardMatchRate": None,
         },
         "aiUsage": {
             "nanoCallCount": nano_count,

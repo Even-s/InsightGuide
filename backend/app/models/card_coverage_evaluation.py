@@ -1,11 +1,8 @@
-"""Card Coverage Evaluation model - Phase 2 of transcript split.
-
-Separates provisional (live) from final coverage evaluations.
-"""
+"""Realtime card coverage evaluation model."""
 
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, Numeric, String
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, Numeric, String
 from sqlalchemy.dialects.postgresql import JSON
 
 from app.db.session import Base
@@ -14,25 +11,31 @@ from app.db.session import Base
 class CardCoverageEvaluation(Base):
     """Card coverage evaluation record.
 
-    Stores coverage judgments for question cards, distinguishing between:
-    - live: Provisional judgments during interview (from Realtime API transcripts)
-    - final: Definitive judgments after diarization (from final transcripts)
-
-    This allows real-time UI feedback without polluting formal BRD evidence.
+    Stores judgments made from the canonical Realtime transcript.
     """
 
     __tablename__ = "card_coverage_evaluations"
+    __table_args__ = (
+        Index(
+            "ix_card_coverage_evaluations_session_card",
+            "session_id",
+            "card_id",
+        ),
+    )
 
     id = Column(String, primary_key=True)
-    session_id = Column(String, ForeignKey("interview_sessions.id"), nullable=False, index=True)
-    card_id = Column(String, ForeignKey("question_cards.id"), nullable=False, index=True)
-
-    basis_type = Column(String, nullable=False, index=True)
-    # live: provisional judgment from live_utterances (for real-time UI)
-    # final: authoritative judgment from final_utterances (for BRD/reports)
-
-    transcript_revision_id = Column(String, ForeignKey("transcript_revisions.id"), nullable=True)
-    # Only set for final evaluations; null for live
+    session_id = Column(
+        String,
+        ForeignKey("interview_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    card_id = Column(
+        String,
+        ForeignKey("question_cards.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
 
     state = Column(String, nullable=False)
     # pending | listening | probably_sufficient | sufficient
@@ -50,7 +53,7 @@ class CardCoverageEvaluation(Base):
     # Array of evidence objects:
     # [{
     #   "element_id": "e1",
-    #   "utterance_table": "final_utterances" | "live_utterances",
+    #   "utterance_table": "live_utterances",
     #   "utterance_id": "utt_xxx",
     #   "quote": "受訪者說的原文片段"
     # }]
@@ -60,7 +63,7 @@ class CardCoverageEvaluation(Base):
     # Higher seq number = more recent evaluation
 
     model = Column(String, nullable=True)
-    # e.g., "gpt-5.4-nano" for live, "gpt-5.4-mini" for final
+    # e.g., "gpt-5.4-nano"
 
     prompt_version = Column(String, nullable=True)
     # Prompt registry version used for this evaluation

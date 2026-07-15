@@ -801,10 +801,16 @@ def generate_project_brd(project_id: str, db: Session = Depends(get_db)):
 
     if not check["can_generate"]:
         report = brd_readiness_service.generate_report(db, project_id)
-        return {
-            "status": "not_ready",
-            "readinessReport": _readiness_to_response(report),
-            "message": check["reason"],
+        if not report.is_ready:
+            return {
+                "status": "not_ready",
+                "readinessReport": _readiness_to_response(report),
+                "message": report.recommendation,
+            }
+        check = {
+            "can_generate": True,
+            "mode": report.generation_mode,
+            "reason": report.recommendation,
         }
 
     # Generate project-level BRD from evidence matrix
@@ -875,15 +881,30 @@ def generate_interview_guide(
 
     Accepts optional generation options (duration, purpose, focus, etc.).
     """
-    from app.services.stakeholder_card_generator import stakeholder_card_generator
+    from app.services.interview_round_service import interview_round_service
+    from app.services.interview_series_service import interview_series_service
 
     generation_options = None
     if options:
         generation_options = options.model_dump(exclude_none=True)
 
     try:
-        result = stakeholder_card_generator.generate_cards_for_stakeholder(
-            db, project_id, profile_id, options=generation_options
+        series = interview_series_service.get_or_create_default_series(db, project_id, profile_id)
+        focus_topics = []
+        if options and options.focus_topics:
+            focus_topics = [
+                topic.strip()
+                for topic in options.focus_topics.replace("，", ",").split(",")
+                if topic.strip()
+            ]
+        interview_round = interview_round_service.get_or_create_editable_round(
+            db,
+            series.id,
+            objective=options.interview_purpose if options else None,
+            focus_topics=focus_topics,
+        )
+        result = interview_round_service.generate_round_guide(
+            db, interview_round.id, options=generation_options
         )
         return result
     except ValueError as e:

@@ -1,19 +1,20 @@
 # GPT Model Configuration
 
-**Last Updated**: 2026-06-02
+**Last Updated**: 2026-07-15
 **Status**: Current configuration guide. Historical GPT-4o/Whisper notes remain in archived reports only.
 
 ## Current Model Selection
 
 | Use Case | Model / Service | Configuration Source |
 | --- | --- | --- |
-| Document analysis and Question Card generation | `gpt-5.5` | `DOCUMENT_ANALYSIS_MODEL` / `backend/app/services/openai_service.py` |
-| Question Card metadata and generation helpers | `gpt-5.5` aligned generation path | `backend/app/services/openai_service.py`, `backend/app/services/ai_question_generator.py` |
+| High-context document/section analysis | `gpt-5.5` | `DOCUMENT_ANALYSIS_MODEL` / `backend/app/services/openai_service.py` |
+| Uploaded-document theme and Question Card generation | `gpt-4o` | `backend/app/services/openai_service.py` |
+| Stakeholder-specific round guide generation | `gpt-5.4-mini` | `backend/app/services/stakeholder_card_generator.py` |
 | Semantic judgment and Topic Card completion | `gpt-5.4-mini` | `SEMANTIC_UNDERSTANDING_MODEL` |
 | Answer evaluation and card coverage | `gpt-5.4-mini` | `SEMANTIC_UNDERSTANDING_MODEL` |
-| Speaker classification and Q/A reconstruction | `gpt-5.4-mini` | `SEMANTIC_UNDERSTANDING_MODEL` |
-| Realtime transcription | OpenAI Realtime transcription via WebRTC | `backend/app/services/realtime_service.py` and frontend realtime hooks |
-| Embeddings | `text-embedding-3-large` | `EMBEDDING_MODEL` |
+| Insight Memo and Evidence Matrix analysis | `gpt-5.4-mini` | `backend/app/services/insight_memo_service.py`, `evidence_matrix_service.py` |
+| Realtime transcription | `gpt-realtime-whisper` via WebRTC | `REALTIME_TRANSCRIPTION_MODEL` / `backend/app/services/realtime_service.py` |
+| Embeddings | `text-embedding-3-large` is configured but not called by the current card-matching path | `EMBEDDING_MODEL` |
 
 The effective runtime values should always be verified from:
 
@@ -35,10 +36,12 @@ Do not keep production credentials in the root `.env`; local service startup use
 
 ## Why This Split
 
-- `gpt-5.5` is used for high-context generation tasks where quality matters more than latency.
-- `gpt-5.4-mini` is used for live presenter checks where response time and cost are more important.
+- `gpt-5.5` is the configurable high-context document-analysis model.
+- `gpt-4o` currently generates themes and cards for an uploaded source document.
+- `gpt-5.4-mini` handles stakeholder-specific planning, live evaluation, memo extraction, and matrix consolidation where latency and cost matter.
 - Realtime transcription stays on the OpenAI Realtime/WebRTC path rather than a backup HTTP audio transcription flow.
-- Embeddings are used for candidate recall before semantic judgment.
+- The application stores only completed Realtime transcript segments; it does not run speaker classification or Q/A reconstruction.
+- Current candidate recall uses keyword and character-ngram scoring. `EMBEDDING_MODEL` is retained for a future semantic-recall implementation.
 
 ## Verification
 
@@ -63,4 +66,4 @@ npm run build
 
 - [GPT-5.5 model guide](GPT-5.5-MODEL-GUIDE.md)
 - [GPT-5.4-mini notes](GPT-5.4-MINI.md)
-- [Architecture](../ARCHITECTURE.md)
+- [Architecture](../../ARCHITECTURE.md)

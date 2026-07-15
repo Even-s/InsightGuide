@@ -70,10 +70,4 @@ class Settings(BaseSettings):
     SESSION_TIMEOUT_SECONDS: int = 7200
     REALTIME_SESSION_TIMEOUT_SECONDS: int = 3600
 
-    @property
-    def database_url_async(self) -> str:
-        """Get async database URL."""
-        return self.DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
-
-
 settings = Settings()

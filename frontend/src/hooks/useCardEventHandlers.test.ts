@@ -1,10 +1,12 @@
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { interviewAPI } from '@/api/interview'
 import { useCardEventHandlers } from './useCardEventHandlers'
 import { useSSEEvents } from '@/hooks/useSSEEvents'
 
 vi.mock('@/api/interview', () => ({
   interviewAPI: {
+    clearActiveCard: vi.fn().mockResolvedValue({ ok: true, cardId: 'card-1' }),
     getSessionCards: vi.fn().mockResolvedValue([
       {
         id: 'cs-1',
@@ -21,11 +23,18 @@ vi.mock('@/api/interview', () => ({
           focusText: 'Focus 1',
           questionText: 'Question 1',
           interviewThemeId: 'theme-1',
-          sectionId: null,
+          sectionId: '',
           status: 'pending',
           confidence: 0,
           importance: 'must',
-          coverageRule: { semanticAnchors: [], expectedKeywords: [], mustMentionElements: [], thresholds: { probably_sufficient: 0.65, sufficient: 0.8 } },
+          coverageRule: {
+            semanticAnchors: [],
+            expectedKeywords: [],
+            mustMentionElements: [],
+            negativeSignals: [],
+            thresholds: { probablySufficient: 0.65, sufficient: 0.8 },
+            scoringWeights: { semanticSimilarity: 0.55, keywordCoverage: 0.25, elementCoverage: 0.2 },
+          },
         },
       },
     ]),
@@ -132,6 +141,64 @@ describe('useCardEventHandlers', () => {
     })
   })
 
+  it('clears stale routing restored for an already completed card', async () => {
+    vi.mocked(interviewAPI.getSessionCards).mockResolvedValueOnce([
+      {
+        id: 'cs-1',
+        sessionId: 'session-1',
+        topicCardId: 'card-1',
+        status: 'sufficient',
+        confidence: 1,
+        evidenceTranscript: '完整回答',
+        evidence: null,
+        createdAt: '2026-01-01',
+        updatedAt: '2026-01-01',
+        questionCard: {
+          id: 'card-1',
+          documentId: 'doc-1',
+          focusText: 'Focus 1',
+          questionText: 'Question 1',
+          questionType: 'clarification',
+          interviewThemeId: 'theme-1',
+          sectionId: '',
+          sectionNumber: 0,
+          status: 'sufficient',
+          confidence: 1,
+          importance: 'must',
+          expectedAnswerElements: [],
+          coverageRule: {
+            semanticAnchors: [],
+            expectedKeywords: [],
+            mustMentionElements: [],
+            negativeSignals: [],
+            thresholds: { probablySufficient: 0.65, sufficient: 0.8 },
+            scoringWeights: { semanticSimilarity: 0.55, keywordCoverage: 0.25, elementCoverage: 0.2 },
+          },
+          orderIndex: 0,
+          createdBy: 'ai',
+          createdAt: '2026-01-01',
+          updatedAt: '2026-01-01',
+        },
+      },
+    ])
+
+    const { result } = renderHook(() =>
+      useCardEventHandlers({
+        sessionId: 'session-1',
+        documentId: 'doc-1',
+        currentThemeId: 'theme-1',
+        currentSectionId: undefined,
+        initialActiveCardId: 'card-1',
+      }),
+    )
+
+    await waitFor(() => {
+      expect(result.current.cardStates[0]?.status).toBe('sufficient')
+      expect(result.current.activeCardId).toBeNull()
+    })
+    expect(interviewAPI.clearActiveCard).toHaveBeenCalledWith('session-1')
+  })
+
   it('restores an AI-detected card separately from the manual active card', async () => {
     const { result } = renderHook(() =>
       useCardEventHandlers({
@@ -205,6 +272,38 @@ describe('useCardEventHandlers', () => {
     })
 
     expect(result.current.activeCardId).toBe('card-1')
+    expect(result.current.detectedCardId).toBeNull()
+  })
+
+  it('clears active and detected routing when the card is covered', async () => {
+    const { result } = renderHook(() =>
+      useCardEventHandlers({
+        sessionId: 'session-1',
+        documentId: 'doc-1',
+        currentThemeId: 'theme-1',
+        currentSectionId: undefined,
+        initialActiveCardId: 'card-1',
+      }),
+    )
+
+    await waitFor(() => {
+      expect(result.current.activeCardId).toBe('card-1')
+    })
+
+    const sseCalls = vi.mocked(useSSEEvents).mock.calls
+    const eventHandlers = sseCalls[sseCalls.length - 1]?.[1]
+    act(() => {
+      eventHandlers?.onCardCovered?.({
+        type: 'CARD_COVERED',
+        card_id: 'card-1',
+        old_status: 'probably_sufficient',
+        new_status: 'sufficient',
+        confidence: 1,
+      })
+    })
+
+    expect(result.current.cardStates[0].status).toBe('sufficient')
+    expect(result.current.activeCardId).toBeNull()
     expect(result.current.detectedCardId).toBeNull()
   })
 

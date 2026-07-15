@@ -1,0 +1,196 @@
+name: insightguide-ec2
+
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
+x-backend-environment: &backend-environment
+  ENVIRONMENT: production
+  DEBUG: "false"
+  SECRET_KEY: ${SECRET_KEY}
+  CORS_ORIGINS: '["https://${APP_DOMAIN}"]'
+  DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+  REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
+  CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/1
+  CELERY_RESULT_BACKEND: redis://:${REDIS_PASSWORD}@redis:6379/2
+  OPENAI_API_KEY: ${OPENAI_API_KEY}
+  DOCUMENT_ANALYSIS_MODEL: ${DOCUMENT_ANALYSIS_MODEL:-gpt-5.5}
+  SEMANTIC_UNDERSTANDING_MODEL: ${SEMANTIC_UNDERSTANDING_MODEL:-gpt-5.4-mini}
+  EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-large}
+  REALTIME_TRANSCRIPTION_MODEL: ${REALTIME_TRANSCRIPTION_MODEL:-gpt-realtime-whisper}
+  S3_ENDPOINT_URL: http://minio:9000
+  S3_PUBLIC_ENDPOINT_URL: https://${FILES_DOMAIN}
+  S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+  S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+  S3_BUCKET_NAME: ${S3_BUCKET_NAME}
+  S3_REGION: ${S3_REGION:-us-east-1}
+  MAX_UPLOAD_SIZE: ${MAX_UPLOAD_SIZE:-50000000}
+  SESSION_TIMEOUT_SECONDS: ${SESSION_TIMEOUT_SECONDS:-7200}
+  REALTIME_SESSION_TIMEOUT_SECONDS: ${REALTIME_SESSION_TIMEOUT_SECONDS:-3600}
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres-init.sql:/docker-entrypoint-initdb.d/00-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$$POSTGRES_USER\" -d \"$$POSTGRES_DB\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: *default-logging
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    command:
+      - /bin/sh
+      - -ec
+      - exec redis-server --appendonly yes --requirepass "$${REDIS_PASSWORD}"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    logging: *default-logging
+
+  minio:
+    image: ${MINIO_IMAGE:-minio/minio:latest}
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_API_CORS_ALLOW_ORIGIN: https://${APP_DOMAIN}
+    volumes:
+      - minio_data:/data
+    logging: *default-logging
+
+  minio-init:
+    image: ${MINIO_MC_IMAGE:-minio/mc:latest}
+    restart: "no"
+    depends_on:
+      minio:
+        condition: service_started
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME}
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        until mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}"; do
+          echo "Waiting for MinIO..."
+          sleep 2
+        done
+        mc mb --ignore-existing "local/$${S3_BUCKET_NAME}"
+        mc anonymous set none "local/$${S3_BUCKET_NAME}"
+    logging: *default-logging
+
+  backend:
+    image: insightguide-backend:${IMAGE_TAG:-ec2}
+    build:
+      context: ../../backend
+      dockerfile: Dockerfile.ec2
+    restart: unless-stopped
+    command:
+      - /bin/sh
+      - -ec
+      - exec uvicorn app.main:app --host 0.0.0.0 --port 8002 --workers "$${WEB_CONCURRENCY:-2}" --proxy-headers --forwarded-allow-ips="*"
+    environment:
+      <<: *backend-environment
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
+    expose:
+      - "8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    stop_grace_period: 45s
+    logging: *default-logging
+
+  worker:
+    image: insightguide-backend:${IMAGE_TAG:-ec2}
+    restart: unless-stopped
+    command:
+      - /bin/sh
+      - -ec
+      - exec celery -A app.workers.celery_app worker --loglevel=info --concurrency="$${CELERY_CONCURRENCY:-2}"
+    environment:
+      <<: *backend-environment
+      CELERY_CONCURRENCY: ${CELERY_CONCURRENCY:-2}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    stop_grace_period: 2m
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - celery -A app.workers.celery_app inspect ping -d "celery@$$HOSTNAME" --timeout=5 | grep -q pong
+      interval: 30s
+      timeout: 10s
+      start_period: 20s
+      retries: 3
+    logging: *default-logging
+
+  migrate:
+    image: insightguide-backend:${IMAGE_TAG:-ec2}
+    profiles: ["tools"]
+    command: ["python", "-m", "scripts.bootstrap_database"]
+    environment:
+      <<: *backend-environment
+    depends_on:
+      postgres:
+        condition: service_healthy
+    logging: *default-logging
+
+  web:
+    image: insightguide-web:${IMAGE_TAG:-ec2}
+    build:
+      context: ../..
+      dockerfile: deploy/ec2/Dockerfile.web
+      args:
+        VITE_API_BASE_URL: https://${APP_DOMAIN}
+    restart: unless-stopped
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN}
+      FILES_DOMAIN: ${FILES_DOMAIN}
+      ACME_EMAIL: ${ACME_EMAIL}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      backend:
+        condition: service_healthy
+    logging: *default-logging
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  caddy_data:
+  caddy_config:

@@ -21,6 +21,7 @@ from app.services.evaluation import (
     reduce_card_state,
     should_skip_utterance,
 )
+from app.services.interview_service import interview_service
 from app.services.question_card_service import question_card_service
 from app.services.question_rubric_service import question_rubric_service
 
@@ -243,8 +244,6 @@ class AnswerEvaluationEngine:
                 id=f"cce_{uuid.uuid4().hex[:12]}",
                 session_id=session_id,
                 card_id=card.id,
-                basis_type="live",
-                transcript_revision_id=None,
                 state="listening",
                 confidence=0,
                 covered_element_ids=[],
@@ -599,6 +598,8 @@ class AnswerEvaluationEngine:
             )
             if update:
                 updates.append(update)
+                if update["new_status"] in ("sufficient", "covered", "manually_checked"):
+                    interview_service.clear_completed_card_routing(session, update["card_id"])
 
         db.commit()
         logger.info(f"Answer evaluated: {len(updates)} cards updated")
@@ -1210,8 +1211,6 @@ class AnswerEvaluationEngine:
             id=f"cce_{uuid.uuid4().hex[:12]}",
             session_id=card_state.session_id,
             card_id=card.id,
-            basis_type="live",
-            transcript_revision_id=None,
             state=new_status,
             confidence=new_confidence,
             covered_element_ids=covered or [],
@@ -1312,179 +1311,6 @@ class AnswerEvaluationEngine:
             "judgment": judgment,
             "evaluation_seq": evaluation_seq,
         }
-
-    def run_final_coverage(
-        self,
-        db: Session,
-        session_id: str,
-        transcript_revision_id: str,
-    ) -> List[Dict[str, Any]]:
-        """Run final card coverage evaluation after diarization completes.
-
-        Phase 2: This method is called after final_utterances are written.
-        It evaluates all cards against the complete diarized transcript and writes
-        CardCoverageEvaluation records with basis_type='final'.
-
-        Args:
-            db: Database session
-            session_id: Interview session ID
-            transcript_revision_id: TranscriptRevision ID for the final transcript
-
-        Returns:
-            List of final coverage evaluation results
-        """
-        from app.models.final_utterance import FinalUtterance
-        from app.models.interview_session import InterviewSession
-        from app.models.interview_theme import InterviewTheme
-        from app.models.question_card import QuestionCard
-
-        logger.info(f"Running final coverage evaluation for session {session_id}")
-
-        # Load session
-        session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
-        if not session:
-            logger.error(f"Session {session_id} not found")
-            return []
-
-        # Load all final utterances for this revision
-        final_utterances = (
-            db.query(FinalUtterance)
-            .filter(
-                FinalUtterance.session_id == session_id,
-                FinalUtterance.transcript_revision_id == transcript_revision_id,
-            )
-            .order_by(FinalUtterance.sequence_index)
-            .all()
-        )
-
-        if not final_utterances:
-            logger.warning(f"No final utterances found for session {session_id}")
-            return []
-
-        # Load all question cards for this document
-        themes = (
-            db.query(InterviewTheme)
-            .filter(
-                InterviewTheme.document_id == session.document_id,
-                InterviewTheme.is_enabled == True,
-            )
-            .order_by(InterviewTheme.order_index)
-            .all()
-        )
-
-        all_cards = []
-        for theme in themes:
-            cards = (
-                db.query(QuestionCard)
-                .filter(
-                    QuestionCard.interview_theme_id == theme.id,
-                )
-                .order_by(QuestionCard.order_index)
-                .all()
-            )
-            for card in cards:
-                all_cards.append(
-                    {
-                        "card": card,
-                        "theme_id": theme.id,
-                        "theme_title": theme.title,
-                    }
-                )
-
-        if not all_cards:
-            logger.warning(f"No question cards found for session {session_id}")
-            return []
-
-        # Group utterances by theme (for now, use all utterances as context)
-        # TODO: Phase 3 will use theme-based grouping
-        full_transcript = " ".join([u.transcript for u in final_utterances])
-
-        logger.info(
-            f"Final coverage: evaluating {len(all_cards)} cards against "
-            f"{len(final_utterances)} utterances ({len(full_transcript)} chars)"
-        )
-
-        # Run batch judgment with all cards
-        judgments = self._batch_judge_answer_sufficiency(
-            full_transcript, all_cards, session_id=session_id, db=db
-        )
-
-        # Write CardCoverageEvaluation records with basis_type='final'
-        results = []
-        for card_data, judgment in zip(all_cards, judgments):
-            card = card_data["card"]
-
-            # Determine state based on judgment
-            ai_confidence = judgment.get("sufficiency_score", None) or judgment.get(
-                "confidence", 0.0
-            )
-            is_covered = judgment.get("is_sufficient", None) or judgment.get("is_covered", False)
-            covered_element_ids = judgment.get("covered_element_ids", []) or []
-            missing_element_ids = judgment.get("missing_element_ids", []) or []
-
-            if covered_element_ids or missing_element_ids:
-                covered, missing = self._normalize_completion_element_ids(
-                    card=card,
-                    completion={
-                        "covered_element_ids": list(covered_element_ids),
-                        "missing_element_ids": list(missing_element_ids),
-                    },
-                    completion_percentage=ai_confidence * 100,
-                    is_sufficient=bool(is_covered),
-                )
-            else:
-                covered, missing = [], []
-
-            # Determine state using the same reduce_card_state() method for consistency
-            state, _, _ = reduce_card_state(
-                current_status="pending",
-                judgment={
-                    "confidence": ai_confidence,
-                    "is_covered": is_covered,
-                    "evidence_quote": judgment.get("evidence_quote", ""),
-                    "missing_element_ids": missing,
-                    "covered_element_ids": covered,
-                },
-                is_partial=False,
-            )
-
-            # Get next evaluation_seq
-            evaluation_seq = self._get_next_evaluation_seq(db, session_id, card.id)
-
-            # Create CardCoverageEvaluation with basis_type='final'
-            coverage_eval = CardCoverageEvaluation(
-                id=f"cce_{uuid.uuid4().hex[:12]}",
-                session_id=session_id,
-                card_id=card.id,
-                basis_type="final",
-                transcript_revision_id=transcript_revision_id,
-                state=state,
-                confidence=ai_confidence,
-                covered_element_ids=covered or [],
-                missing_element_ids=missing or [],
-                evidence=[],  # TODO: Phase 3 will populate structured evidence with quotes
-                evaluation_seq=evaluation_seq,
-                model="gpt-5.4-mini",
-                prompt_version=None,
-                created_at=datetime.utcnow(),
-            )
-            db.add(coverage_eval)
-
-            results.append(
-                {
-                    "card_id": card.id,
-                    "state": state,
-                    "confidence": ai_confidence,
-                    "covered_element_ids": covered,
-                    "missing_element_ids": missing,
-                    "evaluation_seq": evaluation_seq,
-                }
-            )
-
-        db.commit()
-        logger.info(f"Final coverage complete: wrote {len(results)} evaluations")
-
-        return results
 
 
 # Singleton instance

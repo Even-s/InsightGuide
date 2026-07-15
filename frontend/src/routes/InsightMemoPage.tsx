@@ -5,7 +5,6 @@ import { generateInsightMemo, getInsightMemo, type InsightMemo } from '@/api/pro
 
 type TranscriptEntry = {
   id?: string
-  speaker: string
   transcript: string
   startedAt?: string
 }
@@ -159,9 +158,9 @@ export default function InsightMemoPage() {
         try {
           const response = await apiClient.get(`/api/projects/${data.projectId}/insight-memos`)
           const memos: InsightMemo[] = response.data?.memos || response.data || []
-          const stakeholderMemos = memos.filter(
-            item => item.stakeholderProfileId === data!.stakeholderProfileId,
-          )
+          const stakeholderMemos = memos.filter(item => data!.interviewSeriesId
+            ? item.interviewSeriesId === data!.interviewSeriesId
+            : item.stakeholderProfileId === data!.stakeholderProfileId)
           setAllMemos(
             stakeholderMemos.some(item => item.sessionId === data!.sessionId)
               ? stakeholderMemos
@@ -206,17 +205,27 @@ export default function InsightMemoPage() {
     return () => { cancelled = true }
   }, [activeTab, selectedTranscriptSessionId])
 
-  const mergedPainPoints = allMemos.flatMap(item => item.painPoints || [])
-  const mergedRequirements = allMemos.flatMap(item => item.requirementCandidates || [])
-  const mergedConstraints = allMemos.flatMap(item => item.constraintsAndAssumptions || [])
-  const mergedUnresolved = allMemos.flatMap(item => item.unresolvedQuestions || [])
-  const mergedSuggestions = allMemos.flatMap(item => item.nextInterviewSuggestions || [])
-  const mergedTopics = [...new Set(allMemos.flatMap(item => item.topicsCovered || []))]
-  const totalMinutes = allMemos.reduce(
+  const analysisMemos = Object.values(allMemos.reduce<Record<string, InsightMemo>>((latest, item) => {
+    const key = item.interviewRoundId || item.sessionId
+    const previous = latest[key]
+    const itemTime = new Date(item.generatedAt || item.createdAt || item.interviewDate || 0).getTime()
+    const previousTime = previous
+      ? new Date(previous.generatedAt || previous.createdAt || previous.interviewDate || 0).getTime()
+      : -1
+    if (!previous || itemTime >= previousTime) latest[key] = item
+    return latest
+  }, {}))
+  const mergedPainPoints = analysisMemos.flatMap(item => item.painPoints || [])
+  const mergedRequirements = analysisMemos.flatMap(item => item.requirementCandidates || [])
+  const mergedConstraints = analysisMemos.flatMap(item => item.constraintsAndAssumptions || [])
+  const mergedUnresolved = analysisMemos.flatMap(item => item.unresolvedQuestions || [])
+  const mergedSuggestions = analysisMemos.flatMap(item => item.nextInterviewSuggestions || [])
+  const mergedTopics = [...new Set(analysisMemos.flatMap(item => item.topicsCovered || []))]
+  const totalMinutes = analysisMemos.reduce(
     (sum, item) => sum + (item.interviewDurationMinutes || 0),
     0,
   )
-  const sourceTotals = allMemos.reduce(
+  const sourceTotals = analysisMemos.reduce(
     (totals, item) => ({
       explicit: totals.explicit + (item.sourceDistinction?.explicit_statements || 0),
       inferred: totals.inferred + (item.sourceDistinction?.inferences || 0),
@@ -366,15 +375,11 @@ export default function InsightMemoPage() {
       <main className="mx-auto max-w-6xl px-6 py-8 lg:px-8">
         {activeTab === 'transcript' ? (
           <section className="animate-themeFadeIn">
-            <div className="mb-6 flex flex-col gap-3 border-b border-cream-300 pb-5 sm:flex-row sm:items-end sm:justify-between">
+            <div className="mb-6 border-b border-cream-300 pb-5">
               <div>
                 <p className="text-xs font-semibold tracking-[0.14em] text-sage-500">FULL TRANSCRIPT</p>
                 <h2 className="mt-1 text-2xl font-semibold text-natural-800">完整逐字稿</h2>
-                <p className="mt-1 text-sm text-natural-500">依照發言順序保留訪談內容，方便回查洞察來源。</p>
-              </div>
-              <div className="flex gap-5 text-xs text-natural-500">
-                <span><i className="mr-2 inline-block h-2 w-2 bg-sage-400" />訪談者</span>
-                <span><i className="mr-2 inline-block h-2 w-2 bg-wood-300" />受訪者</span>
+                <p className="mt-1 text-sm text-natural-500">依照 Realtime 完成辨識的順序保留內容，方便回查洞察來源。</p>
               </div>
             </div>
 
@@ -442,21 +447,17 @@ export default function InsightMemoPage() {
             ) : (
               <div className="overflow-hidden rounded-xl border border-cream-300 bg-white shadow-natural">
                 {transcript.map((utterance, index) => {
-                  const interviewer = utterance.speaker === 'interviewer'
                   return (
                     <article
                       key={utterance.id || `${utterance.startedAt || 'utterance'}-${index}`}
-                      className="grid grid-cols-[44px_80px_minmax(0,1fr)] gap-3 border-b border-cream-200 px-4 py-5 last:border-b-0 sm:grid-cols-[56px_100px_minmax(0,1fr)] sm:gap-5 sm:px-6"
+                      className="grid grid-cols-[44px_minmax(0,1fr)] gap-3 border-b border-cream-200 px-4 py-5 last:border-b-0 sm:grid-cols-[56px_minmax(0,1fr)] sm:gap-5 sm:px-6"
                     >
-                      <span className="pt-0.5 font-mono text-xs tabular-nums text-natural-300">
-                        {String(index + 1).padStart(2, '0')}
-                      </span>
                       <div>
-                        <div className={`border-l-2 pl-3 text-sm font-semibold ${interviewer ? 'border-sage-400 text-sage-500' : 'border-wood-300 text-wood-500'}`}>
-                          {interviewer ? '訪談者' : '受訪者'}
-                        </div>
+                        <span className="font-mono text-xs tabular-nums text-natural-300">
+                          {String(index + 1).padStart(2, '0')}
+                        </span>
                         {formatTime(utterance.startedAt) && (
-                          <div className="mt-1 pl-3 text-xs tabular-nums text-natural-300">{formatTime(utterance.startedAt)}</div>
+                          <div className="mt-1 text-xs tabular-nums text-natural-300">{formatTime(utterance.startedAt)}</div>
                         )}
                       </div>
                       <p className="text-base leading-8 text-natural-700">{utterance.transcript}</p>

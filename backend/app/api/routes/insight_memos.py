@@ -20,6 +20,8 @@ def _memo_to_response(memo) -> dict:
         "sessionId": memo.session_id,
         "projectId": memo.project_id,
         "stakeholderProfileId": memo.stakeholder_profile_id,
+        "interviewSeriesId": memo.interview_series_id,
+        "interviewRoundId": memo.interview_round_id,
         "interviewDate": memo.interview_date.isoformat() if memo.interview_date else None,
         "interviewDurationMinutes": memo.interview_duration_minutes,
         "topicsCovered": memo.topics_covered or [],
@@ -44,6 +46,14 @@ async def generate_insight_memo(session_id: str, db: Session = Depends(get_db)):
     """Generate an Interview Insight Memo. Returns existing one if already generated."""
     existing = insight_memo_service.get_memo(db, session_id)
     if existing:
+        if existing.interview_round_id:
+            from app.services.interview_round_aggregate_service import (
+                interview_round_aggregate_service,
+            )
+
+            aggregate = interview_round_aggregate_service.get(db, existing.interview_round_id)
+            if not aggregate or aggregate.status != "ready":
+                interview_round_aggregate_service.rebuild(db, existing.interview_round_id)
         return _memo_to_response(existing)
 
     try:

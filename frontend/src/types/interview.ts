@@ -10,7 +10,7 @@ export type SessionStatus =
   | 'ready'
   | 'interviewing'
   | 'paused'
-  | 'transitioning'
+  | 'section_transitioning'
   | 'recovering'
   | 'ended'
   | 'failed'
@@ -41,6 +41,8 @@ export interface InterviewSession {
   userId: string
   projectId?: string
   stakeholderProfileId?: string
+  interviewRoundId?: string
+  continuedFromSessionId?: string
   status: SessionStatus
   currentSectionId?: string
   activeCardId?: string | null

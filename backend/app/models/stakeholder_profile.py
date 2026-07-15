@@ -19,8 +19,12 @@ class StakeholderProfile(Base):
     __tablename__ = "stakeholder_profiles"
 
     id = Column(String, primary_key=True)
-    project_id = Column(String, ForeignKey("projects.id"), nullable=False, index=True)
-    slot_id = Column(String, ForeignKey("stakeholder_slots.id"), nullable=True, index=True)
+    project_id = Column(
+        String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    slot_id = Column(
+        String, ForeignKey("stakeholder_slots.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     name = Column(String, nullable=False)
     role_title = Column(String, nullable=True)
@@ -46,4 +50,7 @@ class StakeholderProfile(Base):
         "InterviewSession",
         back_populates="stakeholder_profile",
         foreign_keys="[InterviewSession.stakeholder_profile_id]",
+    )
+    interview_series = relationship(
+        "InterviewSeries", back_populates="stakeholder_profile", cascade="all, delete-orphan"
     )

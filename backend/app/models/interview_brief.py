@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base
@@ -17,13 +17,26 @@ class InterviewBrief(Base):
     """
 
     __tablename__ = "interview_briefs"
+    __table_args__ = (UniqueConstraint("session_id"),)
 
     id = Column(String, primary_key=True)
     session_id = Column(
-        String, ForeignKey("interview_sessions.id"), nullable=False, unique=True, index=True
+        String,
+        ForeignKey("interview_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
-    stakeholder_profile_id = Column(String, ForeignKey("stakeholder_profiles.id"), nullable=False)
-    project_id = Column(String, ForeignKey("projects.id"), nullable=False, index=True)
+    stakeholder_profile_id = Column(
+        String,
+        ForeignKey("stakeholder_profiles.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    project_id = Column(
+        String,
+        ForeignKey("projects.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
 
     interview_objective = Column(Text, nullable=False)
 

@@ -9,6 +9,12 @@ import {
   getEvidenceSuggestedFollowup,
 } from '@/components/PresenterMode/presenterUtils'
 
+const COMPLETED_CARD_STATUSES = new Set<CardStatus>([
+  'sufficient',
+  'covered',
+  'manually_checked',
+])
+
 interface UseCardEventHandlersOptions {
   sessionId: string
   documentId: string
@@ -63,6 +69,11 @@ export function useCardEventHandlers({
     evidenceTranscript?: string,
   ) => {
     if (!cardId) return
+
+    if (COMPLETED_CARD_STATUSES.has(status)) {
+      setActiveCardId((previous) => previous === cardId ? null : previous)
+      setDetectedCardId((previous) => previous === cardId ? null : previous)
+    }
 
     const resolvedTranscript =
       evidenceTranscript
@@ -160,6 +171,25 @@ export function useCardEventHandlers({
       )
     }
   }, [initialActiveCardId, initialDetectedCardId])
+
+  useEffect(() => {
+    const completedCardIds = new Set(
+      cardStates
+        .filter((cardState) => COMPLETED_CARD_STATUSES.has(cardState.status))
+        .map((cardState) => cardState.questionCard.id),
+    )
+    const hasStaleRouting = Boolean(
+      (activeCardId && completedCardIds.has(activeCardId))
+      || (detectedCardId && completedCardIds.has(detectedCardId)),
+    )
+    if (!hasStaleRouting) return
+
+    setActiveCardId(null)
+    setDetectedCardId(null)
+    void interviewAPI.clearActiveCard(sessionId).catch((error) => {
+      console.error('Failed to clear completed card routing:', error)
+    })
+  }, [activeCardId, cardStates, detectedCardId, sessionId])
 
   useSSEEvents(sessionId, {
     onCardListening: (data) => {

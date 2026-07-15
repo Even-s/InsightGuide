@@ -8,7 +8,6 @@ from typing import Any, Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from app.models.brd_readiness_report import BRDReadinessReport
-from app.models.interview_insight_memo import InterviewInsightMemo
 from app.models.project import Project
 from app.models.requirement_evidence_matrix import EvidenceMatrixEntry, RequirementEvidenceMatrix
 from app.models.stakeholder_profile import StakeholderProfile
@@ -31,6 +30,10 @@ class BRDReadinessService:
             .filter(RequirementEvidenceMatrix.project_id == project_id)
             .first()
         )
+        if not matrix or matrix.status != "ready":
+            from app.services.evidence_matrix_service import evidence_matrix_service
+
+            matrix = evidence_matrix_service.update_matrix(db, project_id)
 
         entries = []
         if matrix:
@@ -40,14 +43,9 @@ class BRDReadinessService:
                 .all()
             )
 
-        memos = (
-            db.query(InterviewInsightMemo)
-            .filter(
-                InterviewInsightMemo.project_id == project_id,
-                InterviewInsightMemo.status == "completed",
-            )
-            .all()
-        )
+        from app.services.interview_round_aggregate_service import interview_round_aggregate_service
+
+        memos = interview_round_aggregate_service.latest_memos_for_project(db, project_id)
 
         slots = db.query(StakeholderSlot).filter(StakeholderSlot.project_id == project_id).all()
 
@@ -125,6 +123,17 @@ class BRDReadinessService:
 
     def can_generate_brd(self, db: Session, project_id: str) -> Dict[str, Any]:
         """Quick check: can we generate a BRD?"""
+        matrix = (
+            db.query(RequirementEvidenceMatrix)
+            .filter(RequirementEvidenceMatrix.project_id == project_id)
+            .first()
+        )
+        if not matrix or matrix.status != "ready":
+            return {
+                "can_generate": False,
+                "mode": "not_ready",
+                "reason": "訪談資料已更新，請先重新整理證據矩陣與準備度報告",
+            }
         report = self.get_latest_report(db, project_id)
         if not report:
             return {"can_generate": False, "mode": "not_ready", "reason": "尚未產生準備度報告"}

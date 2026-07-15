@@ -18,7 +18,7 @@
 - 後端使用 pytest；設定 `DEBUG=false` 後可收集並通過 347 項測試（另有 24 個 deprecation warnings）。
 - 直接使用目前 `.env` 執行後端測試時，`DEBUG=release` 無法解析為布林值，會在測試收集階段失敗。此問題列為 M0 阻塞項。
 - 目前沒有 Playwright/Cypress 等瀏覽器端 E2E 測試，也沒有現行 `.github/workflows` 工作流程。
-- OpenAI、Realtime WebRTC、MinIO、Redis、Celery、LibreOffice 與 Poppler 都是功能旅程的一部分，測試時需要區分 mock 與真實整合環境。
+- OpenAI、Realtime WebRTC、MinIO、Redis 與 Celery 都是功能旅程的一部分，測試時需要區分 mock 與真實整合環境。
 
 ## 3. 優先級與測試層級
 
@@ -57,7 +57,7 @@
 | TD-03 | TD-02 + 3 位受訪者，其中一位無法受訪、一位已完成 |
 | TD-04 | 已產生訪談大綱，含 3 個主題與 10 張問題卡 |
 | TD-05 | 進行中的訪談，含 pending/listening/probably_sufficient/sufficient 卡片 |
-| TD-06 | 已結束訪談，含 live/final utterances、speaker、Q/A 與 Insight Memo |
+| TD-06 | 已結束訪談，含 Realtime transcript、卡片狀態、Insight Memo 與 Round Aggregate |
 | TD-07 | 3 場跨角色訪談，包含一致證據、單一來源、缺驗證角色與互相衝突證據 |
 | TD-08 | PDF、DOCX、Markdown、空檔、錯誤格式與超大檔案 fixtures |
 | TD-09 | OpenAI 逾時、429、5xx、空回應、格式錯誤；Redis/MinIO/Celery 中斷 fixtures |
@@ -68,7 +68,7 @@
 
 | ID | P | 測試情境 | 前置條件與步驟摘要 | 預期結果 | 自動化 |
 |---|---|---|---|---|---|
-| SYS-001 | P0 | 新 Mac 一鍵安裝 | 乾淨 macOS；執行 `InstallInsightGuide.command` | Homebrew、Node、Python 3.11、Docker Desktop、LibreOffice、Poppler 與專案依賴安裝完成；重跑不破壞既有環境 | MANUAL |
+| SYS-001 | P0 | 新 Mac 一鍵安裝 | 乾淨 macOS；執行 `InstallInsightGuide.command` | Homebrew、Node、Python 3.11、Docker Desktop 與專案依賴安裝完成；重跑不破壞既有環境 | MANUAL |
 | SYS-002 | P0 | 一鍵啟動全部服務 | 執行 `InsightGuide.command` 或 `./insightguide.sh launch` | PostgreSQL、Redis、MinIO、後端、Celery、前端皆 ready；瀏覽器開啟首頁 | INT |
 | SYS-003 | P1 | 重複啟動 | 服務已運行，再執行 `start` | 不建立重複程序、不占用新 port，狀態仍為 healthy | INT |
 | SYS-004 | P0 | 狀態與健康檢查 | 執行 `./insightguide.sh status`，呼叫 `/health` | 顯示各服務狀態；後端回傳 `healthy` 和正確環境 | INT |
@@ -170,7 +170,7 @@
 | INT-003 | P0 | 麥克風或 token 失敗 | 拒絕權限；模擬 transcription-session 401/429/5xx | 不開始訪談或清楚顯示錯誤；可重試；不留下幽靈錄音 | E2E/API |
 | INT-004 | P0 | SDP/ICE 連線異常 | 模擬 invalid_offer、ICE timeout、網路離線 | 顯示具體連線錯誤；既有 session 可安全重試／恢復 | E2E/LIVE |
 | INT-005 | P0 | partial 與 completed transcript | 傳送多個 delta 再完成 utterance | pending 文字即時顯示；完成後只寫入一次歷史與後端 | UNIT/E2E |
-| INT-006 | P1 | speaker 分類 | interviewer 提問與 interviewee 回答 fixtures | speaker 分類正確；錯分可於訪談後修正 | API/INT |
+| INT-006 | P1 | 中性逐字稿 | 連續輸入多段 Realtime transcript | 依時間保存完整內容，不產生訪問者／受訪者分類 | API/INT |
 | INT-007 | P0 | 問題啟動卡片 | 訪談者問與特定卡片語意相符的問題 | 正確卡片 pending → listening；不誤啟動無關卡片 | API/INT |
 | INT-008 | P0 | 部分回答 | 回答只覆蓋部分 criteria | 維持 listening 或 probably_sufficient；顯示缺口，不提前完成 | API/INT |
 | INT-009 | P0 | 充分回答 | 回答具體覆蓋必要 criteria | 卡片轉 sufficient，保存 evidence/confidence，發出 SSE 事件 | API/INT |
@@ -182,9 +182,9 @@
 | INT-015 | P0 | 暫停與恢復 | 訪談中暫停，再恢復 | session interviewing ↔ paused；錄音／轉錄狀態一致，不重複計時 | API/E2E |
 | INT-016 | P0 | 重新整理與續訪 | 進行中重新整理，或由 session URL 進入 | 載入原 session、current theme、卡片狀態與 transcript；不建立新 session | API/E2E |
 | INT-017 | P1 | SSE 斷線重連 | 中斷 Redis/SSE 後恢復，傳送重複事件 | 自動重連；事件冪等，不重複更新卡片或 transcript | INT/E2E |
-| INT-018 | P0 | 正常結束與 diarization | 有效錄音 >1KB 且有 recording_started_at，按結束 | 上傳 diarization，建立 final utterances，成功後 session 才 ended | INT/E2E/LIVE |
-| INT-019 | P0 | 結束失敗 | 無錄音、缺開始時間、diarization 5xx | 顯示錯誤且 session 不誤標 ended；可重試，不遺失錄音 blob | UNIT/E2E |
-| INT-020 | P1 | 重複結束與競態 | 雙擊結束、背景回應延遲、另一分頁同時結束 | end/diarize 冪等；只有一份 final transcript 與後續任務 | API/INT |
+| INT-018 | P0 | 正常結束與 memo 聚合 | 有 Realtime transcript，按結束 | session ended；產生累積 memo；更新該輪 Aggregate | INT/E2E/LIVE |
+| INT-019 | P0 | Realtime 寫入失敗 | 最後一段 transcript 儲存失敗 | 結束前等待或顯示錯誤；可重試且不誤產生 memo | UNIT/E2E |
+| INT-020 | P1 | 重複結束與競態 | 雙擊結束、背景回應延遲、另一分頁同時結束 | end/memo/aggregate 冪等；Round Aggregate 只指向最新完成 memo | API/INT |
 
 ### G. 訪談後分析與報告
 
@@ -193,20 +193,20 @@
 | PST-001 | P0 | 結束後導向 | INT-018 成功 | 自動導向 `/sessions/:id/insight-memo`，不閃回訪談頁 | E2E |
 | PST-002 | P0 | 產生 Insight Memo | TD-06 無 memo，點產生 | 建立痛點、需求線索、限制／假設、未解問題與下一步；可追溯 evidence | API/E2E |
 | PST-003 | P1 | Memo 快取與重生 | 已有 memo 再開啟、再按重新產生 | 一般讀取不重複花費；重生規則明確並更新時間／內容 | API/E2E |
-| PST-004 | P0 | 正式逐字稿分頁 | 切換 Memo／正式逐字稿 | 顯示 speaker、時間與內容；沒有 final transcript 時顯示空狀態 | E2E |
-| PST-005 | P1 | 修正 speaker | 將一段 speaker 改為另一角色 | 後端更新並刷新顯示；Q/A、報告重算策略一致 | API/E2E |
+| PST-004 | P0 | 各場逐字稿分頁 | 切換同一輪不同 session | 每頁只顯示該場 Realtime transcript；內容不標 speaker | E2E |
+| PST-005 | P1 | 累積洞察 | 同輪完成第二場續訪 | 最新 memo 與 Aggregate 納入兩場內容，專案輸出只計算一次 | API/E2E |
 | PST-006 | P0 | 訪談報告生成 | 開啟 report route，等待 outputs generate | 顯示 BRD 與 transcript 分頁；失敗可重試；不無限 loading | API/E2E |
 | PST-007 | P1 | 報告分析正確性 | TD-06 固定時間軸與卡片狀態 | 覆蓋率、時間軸、提問與語速統計符合 fixture | API |
 | PST-008 | P1 | 下載 Markdown | 下載 BRD 與逐字稿 | 檔名、UTF-8、章節、證據與換行正確；檔案非空 | E2E |
 | PST-009 | P1 | Session log | 依事件類型篩選並返回後台 | 摘要數與列表一致；篩選不改動資料；空狀態正確 | E2E/API |
-| PST-010 | P1 | 背景後處理失敗 | Memo、alignment、Q/A、report 任一任務失敗 | 其他已完成產物仍可查看；失敗項可重試且不重複資料 | INT |
+| PST-010 | P1 | 背景後處理失敗 | Memo、Round Aggregate、Evidence Matrix 或 report 任一任務失敗 | 其他已完成產物仍可查看；失敗項可重試且不重複資料，失效狀態不會被誤標為 ready | INT |
 
 ### H. 證據矩陣與 BRD 準備度
 
 | ID | P | 測試情境 | 前置條件與步驟摘要 | 預期結果 | 自動化 |
 |---|---|---|---|---|---|
 | EVD-001 | P1 | 無訪談資料 | TD-02 開啟矩陣 | 顯示尚無資料，不出錯；刷新有明確結果 | E2E |
-| EVD-002 | P0 | 刷新矩陣 | TD-07 點刷新 | 從最新 memos 建立候選需求並更新 summary；重跑冪等 | API/E2E |
+| EVD-002 | P0 | 刷新矩陣 | TD-07 點刷新 | 每個 ready Round Aggregate 只提供一份最新累積 memo；據此建立候選需求並更新 summary，重跑冪等 | API/E2E |
 | EVD-003 | P0 | 跨訪談去重 | 多位受訪者以不同措辭描述同需求 | 合併為同一 candidate，mention/source/evidence 全保留 | API |
 | EVD-004 | P0 | 衝突與缺角色 | TD-07 | conflicted、needs_more_evidence、missing_validation_from 判定正確 | API/E2E |
 | EVD-005 | P1 | 篩選與展開 | 逐一切換全部／已驗證／待補證／衝突／候選，展開項目 | 筆數與狀態一致；顯示來源角色、引文與衝突內容 | E2E |
@@ -229,7 +229,7 @@
 | BRD-005 | P1 | 重新生成 | completed BRD 點重新生成 | 版本／覆蓋規則明確；不因輪詢建立多筆重複需求 | API/E2E |
 | BRD-006 | P1 | 需求更新與刪除 API | patch priority/content，delete requirement | 回應與 BRD summary 一致；不存在 ID 為 404 | API |
 | BRD-007 | P0 | Markdown 下載 | 下載 completed BRD | Content-Type、檔名、UTF-8、章節與資料正確 | API/E2E |
-| BRD-008 | P0 | PDF 下載 | 下載並以 Poppler render | HTTP 200、PDF 可開啟、中文字型正常、分頁無截斷、內容與 BRD 一致 | API/INT/MANUAL |
+| BRD-008 | P0 | PDF 下載 | 下載並以瀏覽器或系統 PDF 閱讀器開啟 | HTTP 200、PDF 可開啟、中文字型正常、分頁無截斷、內容與 BRD 一致 | API/INT/MANUAL |
 
 ### J. 管理後台、驗證與通用錯誤
 
@@ -265,8 +265,8 @@
 |---|---|---|---|
 | E2E-001 | P0 | 首頁 → 新建專案 → AI 訪談計劃 → 新增角色 → 指派受訪者 | 專案詳情的計劃、統計與受訪者資料一致 |
 | E2E-002 | P0 | 受訪者 → 訪談大綱 → 編輯問題卡 → 開始訪談 | 進入正確 session，角色過濾後的卡片可使用 |
-| E2E-003 | P0 | 即時提問 → partial answer → sufficient answer → 暫停／恢復 → 結束 | 卡片狀態、live/final transcript、session lifecycle 全部一致 |
-| E2E-004 | P0 | 結束訪談 → diarization → Insight Memo → 報告 → Markdown/PDF | 產物可追溯至正式逐字稿，下載檔可開啟 |
+| E2E-003 | P0 | 即時提問 → partial answer → sufficient answer → 暫停／恢復 → 結束 | 卡片狀態、Realtime transcript、session lifecycle 全部一致 |
+| E2E-004 | P0 | 結束訪談 → Insight Memo → Round Aggregate → 報告 → Markdown/PDF | 產物可追溯至各場 Realtime transcript，下載檔可開啟 |
 | E2E-005 | P0 | 三角色多場訪談 → Evidence Matrix → Readiness → 專案 BRD | 去重、衝突、缺口、gate 與最終 BRD 一致 |
 | E2E-006 | P1 | 語音建立專案 → 語音新增角色 → 語音新增受訪者 → 語音設定大綱 | 每一步都先產生可人工確認的草稿，未確認前不寫入 |
 | E2E-007 | P1 | Realtime 斷線 → 重連 → 續訪 → 重複結束請求 | 不遺失、不重複 transcript/evidence，session 可正確完成 |
@@ -318,7 +318,7 @@
 ### M4 — Realtime、SSE 與背景任務
 
 - Chromium 使用 fake audio fixture 驗證前端 WebRTC 狀態。
-- Integration 環境驗證 Redis SSE、Celery、MinIO、diarization 與 worker retry。
+- Integration 環境驗證 Redis SSE、Celery、MinIO、Realtime transcript 與 worker retry。
 - 另設少量真實 OpenAI nightly，不阻塞一般 PR。
 
 完成條件：中斷與重試案例不造成遺失、重複或永久 processing。

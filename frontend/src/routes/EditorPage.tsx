@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
-import { useParams } from 'react-router-dom'
+import { useNavigate, useParams } from 'react-router-dom'
 import { documentsAPI } from '@/api/documents'
+import { interviewRoundsAPI, type InterviewRound } from '@/api/interviewRounds'
+import { interviewAPI } from '@/api/interview'
+import { listStakeholders, type StakeholderProfile } from '@/api/projects'
 import { questionCardsAPI, type QuestionCardFormData } from '@/api/questionCards'
+import { InterviewRoundModal } from '@/components/ProjectDetail/InterviewRoundModal'
 import CardEditor from '@/components/EditorMode/CardEditor'
 import Button from '@/components/common/Button'
 import LoadingSpinner from '@/components/common/LoadingSpinner'
 import apiClient from '@/api/client'
+import type { InterviewSession } from '@/types/interview'
 import type { QuestionCard } from '@/types/questionCard'
 
 interface InterviewTheme {
@@ -59,7 +64,20 @@ interface SessionItem {
 
 export default function EditorPage() {
   const { documentId } = useParams<{ documentId: string }>()
+  const navigate = useNavigate()
   const [projectId, setProjectId] = useState<string | null>(null)
+  const [stakeholderProfileId, setStakeholderProfileId] = useState<string | null>(null)
+  const [isFrozen, setIsFrozen] = useState(false)
+  const [activeRoundId, setActiveRoundId] = useState<string | null>(null)
+  const [rounds, setRounds] = useState<InterviewRound[]>([])
+  const [roundsLoading, setRoundsLoading] = useState(false)
+  const [roundSessions, setRoundSessions] = useState<InterviewSession[]>([])
+  const [continuingRoundId, setContinuingRoundId] = useState<string | null>(null)
+  const [roundActionError, setRoundActionError] = useState<string | null>(null)
+  const [roundModalProfile, setRoundModalProfile] = useState<StakeholderProfile | null>(null)
+  const [roundModalSessions, setRoundModalSessions] = useState<InterviewSession[]>([])
+  const [roundModalLoading, setRoundModalLoading] = useState(false)
+  const [roundModalError, setRoundModalError] = useState<string | null>(null)
   const [plan, setPlan] = useState<InterviewPlan | null>(null)
   const [cards, setCards] = useState<QuestionCard[]>([])
   const [selectedThemeId, setSelectedThemeId] = useState<string>('')
@@ -83,9 +101,7 @@ export default function EditorPage() {
     const data: InterviewPlan = response.data
     setPlan(data)
 
-    if (data.themes.length > 0) {
-      setSelectedThemeId(prev => prev || data.themes[0].id)
-    }
+    if (data.themes.length > 0) setSelectedThemeId(data.themes[0].id)
 
     // Also load full cards for editing
     const fullCards = await questionCardsAPI.getDocumentCards(documentId)
@@ -103,11 +119,45 @@ export default function EditorPage() {
       try {
         setIsLoading(true)
         setError(null)
+        setRounds([])
+        setRoundSessions([])
+        setActiveRoundId(null)
+        setRoundsLoading(false)
+        setStakeholderProfileId(null)
+        setRoundModalError(null)
 
         // Load document to get project context
         try {
           const doc = await documentsAPI.getDocument(documentId!)
           if (doc.project_id) setProjectId(doc.project_id)
+          setStakeholderProfileId(doc.stakeholder_profile_id || null)
+          setIsFrozen(Boolean(doc.is_frozen))
+          if (doc.project_id && doc.stakeholder_profile_id) {
+            interviewAPI.listSessions({
+              projectId: doc.project_id,
+              stakeholderProfileId: doc.stakeholder_profile_id,
+              limit: 50,
+            }).then(result => {
+              if (isMounted) setRoundSessions(result.sessions)
+            }).catch(() => {
+              if (isMounted) setRoundSessions([])
+            })
+          }
+          if (doc.interview_round_id) {
+            setRoundsLoading(true)
+            setActiveRoundId(doc.interview_round_id)
+            try {
+              const currentRound = await interviewRoundsAPI.getRound(doc.interview_round_id)
+              const seriesRounds = await interviewRoundsAPI.listRounds(currentRound.seriesId)
+              if (isMounted) {
+                setRounds([...seriesRounds].sort((a, b) => a.roundNumber - b.roundNumber))
+              }
+            } catch {
+              if (isMounted) setRounds([])
+            } finally {
+              if (isMounted) setRoundsLoading(false)
+            }
+          }
         } catch { /* continue without project context */ }
 
         const deckStatus = await documentsAPI.getDocumentStatus(documentId!)
@@ -187,10 +237,102 @@ export default function EditorPage() {
   }, [documentId, isAnalyzing, loadPlan])
 
   const selectedTheme = plan?.themes.find((t) => t.id === selectedThemeId) ?? null
+  const activeRound = rounds.find(round => round.id === activeRoundId)
   const themeCards = useMemo(
     () => cards.filter((c) => c.interviewThemeId === selectedThemeId).sort((a, b) => a.orderIndex - b.orderIndex),
     [cards, selectedThemeId],
   )
+  const sharedLegacyDocumentIds = useMemo(() => {
+    const documentCounts = rounds.reduce<Record<string, number>>((counts, round) => {
+      if (round.guideDocumentId) counts[round.guideDocumentId] = (counts[round.guideDocumentId] ?? 0) + 1
+      return counts
+    }, {})
+    return new Set(
+      Object.entries(documentCounts)
+        .filter(([, count]) => count > 1)
+        .map(([id]) => id),
+    )
+  }, [rounds])
+  const isActiveLegacyGuide = Boolean(
+    activeRound?.guideDocumentId && sharedLegacyDocumentIds.has(activeRound.guideDocumentId),
+  )
+  const latestSessionByRound = useMemo(() => {
+    return rounds.reduce<Record<string, InterviewSession>>((result, round) => {
+      const session = [...roundSessions]
+        .filter(item => (
+          (item.interviewRoundId === round.id || round.sessionIds.includes(item.id))
+        ))
+        .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0]
+      if (session) result[round.id] = session
+      return result
+    }, {})
+  }, [roundSessions, rounds])
+  const activeRoundLatestSession = activeRound
+    ? latestSessionByRound[activeRound.id]
+    : undefined
+  const activeRoundFallbackSessionId = activeRound && activeRound.sessionIds.length > 0
+    ? activeRound.sessionIds[activeRound.sessionIds.length - 1]
+    : undefined
+  const canContinueActiveRound = Boolean(
+    activeRound
+    && (activeRoundLatestSession || activeRoundFallbackSessionId)
+    && activeRoundLatestSession?.status !== 'failed',
+  )
+
+  async function continueRoundInterview(round: InterviewRound, latestSession?: InterviewSession) {
+    if (continuingRoundId) return
+    setRoundActionError(null)
+
+    setContinuingRoundId(round.id)
+    try {
+      const sourceSessionId = latestSession?.id ?? round.sessionIds[round.sessionIds.length - 1]
+      if (!sourceSessionId) {
+        throw new Error(`第 ${round.roundNumber} 輪沒有可繼續的訪談場次`)
+      }
+      const sourceSession = latestSession ?? await interviewAPI.getSession(sourceSessionId)
+      if (sourceSession.status !== 'ended') {
+        navigate(`/interview/session/${sourceSession.id}`)
+        return
+      }
+
+      const continued = await interviewRoundsAPI.continueSession(round.id, sourceSession.id)
+      navigate(`/interview/session/${continued.id}`)
+    } catch (err) {
+      setRoundActionError(getErrorMessage(err) || `無法繼續第 ${round.roundNumber} 輪訪談`)
+    } finally {
+      setContinuingRoundId(null)
+    }
+  }
+
+  function selectRound(round: InterviewRound) {
+    if (!round.guideDocumentId) return
+    setActiveRoundId(round.id)
+    if (round.guideDocumentId !== documentId) navigate(`/editor/${round.guideDocumentId}`)
+  }
+
+  async function openCreateRound() {
+    if (!projectId || !stakeholderProfileId) {
+      setRoundModalError('此大綱缺少專案或受訪者資料，無法建立新訪談。')
+      return
+    }
+
+    setRoundModalLoading(true)
+    setRoundModalError(null)
+    try {
+      const [profiles, sessionResult] = await Promise.all([
+        listStakeholders(projectId),
+        interviewAPI.listSessions({ projectId, stakeholderProfileId, limit: 50 }),
+      ])
+      const profile = profiles.find(item => item.id === stakeholderProfileId)
+      if (!profile) throw new Error('stakeholder profile not found')
+      setRoundModalSessions(sessionResult.sessions)
+      setRoundModalProfile(profile)
+    } catch {
+      setRoundModalError('無法載入受訪者與歷史訪談，請稍後再試。')
+    } finally {
+      setRoundModalLoading(false)
+    }
+  }
 
   async function handleOpenSessionPanel() {
     setShowSessionPanel(true)
@@ -325,38 +467,123 @@ export default function EditorPage() {
 
   return (
     <div className="flex h-screen flex-col bg-cream-100">
-      {/* Header */}
-      <header className="flex h-14 shrink-0 items-center justify-between border-b border-cream-300 bg-white px-5">
-        <div className="flex items-center gap-3">
+      <header className="flex h-20 shrink-0 items-stretch border-b border-cream-300 bg-white px-5">
+        <div className="flex w-[15.5rem] shrink-0 items-center gap-3 border-r border-cream-200 pr-4">
           <button
+            type="button"
+            aria-label="返回專案"
             onClick={() => projectId ? window.location.assign(`/projects/${projectId}`) : window.history.back()}
-            className="text-natural-400 hover:text-natural-600 text-sm"
+            className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-natural-400 transition-colors hover:bg-cream-100 hover:text-natural-700"
           >
-            &larr; 返回專案
+            <svg aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M15 19l-7-7 7-7" />
+            </svg>
           </button>
-          <div>
-            <h1 className="text-base font-semibold text-natural-700">準備模式</h1>
-            <p className="text-xs text-natural-400">
-              {plan.themes.length} 個訪談單元 · {plan.totalCards} 個提問重點
+          <div className="min-w-0">
+            <h1 className="text-base font-semibold text-natural-800">準備模式</h1>
+            <p className="mt-1 truncate text-xs text-natural-400">
+              {activeRound ? `第 ${activeRound.roundNumber} 輪` : '訪談大綱'} · {plan.themes.length} 個單元 · {plan.totalCards} 個問題{isFrozen ? ' · 唯讀' : ''}
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <Button variant="secondary" onClick={handleOpenSessionPanel}>訪談紀錄</Button>
-          <Button onClick={() => window.location.assign(`/interview/${documentId}${projectId ? `?projectId=${projectId}` : ''}`)}>開始訪談</Button>
+        {(roundsLoading || rounds.length > 0) && (
+          <div className="flex min-w-0 flex-1 items-stretch overflow-x-auto" role="tablist" aria-label="切換訪談輪次">
+            {roundsLoading ? (
+              <div className="flex items-center px-5 text-sm text-natural-400">正在載入輪次…</div>
+            ) : rounds.map((round) => {
+              const isActive = round.id === activeRoundId
+              return (
+                <div
+                  key={round.id}
+                  role="presentation"
+                  className={`relative flex min-w-[7.75rem] shrink-0 items-center border-r border-cream-200 transition-colors ${
+                    isActive ? 'bg-sage-50' : 'bg-white hover:bg-cream-50'
+                  }`}
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={isActive}
+                    aria-controls="interview-outline-panel"
+                    disabled={!round.guideDocumentId}
+                    onClick={() => selectRound(round)}
+                    className="min-w-0 flex-1 self-stretch px-3 py-3 text-left disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <span className={`block text-sm font-semibold ${isActive ? 'text-sage-700' : 'text-natural-600'}`}>
+                      第 {round.roundNumber} 輪
+                    </span>
+                    <span className="mt-1 block text-[11px] text-natural-400">
+                      {round.guideDocumentId ? `V${round.guideVersion ?? round.roundNumber} · ${round.cardCount} 題` : '尚無大綱'}
+                    </span>
+                  </button>
+                  {isActive && <span className="absolute inset-x-0 bottom-0 h-0.5 bg-sage-500" />}
+                </div>
+              )
+            })}
+          </div>
+        )}
+        <div aria-label="準備模式操作" className="flex shrink-0 items-center border-l border-cream-300 bg-white pl-3">
+          <div className="flex items-center gap-1 rounded-xl border border-cream-300 bg-cream-100/80 p-1">
+            <button
+              type="button"
+              onClick={handleOpenSessionPanel}
+              className="inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-sm font-medium text-natural-500 transition-colors hover:bg-white hover:text-natural-700"
+            >
+              <svg aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.7} d="M8 6h13M8 12h13M8 18h13M3.5 6h.01M3.5 12h.01M3.5 18h.01" />
+              </svg>
+              訪談紀錄
+            </button>
+            {projectId && stakeholderProfileId && !roundsLoading && (
+              <button
+                type="button"
+                onClick={openCreateRound}
+                disabled={roundModalLoading}
+                className="inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-lg px-3 text-sm font-medium text-sage-500 transition-colors hover:bg-white disabled:cursor-wait disabled:opacity-60"
+              >
+                <svg aria-hidden="true" className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.7} d="M12 5v14M5 12h14" />
+                </svg>
+                {roundModalLoading ? '載入中…' : '新增訪談'}
+              </button>
+            )}
+            {activeRound && canContinueActiveRound && (
+              <button
+                type="button"
+                aria-label={`繼續第 ${activeRound.roundNumber} 輪訪談`}
+                title={activeRoundLatestSession?.status === 'ended' ? '延續此輪並保留上次完成狀態' : '回到或延續此輪訪談'}
+                disabled={continuingRoundId !== null}
+                onClick={() => continueRoundInterview(activeRound, activeRoundLatestSession)}
+                className="inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-lg bg-sage-500 px-3.5 text-sm font-medium text-white transition-colors hover:bg-sage-400 disabled:cursor-wait disabled:opacity-60"
+              >
+                <svg aria-hidden="true" className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M5.5 3.75a.75.75 0 0 1 1.14-.64l9 5.75a.75.75 0 0 1 0 1.28l-9 5.75a.75.75 0 0 1-1.14-.64V3.75Z" />
+                </svg>
+                {continuingRoundId === activeRound.id ? '建立中…' : '繼續該輪訪談'}
+              </button>
+            )}
+            {!isFrozen && !canContinueActiveRound && (
+              <button
+                type="button"
+                onClick={() => window.location.assign(`/interview/${documentId}${projectId ? `?projectId=${projectId}` : ''}`)}
+                className="inline-flex h-9 items-center gap-1.5 whitespace-nowrap rounded-lg bg-sage-500 px-3.5 text-sm font-medium text-white transition-colors hover:bg-sage-400"
+              >
+                <svg aria-hidden="true" className="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M5.5 3.75a.75.75 0 0 1 1.14-.64l9 5.75a.75.75 0 0 1 0 1.28l-9 5.75a.75.75 0 0 1-1.14-.64V3.75Z" />
+                </svg>
+                開始訪談
+              </button>
+            )}
+          </div>
         </div>
       </header>
-
-      {/* Interview objective banner */}
-      {plan.interviewObjective && (
-        <div className="border-b border-sage-100 bg-sage-50 px-5 py-2">
-          <p className="text-xs text-sage-500">
-            <span className="font-medium">訪談目標：</span>{plan.interviewObjective}
-          </p>
+      {roundActionError && (
+        <div role="alert" className="shrink-0 border-b border-red-200 bg-red-50 px-5 py-2 text-sm text-red-700">
+          {roundActionError}
         </div>
       )}
 
-      <main className="grid min-h-0 flex-1 grid-cols-[15rem_minmax(0,1fr)] overflow-hidden">
+      <main id="interview-outline-panel" role="tabpanel" className="grid min-h-0 flex-1 grid-cols-[15rem_minmax(0,1fr)] overflow-hidden">
         {/* Left: Theme list */}
         <aside className="min-h-0 overflow-y-auto border-r border-cream-300 bg-white p-3">
           <h2 className="mb-3 px-1 text-sm font-semibold text-natural-600">訪談單元</h2>
@@ -396,6 +623,27 @@ export default function EditorPage() {
         <section className="flex min-h-0 flex-col overflow-y-auto p-5">
           {selectedTheme ? (
             <div className="mx-auto w-full max-w-4xl space-y-5">
+              {roundModalError && (
+                <p className="border-l-2 border-red-300 bg-red-50 px-4 py-2 text-sm text-red-600" role="alert">
+                  {roundModalError}
+                </p>
+              )}
+              {(plan.interviewObjective || isFrozen || isActiveLegacyGuide) && (
+                <div className="border-l-2 border-sage-300 pl-4">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <p className="text-xs font-semibold tracking-wide text-sage-600">本輪訪談目標</p>
+                    {isFrozen && <span className="text-xs text-wood-500">已有訪談紀錄 · 內容唯讀</span>}
+                  </div>
+                  <p className="mt-1 text-sm leading-6 text-natural-500">
+                    {plan.interviewObjective || '此輪未設定訪談目標。'}
+                  </p>
+                  {isActiveLegacyGuide && (
+                    <p className="mt-1 text-xs leading-5 text-wood-500">
+                      此輪為舊資料，建立當時尚未分開保存每輪版本，因此會顯示共用的大綱與問題。
+                    </p>
+                  )}
+                </div>
+              )}
               <div>
                 <h2 className="text-lg font-semibold text-natural-700">
                   {selectedTheme.themeNumber}. {selectedTheme.title}
@@ -434,13 +682,31 @@ export default function EditorPage() {
                     訪談問題 ({themeCards.length})
                   </h3>
                 </div>
-                <CardEditor
-                  cards={themeCards}
-                  onUpdate={updateCard}
-                  onDelete={deleteCard}
-                  onReorder={reorderCards}
-                  onCreate={createCard}
-                />
+                {isFrozen ? (
+                  <div className="divide-y divide-cream-200">
+                    {themeCards.map((card, index) => (
+                      <article key={card.id} className="grid grid-cols-[32px_minmax(0,1fr)] gap-3 px-4 py-4">
+                        <span className="text-xs font-semibold tabular-nums text-natural-300">{String(index + 1).padStart(2, '0')}</span>
+                        <div>
+                          <p className="text-sm font-medium leading-6 text-natural-700">{card.questionText}</p>
+                          {card.coverageRule?.criteria?.length ? (
+                            <ul className="mt-2 space-y-1 text-xs text-natural-400">
+                              {card.coverageRule.criteria.map(criterion => <li key={criterion.id}>— {criterion.description}</li>)}
+                            </ul>
+                          ) : null}
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <CardEditor
+                    cards={themeCards}
+                    onUpdate={updateCard}
+                    onDelete={deleteCard}
+                    onReorder={reorderCards}
+                    onCreate={createCard}
+                  />
+                )}
               </div>
             </div>
           ) : (
@@ -531,6 +797,20 @@ export default function EditorPage() {
             </div>
           </aside>
         </div>
+      )}
+      {roundModalProfile && projectId && (
+        <InterviewRoundModal
+          projectId={projectId}
+          profile={roundModalProfile}
+          sessions={roundModalSessions}
+          initialView="create"
+          initialSeriesId={rounds.find(round => round.id === activeRoundId)?.seriesId}
+          onClose={() => setRoundModalProfile(null)}
+          onGuideCreated={newDocumentId => {
+            setRoundModalProfile(null)
+            navigate(`/editor/${newDocumentId}`)
+          }}
+        />
       )}
     </div>
   )

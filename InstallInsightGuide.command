@@ -103,9 +103,7 @@ main() {
     install_homebrew || return 1
     install_formula node "Node.js" || return 1
     install_formula python@3.11 "Python 3.11" || return 1
-    install_formula poppler "Poppler" || return 1
     install_cask docker-desktop /Applications/Docker.app "Docker Desktop" || return 1
-    install_cask libreoffice /Applications/LibreOffice.app "LibreOffice" || return 1
     echo ""
 
     bold "2. Starting Docker Desktop"

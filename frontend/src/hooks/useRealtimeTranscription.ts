@@ -34,7 +34,6 @@ interface UseRealtimeTranscriptionOptions {
   onTranscriptDelta?: (delta: string, itemId?: string) => void
   onTranscriptCompleted?: (payload: TranscriptCompletedPayload) => void
   onSpeechStarted?: () => void
-  onMediaStreamReady?: (stream: MediaStream) => void
   diagnosticsEnabled?: boolean
   audioProcessingProfile?: AudioProcessingProfile
 }
@@ -82,7 +81,6 @@ export function useRealtimeTranscription({
   onTranscriptDelta,
   onTranscriptCompleted,
   onSpeechStarted,
-  onMediaStreamReady,
   diagnosticsEnabled = false,
   audioProcessingProfile = 'standard',
 }: UseRealtimeTranscriptionOptions = {}) {
@@ -107,7 +105,6 @@ export function useRealtimeTranscription({
     onTranscriptDelta,
     onTranscriptCompleted,
     onSpeechStarted,
-    onMediaStreamReady,
   })
   const {
     snapshot: audioDiagnostics,
@@ -123,9 +120,8 @@ export function useRealtimeTranscription({
       onTranscriptDelta,
       onTranscriptCompleted,
       onSpeechStarted,
-      onMediaStreamReady,
     }
-  }, [onMediaStreamReady, onSpeechStarted, onTranscriptCompleted, onTranscriptDelta])
+  }, [onSpeechStarted, onTranscriptCompleted, onTranscriptDelta])
 
   const cleanupConnection = useCallback(() => {
     observeDiagnosticPeerConnection(null)
@@ -298,7 +294,6 @@ export function useRealtimeTranscription({
         return
       }
 
-      callbacksRef.current.onMediaStreamReady?.(mediaStream)
       observeDiagnosticStream(mediaStream)
 
       const peerConnection = new RTCPeerConnection()

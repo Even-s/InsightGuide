@@ -2,7 +2,18 @@
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Column, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    Column,
+    DateTime,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base
@@ -17,14 +28,28 @@ class InterviewInsightMemo(Base):
     """
 
     __tablename__ = "interview_insight_memos"
+    __table_args__ = (
+        UniqueConstraint("session_id"),
+        Index("ix_insight_memos_session_id", "session_id"),
+        Index("ix_insight_memos_project_id", "project_id"),
+        Index("ix_insight_memos_stakeholder_id", "stakeholder_profile_id"),
+    )
 
     id = Column(String, primary_key=True)
     session_id = Column(
-        String, ForeignKey("interview_sessions.id"), nullable=False, unique=True, index=True
+        String, ForeignKey("interview_sessions.id", ondelete="CASCADE"), nullable=False
     )
-    project_id = Column(String, ForeignKey("projects.id"), nullable=True, index=True)
+    project_id = Column(String, ForeignKey("projects.id", ondelete="SET NULL"), nullable=True)
     stakeholder_profile_id = Column(
-        String, ForeignKey("stakeholder_profiles.id"), nullable=True, index=True
+        String,
+        ForeignKey("stakeholder_profiles.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    interview_series_id = Column(
+        String, ForeignKey("interview_series.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    interview_round_id = Column(
+        String, ForeignKey("interview_rounds.id", ondelete="SET NULL"), nullable=True, index=True
     )
 
     # Section 1: Basic info
@@ -67,3 +92,4 @@ class InterviewInsightMemo(Base):
     session = relationship("InterviewSession", back_populates="insight_memo")
     project = relationship("Project", back_populates="insight_memos")
     stakeholder_profile = relationship("StakeholderProfile")
+    interview_round = relationship("InterviewRound", back_populates="insight_memos")

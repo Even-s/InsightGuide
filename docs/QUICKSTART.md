@@ -7,14 +7,12 @@
 - Node.js 20+
 - Python 3.11+
 - Docker & Docker Compose
-- LibreOffice（文件轉換）
-- Poppler（PDF 處理）
 - OpenAI API Key
 
 macOS 安裝：
 ```bash
-brew install node python@3.11 poppler
-brew install --cask docker-desktop libreoffice
+brew install node python@3.11
+brew install --cask docker-desktop
 ```
 
 ---
@@ -92,7 +90,7 @@ docker-compose up -d
 cd backend
 python3 -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 alembic upgrade head
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8002
 ```

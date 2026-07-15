@@ -54,7 +54,7 @@ export interface InterviewSessionForPrep {
   prepSessionId: string;
   documentId: string;
   userId: string;
-  status: 'idle' | 'preparing' | 'ready' | 'interviewing' | 'paused' | 'transitioning' | 'recovering' | 'ended' | 'failed';
+  status: 'idle' | 'preparing' | 'ready' | 'interviewing' | 'paused' | 'section_transitioning' | 'recovering' | 'ended' | 'failed';
   currentSectionId?: string;
   startedAt?: string;
   endedAt?: string;

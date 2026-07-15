@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { interviewAPI } from '@/api/interview'
 import type { StakeholderProfile, InterviewGuide } from '@/api/projects'
+import type { InterviewSession } from '@/types/interview'
+import { InterviewRoundModal } from './InterviewRoundModal'
 
 interface ProfileCardProps {
   profile: StakeholderProfile
@@ -15,8 +17,8 @@ export function ProfileCard({ profile, projectId, guide, onDelete, onShowGuideSe
   const navigate = useNavigate()
   const guideReady = guide && guide.card_count > 0
   const [latestRecordSessionId, setLatestRecordSessionId] = useState<string | null>(null)
-  const [openingRecord, setOpeningRecord] = useState(false)
-  const [recordError, setRecordError] = useState<string | null>(null)
+  const [sessions, setSessions] = useState<InterviewSession[]>([])
+  const [roundModalView, setRoundModalView] = useState<'create' | 'history' | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -24,6 +26,7 @@ export function ProfileCard({ profile, projectId, guide, onDelete, onShowGuideSe
     interviewAPI.listSessions({ projectId, stakeholderProfileId: profile.id, limit: 50 })
       .then(result => {
         if (cancelled) return
+        setSessions(result.sessions)
         setLatestRecordSessionId(findLatestRecordSessionId(result.sessions, profile.id))
       })
       .catch(() => {
@@ -33,37 +36,8 @@ export function ProfileCard({ profile, projectId, guide, onDelete, onShowGuideSe
     return () => { cancelled = true }
   }, [profile.id, projectId])
 
-  const openLatestInterviewRecord = async () => {
-    if (openingRecord) return
-    if (latestRecordSessionId) {
-      navigate(`/sessions/${latestRecordSessionId}/insight-memo`)
-      return
-    }
-
-    setOpeningRecord(true)
-    setRecordError(null)
-
-    try {
-      const result = await interviewAPI.listSessions({
-        projectId,
-        stakeholderProfileId: profile.id,
-        limit: 50,
-      })
-      const targetSessionId = findLatestRecordSessionId(result.sessions, profile.id)
-
-      if (!targetSessionId) {
-        setRecordError('找不到可開啟的訪談紀錄')
-        return
-      }
-
-      setLatestRecordSessionId(targetSessionId)
-      navigate(`/sessions/${targetSessionId}/insight-memo`)
-    } catch {
-      setRecordError('載入訪談紀錄失敗')
-    } finally {
-      setOpeningRecord(false)
-    }
-  }
+  const recordCount = sessions.filter(session => session.status === 'ended').length
+    || profile.interviewCount
 
   return (
     <div className="motion-surface-in p-3 bg-white rounded-xl border border-cream-200 hover:border-cream-300 shadow-natural transition-colors">
@@ -101,7 +75,7 @@ export function ProfileCard({ profile, projectId, guide, onDelete, onShowGuideSe
               onClick={() => navigate(`/editor/${guide.document_id}`)}
               className="px-2.5 py-1 text-xs bg-sage-400 text-white rounded-lg hover:bg-sage-500"
             >
-              編輯訪談大綱
+              {guide.is_frozen ? '查看目前大綱' : '編輯目前大綱'}
             </button>
           ) : (
             <button
@@ -114,11 +88,10 @@ export function ProfileCard({ profile, projectId, guide, onDelete, onShowGuideSe
           {(latestRecordSessionId || profile.interviewCount > 0) && (
             <button
               type="button"
-              onClick={openLatestInterviewRecord}
-              disabled={openingRecord}
-              className="rounded-lg border border-cream-300 bg-white px-2.5 py-1 text-xs font-medium text-natural-600 hover:border-sage-200 hover:bg-sage-50 hover:text-sage-600 disabled:cursor-wait disabled:opacity-50"
+              onClick={() => setRoundModalView('history')}
+              className="rounded-lg border border-cream-300 bg-white px-2.5 py-1 text-xs font-medium text-natural-600 hover:border-sage-200 hover:bg-sage-50 hover:text-sage-600"
             >
-              {openingRecord ? '載入中…' : '訪談紀錄'}
+              訪談紀錄（{recordCount}）
             </button>
           )}
           <button
@@ -134,8 +107,15 @@ export function ProfileCard({ profile, projectId, guide, onDelete, onShowGuideSe
       {profile.department && (
         <div className="text-xs text-natural-400 mt-1 ml-8">{profile.department}</div>
       )}
-      {recordError && (
-        <p className="mt-2 ml-8 text-xs text-red-500" role="alert">{recordError}</p>
+      {roundModalView && (
+        <InterviewRoundModal
+          projectId={projectId}
+          profile={profile}
+          sessions={sessions}
+          initialView={roundModalView}
+          onClose={() => setRoundModalView(null)}
+          onGuideCreated={documentId => navigate(`/editor/${documentId}`)}
+        />
       )}
     </div>
   )

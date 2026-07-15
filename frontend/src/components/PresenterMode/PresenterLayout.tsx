@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { apiClient } from '@/api/client'
 import { useInterviewSession } from '@/hooks/useInterviewSession'
 import { useResponsiveLayout } from '@/hooks/useResponsiveLayout'
 import { usePresenterSessionRefs } from '@/hooks/usePresenterSessionRefs'
@@ -85,20 +84,16 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
     pendingTranscript,
     transcriptionError,
     isPreparingToPresent,
-    isDiarizing,
     realtimeStatus,
     isRecording,
     isTranscribing,
     realtimeError,
     audioDiagnostics,
-    recordingStartedAtRef,
-    finalRecordingBlobRef,
-    setIsDiarizing,
     setTranscriptionError,
     setIsPreparingToPresent,
     startTranscription,
     stopTranscription,
-    stopRecording,
+    flushTranscriptSaves,
     resetAudioDiagnostics,
   } = useTranscriptProcessing({
     sessionId,
@@ -232,54 +227,19 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
         onStart={handleStartRequested}
         onPause={pausePresenting}
         onEnd={async () => {
-          if (import.meta.env.VITE_DISABLE_DIARIZATION === 'true') {
-            endSession()
-            return
-          }
-
-          setIsDiarizing(true)
           try {
-            const blob = finalRecordingBlobRef.current ?? await stopRecording()
-            finalRecordingBlobRef.current = blob
-
-            if (!blob || blob.size <= 1000) {
-              throw new Error('沒有取得有效的訪談錄音檔，請先確認麥克風已開始錄音再停止訪談。')
-            }
-
-            if (!recordingStartedAtRef.current) {
-              throw new Error('缺少錄音開始時間，無法產生正式逐字稿。')
-            }
-
-            const formData = new FormData()
-            formData.append('audio', blob, 'session_audio.webm')
-            formData.append('recording_started_at', recordingStartedAtRef.current)
-            await apiClient.post(`/api/realtime/diarize/${sessionId}`, formData, {
-              headers: { 'Content-Type': 'multipart/form-data' },
-              timeout: 300000,
-            })
-
-            finalRecordingBlobRef.current = null
+            stopTranscription()
+            await flushTranscriptSaves()
+            await endSession()
             setTranscriptionError(null)
           } catch (err) {
-            console.warn('Diarization failed:', err)
-            setTranscriptionError(err instanceof Error ? err.message : '正式逐字稿產生失敗，訪談尚未結束。')
-            setIsDiarizing(false)
-            return
-          } finally {
-            setIsDiarizing(false)
+            console.warn('Failed to end interview:', err)
+            setTranscriptionError(err instanceof Error ? err.message : '訪談結束失敗，請稍後再試。')
           }
-          endSession()
         }}
       />
 
-      {isDiarizing ? (
-        <div className="flex flex-1 items-center justify-center">
-          <div className="text-center">
-            <div className="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-2 border-cream-300 border-t-sage-400" />
-            <p className="text-base font-medium text-natural-600">正在辨識語者...</p>
-          </div>
-        </div>
-      ) : session?.status === 'ended' ? (
+      {session?.status === 'ended' ? (
         (() => { window.location.assign(`/sessions/${sessionId}/insight-memo`); return null })()
       ) : (
         <>

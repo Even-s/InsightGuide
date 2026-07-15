@@ -1,5 +1,6 @@
 """Interview session management service."""
 
+import copy
 import logging
 import uuid
 from datetime import datetime, timedelta
@@ -13,11 +14,11 @@ from app.core.config import settings
 from app.models.card_coverage_evaluation import CardCoverageEvaluation
 from app.models.card_criterion_evidence import CardCriterionEvidence
 from app.models.document import Document
+from app.models.interview_round import InterviewRound
 from app.models.interview_session import InterviewCardState, InterviewSession
 from app.models.live_utterance import LiveUtterance
 from app.models.prep_session import PrepSession
 from app.models.question_card import QuestionCard
-from app.models.utterance import Utterance
 from app.schemas.interview import (
     InterviewCardStateUpdate,
     InterviewSessionCreate,
@@ -33,6 +34,58 @@ logger = logging.getLogger(__name__)
 
 class InterviewService:
     """Service for interview session operations."""
+
+    @staticmethod
+    def clear_completed_card_routing(
+        session: InterviewSession,
+        card_id: str,
+    ) -> bool:
+        """Release routing pointers once their card has been completed.
+
+        Completed cards are terminal and must not remain the destination for
+        later transcript segments.  Return whether any pointer was cleared so
+        callers can persist the session in their existing transaction.
+        """
+        matches_active = session.active_card_id == card_id
+        matches_hint = session.active_card_hint_id == card_id
+        if not matches_active and not matches_hint:
+            return False
+
+        if matches_active:
+            session.active_card_id = None
+        if matches_hint:
+            session.active_card_hint_id = None
+        session.active_card_source = "completed"
+        session.active_card_confirmed_at = None
+        session.pending_answer_buffer = None
+        return True
+
+    @staticmethod
+    def _build_card_state(
+        session_id: str,
+        card_id: str,
+        source_state: Optional[InterviewCardState] = None,
+    ) -> InterviewCardState:
+        """Create a card state, carrying durable progress for a continued visit."""
+        carried_status = source_state.status if source_state else "pending"
+        if carried_status == "listening":
+            carried_status = "pending"
+        return InterviewCardState(
+            id=f"cardstate_{uuid.uuid4().hex[:12]}",
+            session_id=session_id,
+            question_card_id=card_id,
+            status=carried_status,
+            confidence=source_state.confidence if source_state else None,
+            activation_score=source_state.activation_score if source_state else 0,
+            completion_score=source_state.completion_score if source_state else 0,
+            completion_source=source_state.completion_source if source_state else None,
+            manual_note=source_state.manual_note if source_state else None,
+            answered_at=source_state.answered_at if source_state else None,
+            evidence_transcript=source_state.evidence_transcript if source_state else None,
+            evidence=copy.deepcopy(source_state.evidence) if source_state else None,
+            created_at=datetime.utcnow(),
+            updated_at=datetime.utcnow(),
+        )
 
     def calculate_active_duration(
         self, session: InterviewSession, end_at: Optional[datetime] = None
@@ -109,8 +162,6 @@ class InterviewService:
         session.active_card_source = None
         session.active_card_confirmed_at = None
         session.pending_answer_buffer = None
-        session.card_coverage_status = "provisional"
-
         logger.info(
             "Reset card progress for new interview round session=%s cards=%s",
             session.id,
@@ -169,6 +220,66 @@ class InterviewService:
                 detail="Document ID does not match prep session's document",
             )
 
+        interview_round = None
+        interview_round_id = (
+            getattr(session_data, "interviewRoundId", None) or document.interview_round_id
+        )
+        if interview_round_id:
+            interview_round = (
+                db.query(InterviewRound).filter(InterviewRound.id == interview_round_id).first()
+            )
+            if not interview_round:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Interview round {interview_round_id} not found",
+                )
+            if interview_round.guide_document_id != document.id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Interview round does not use the requested guide document",
+                )
+
+        continuation_source = None
+        continuation_source_id = getattr(session_data, "continueFromSessionId", None)
+        if continuation_source_id:
+            continuation_source = (
+                db.query(InterviewSession)
+                .filter(InterviewSession.id == continuation_source_id)
+                .first()
+            )
+            if not continuation_source:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Source interview session {continuation_source_id} not found",
+                )
+            if continuation_source.user_id != user_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="You don't have permission to continue this interview session",
+                )
+            if (
+                continuation_source.document_id != document.id
+                or continuation_source.interview_round_id != interview_round_id
+            ):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Continuation source must belong to the same interview round and guide",
+                )
+            if continuation_source.status != "ended":
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Only an ended interview session can start a continuation",
+                )
+
+        if document.is_frozen and not continuation_source:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "This interview guide already has a session and is frozen. "
+                    "Create a new interview round instead."
+                ),
+            )
+
         # Verify document is analyzed and ready
         if document.status != "analyzed":
             raise HTTPException(
@@ -186,15 +297,21 @@ class InterviewService:
         ).with_for_update().first()
 
         # Now check for recent sessions with the lock held
+        recent_filters = [
+            InterviewSession.prep_session_id == session_data.prepSessionId,
+            InterviewSession.user_id == user_id,
+            InterviewSession.created_at >= recent_threshold,
+        ]
+        if continuation_source:
+            recent_filters.extend(
+                [
+                    InterviewSession.id != continuation_source.id,
+                    InterviewSession.continued_from_session_id == continuation_source.id,
+                ]
+            )
         recent_session = (
             db.query(InterviewSession)
-            .filter(
-                and_(
-                    InterviewSession.prep_session_id == session_data.prepSessionId,
-                    InterviewSession.user_id == user_id,
-                    InterviewSession.created_at >= recent_threshold,
-                )
-            )
+            .filter(and_(*recent_filters))
             .order_by(desc(InterviewSession.created_at))
             .first()
         )
@@ -223,6 +340,8 @@ class InterviewService:
                 self._end_current_pause(old_session, ended_at)
                 old_session.status = "ended"
                 old_session.ended_at = ended_at
+                if old_session.interview_round:
+                    old_session.interview_round.status = "completed"
             db.commit()
             logger.info(
                 f"Auto-ended {len(active_sessions)} old sessions for prep session {session_data.prepSessionId}"
@@ -239,33 +358,80 @@ class InterviewService:
             user_id=user_id,
             project_id=project_id,
             stakeholder_profile_id=stakeholder_profile_id,
+            interview_round_id=interview_round_id,
+            continued_from_session_id=(continuation_source.id if continuation_source else None),
             status="idle",
             created_at=datetime.utcnow(),
         )
 
         db.add(session)
+        # Persist the parent row before copying continuation card/evidence rows.
+        # These models are linked by scalar foreign-key IDs rather than ORM
+        # relationships, so SQLAlchemy cannot otherwise guarantee insert order.
+        db.flush([session])
+        document.is_frozen = True
+        if interview_round:
+            interview_round.status = "scheduled"
 
         # Initialize card states for all question cards in the document
         question_cards = (
             db.query(QuestionCard).filter(QuestionCard.document_id == session_data.documentId).all()
         )
 
-        for card in question_cards:
-            card_state = InterviewCardState(
-                id=f"cardstate_{uuid.uuid4().hex[:12]}",
-                session_id=session_id,
-                question_card_id=card.id,
-                status="pending",
-                created_at=datetime.utcnow(),
-                updated_at=datetime.utcnow(),
+        source_card_states = {
+            state.question_card_id: state
+            for state in (
+                db.query(InterviewCardState)
+                .filter(InterviewCardState.session_id == continuation_source.id)
+                .all()
+                if continuation_source
+                else []
             )
+        }
+
+        for card in question_cards:
+            source_state = source_card_states.get(card.id)
+            card_state = self._build_card_state(session_id, card.id, source_state)
             db.add(card_state)
+
+        if continuation_source:
+            source_criterion_evidence = (
+                db.query(CardCriterionEvidence)
+                .filter(CardCriterionEvidence.session_id == continuation_source.id)
+                .all()
+            )
+            for evidence in source_criterion_evidence:
+                db.add(
+                    CardCriterionEvidence(
+                        id=f"cev_{uuid.uuid4().hex[:12]}",
+                        session_id=session_id,
+                        card_id=evidence.card_id,
+                        criterion_id=evidence.criterion_id,
+                        utterance_id=None,
+                        evaluation_turn_text=evidence.evaluation_turn_text,
+                        status=evidence.status,
+                        evidence_quote=evidence.evidence_quote,
+                        normalized_value=evidence.normalized_value,
+                        evaluator_confidence=evidence.evaluator_confidence,
+                        reason=evidence.reason,
+                        model=evidence.model,
+                        evaluation_seq=evidence.evaluation_seq,
+                        created_at=datetime.utcnow(),
+                    )
+                )
 
         db.commit()
         db.refresh(session)
 
+        if interview_round_id:
+            from app.services.interview_round_aggregate_service import (
+                interview_round_aggregate_service,
+            )
+
+            interview_round_aggregate_service.invalidate(db, interview_round_id)
+
         # Auto-apply role filter if stakeholder is set
-        if stakeholder_profile_id:
+        if stakeholder_profile_id and not continuation_source:
             try:
                 from app.services.role_filter_service import role_filter_service
 
@@ -280,6 +446,7 @@ class InterviewService:
         logger.info(
             f"Created interview session {session_id} for document {session_data.documentId} "
             f"with {len(question_cards)} question cards"
+            + (f" continued from {continuation_source.id}" if continuation_source else "")
         )
 
         return session
@@ -311,11 +478,16 @@ class InterviewService:
             old_status = session.status
             now = datetime.utcnow()
 
-            if update_data.status == "interviewing" and old_status in [
-                "idle",
-                "ready",
-                "preparing",
-            ]:
+            if (
+                update_data.status == "interviewing"
+                and not session.continued_from_session_id
+                and old_status
+                in [
+                    "idle",
+                    "ready",
+                    "preparing",
+                ]
+            ):
                 self._reset_card_progress_for_new_round(db, session)
 
             session.status = update_data.status
@@ -331,12 +503,16 @@ class InterviewService:
                     session.ended_at = None
                 elif old_status == "paused":
                     self._end_current_pause(session, now)
+                if session.interview_round:
+                    session.interview_round.status = "interviewing"
             elif update_data.status == "paused":
                 if session.started_at and old_status != "paused" and not session.paused_at:
                     session.paused_at = now
             elif update_data.status == "ended" and not session.ended_at:
                 self._end_current_pause(session, now)
                 session.ended_at = now
+                if session.interview_round:
+                    session.interview_round.status = "completed"
 
         if update_data.currentSectionId is not None:
             new_id = update_data.currentSectionId
@@ -460,8 +636,8 @@ class InterviewService:
     ) -> LiveUtterance:
         """Create a new live utterance from Realtime API in an interview session.
 
-        Phase 1: This now writes to live_utterances instead of utterances.
-        Live utterances are used for provisional card coverage during the interview.
+        Realtime utterances are the canonical transcript used during and after
+        the interview.
         """
         session = self.get_session(db, session_id)
 
@@ -476,7 +652,7 @@ class InterviewService:
             id=utterance_id,
             session_id=session_id,
             realtime_event_id=utterance_data.realtimeItemId,
-            speaker=utterance_data.speaker or "unknown",
+            speaker="realtime",
             transcript=utterance_data.transcript,
             started_at=utterance_data.startedAt,
             ended_at=utterance_data.endedAt,
@@ -500,45 +676,19 @@ class InterviewService:
         db: Session,
         session_id: str,
         section_id: Optional[str] = None,
-        speaker: Optional[str] = None,
         limit: int = 100,
     ) -> list:
         """Get utterances for a session.
 
-        Priority: final_utterances > live_utterances > old utterances table.
+        Realtime transcript segments are the only canonical source.
         """
         self.get_session(db, session_id)
 
-        # Try final_utterances first (post-diarization, official)
-        from app.models.final_utterance import FinalUtterance
-
-        finals = (
-            db.query(FinalUtterance)
-            .filter(FinalUtterance.session_id == session_id)
-            .order_by(asc(FinalUtterance.sequence_index))
-            .limit(limit)
-            .all()
+        query = db.query(LiveUtterance).filter(
+            LiveUtterance.session_id == session_id,
+            LiveUtterance.is_partial == False,
         )
-        if finals:
-            return finals
-
-        # Fall back to live_utterances
-        from app.models.live_utterance import LiveUtterance
-
-        query = db.query(LiveUtterance).filter(LiveUtterance.session_id == session_id)
-        if speaker:
-            query = query.filter(LiveUtterance.speaker == speaker)
-        lives = query.order_by(asc(LiveUtterance.sequence_index)).limit(limit).all()
-        if lives:
-            return lives
-
-        # Legacy fallback
-        query = db.query(Utterance).filter(Utterance.session_id == session_id)
-        if section_id:
-            query = query.filter(Utterance.section_id == section_id)
-        if speaker:
-            query = query.filter(Utterance.speaker == speaker)
-        return query.order_by(asc(Utterance.created_at)).limit(limit).all()
+        return query.order_by(asc(LiveUtterance.sequence_index)).limit(limit).all()
 
     def list_sessions(
         self,
@@ -548,8 +698,9 @@ class InterviewService:
         offset: int = 0,
         project_id: Optional[str] = None,
         document_id: Optional[str] = None,
+        stakeholder_profile_id: Optional[str] = None,
     ) -> InterviewSessionListResponse:
-        """List interview sessions for a user, optionally filtered by project or document."""
+        """List sessions with project, document, and stakeholder filters."""
         # Query sessions with document information
         query = (
             db.query(InterviewSession, Document.title.label("document_title"))
@@ -562,6 +713,9 @@ class InterviewService:
 
         if document_id:
             query = query.filter(InterviewSession.document_id == document_id)
+
+        if stakeholder_profile_id:
+            query = query.filter(InterviewSession.stakeholder_profile_id == stakeholder_profile_id)
 
         # Get total count
         total = query.count()
@@ -594,6 +748,8 @@ class InterviewService:
                 userId=session.user_id,
                 projectId=session.project_id,
                 stakeholderProfileId=session.stakeholder_profile_id,
+                interviewRoundId=session.interview_round_id,
+                continuedFromSessionId=session.continued_from_session_id,
                 status=session.status,
                 currentSectionId=session.current_section_id,
                 startedAt=session.started_at,
@@ -615,11 +771,17 @@ class InterviewService:
         """Delete an interview session and all related data."""
         session = self.get_session(db, session_id)
 
+        if session.interview_round_id:
+            from app.services.interview_round_aggregate_service import (
+                interview_round_aggregate_service,
+            )
+
+            interview_round_aggregate_service.invalidate(
+                db, session.interview_round_id, commit=False
+            )
+
         # Delete all card states
         db.query(InterviewCardState).filter(InterviewCardState.session_id == session_id).delete()
-
-        # Delete all utterances
-        db.query(Utterance).filter(Utterance.session_id == session_id).delete()
 
         # Delete the session
         db.delete(session)

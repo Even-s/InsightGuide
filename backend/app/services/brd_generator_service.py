@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 
 from app.models.brd import BRDDraft, BRDStatus, Requirement, RequirementPriority, RequirementType
 from app.models.interview_session import InterviewCardState, InterviewSession
-from app.models.utterance import Utterance
+from app.models.live_utterance import LiveUtterance
 from app.services.openai_service import openai_service
 
 logger = logging.getLogger(__name__)
@@ -146,9 +146,12 @@ class BRDGeneratorService:
 
         # Get all utterances
         utterances = (
-            db.query(Utterance)
-            .filter(Utterance.session_id == session.id)
-            .order_by(Utterance.created_at)
+            db.query(LiveUtterance)
+            .filter(
+                LiveUtterance.session_id == session.id,
+                LiveUtterance.is_partial == False,
+            )
+            .order_by(LiveUtterance.sequence_index)
             .all()
         )
 

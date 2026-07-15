@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { interviewAPI } from '@/api/interview'
 import { useRealtimeTranscription } from '@/hooks/useRealtimeTranscription'
-import { useMediaRecorder } from '@/hooks/useMediaRecorder'
 import type { PresenterSessionRefs } from './usePresenterSessionRefs'
 import { simplifiedToTraditional } from '@/utils/chineseConverter'
 import { findAskedCard, getActiveCardId } from '@/components/PresenterMode/presenterUtils'
@@ -24,21 +23,17 @@ export interface TranscriptProcessingResult {
   pendingTranscript: string
   transcriptionError: string | null
   isPreparingToPresent: boolean
-  isDiarizing: boolean
   realtimeStatus: string
   isRecording: boolean
   isTranscribing: boolean
   realtimeError: Error | null
   audioDiagnostics: AudioDiagnosticsSnapshot
-  recordingStartedAtRef: React.MutableRefObject<string | null>
-  finalRecordingBlobRef: React.MutableRefObject<Blob | null>
-  setIsDiarizing: (v: boolean) => void
   setTranscriptionError: (v: string | null) => void
   setIsPreparingToPresent: (v: boolean) => void
   handleStartRequested: () => Promise<void>
   startTranscription: () => void
   stopTranscription: () => void
-  stopRecording: () => Promise<Blob | null>
+  flushTranscriptSaves: () => Promise<void>
   resetAudioDiagnostics: () => void
 }
 
@@ -79,18 +74,14 @@ export function useTranscriptProcessing({
   const [transcriptHistory, setTranscriptHistory] = useState<string[]>([])
   const [pendingTranscript, setPendingTranscript] = useState('')
   const [transcriptionError, setTranscriptionError] = useState<string | null>(null)
-  const [isDiarizing, setIsDiarizing] = useState(false)
   const [isPreparingToPresent, setIsPreparingToPresent] = useState(false)
-
-  const { start: startRecording, stop: stopRecording } = useMediaRecorder()
-  const recordingStartedAtRef = useRef<string | null>(null)
-  const finalRecordingBlobRef = useRef<Blob | null>(null)
 
   const partialTranscriptRef = useRef('')
   const partialMatchTimeoutRef = useRef<number | null>(null)
   const partialMatchInFlightRef = useRef(false)
   const pendingPartialMatchRef = useRef<string | null>(null)
   const lastPartialMatchTextRef = useRef('')
+  const pendingSavePromisesRef = useRef(new Set<Promise<unknown>>())
 
   useEffect(() => {
     return () => {
@@ -162,7 +153,7 @@ export function useTranscriptProcessing({
       partialMatchTimeoutRef.current = null
     }
 
-    if (!text || !activeId || !refs.isPresentingRef.current) {
+    if (!text || !refs.isPresentingRef.current) {
       setPendingTranscript('')
       return
     }
@@ -176,12 +167,14 @@ export function useTranscriptProcessing({
     setPendingTranscript('')
     setTranscriptionError(null)
 
-    const askedCard = findAskedCard(text, refs.cardStatesRef.current, activeId)
+    const askedCard = activeId
+      ? findAskedCard(text, refs.cardStatesRef.current, activeId)
+      : null
 
-    interviewAPI.createUtterance(
+    const savePromise = interviewAPI.createUtterance(
       sessionId,
       text,
-      activeId,
+      activeId ?? undefined,
       payload.itemId,
       payload.startedAt,
       payload.endedAt,
@@ -196,7 +189,15 @@ export function useTranscriptProcessing({
         console.error('Failed to save utterance:', err)
         setTranscriptionError(err instanceof Error ? err.message : 'Failed to save transcript')
       })
+      .finally(() => {
+        pendingSavePromisesRef.current.delete(savePromise)
+      })
+    pendingSavePromisesRef.current.add(savePromise)
   }, [sessionId, refs, candidateCards.length, onBufferedAnswer])
+
+  const flushTranscriptSaves = useCallback(async () => {
+    await Promise.allSettled(Array.from(pendingSavePromisesRef.current))
+  }, [])
 
   const {
     status: realtimeStatus,
@@ -210,11 +211,6 @@ export function useTranscriptProcessing({
   } = useRealtimeTranscription({
     diagnosticsEnabled,
     audioProcessingProfile,
-    onMediaStreamReady: (stream) => {
-      if (import.meta.env.VITE_DISABLE_DIARIZATION === 'true') return
-      recordingStartedAtRef.current = recordingStartedAtRef.current ?? new Date().toISOString()
-      startRecording(stream)
-    },
     onSpeechStarted: () => {
       setTranscriptionError(null)
       setPendingTranscript('正在聽取...')
@@ -256,21 +252,17 @@ export function useTranscriptProcessing({
     pendingTranscript,
     transcriptionError,
     isPreparingToPresent,
-    isDiarizing,
     realtimeStatus,
     isRecording,
     isTranscribing,
     realtimeError,
     audioDiagnostics,
-    recordingStartedAtRef,
-    finalRecordingBlobRef,
-    setIsDiarizing,
     setTranscriptionError,
     setIsPreparingToPresent,
     handleStartRequested,
     startTranscription,
     stopTranscription,
-    stopRecording,
+    flushTranscriptSaves,
     resetAudioDiagnostics,
   }
 }

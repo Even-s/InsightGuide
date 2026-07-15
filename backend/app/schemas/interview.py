@@ -13,6 +13,10 @@ class InterviewSessionSchema(BaseModel):
     prepSessionId: str
     documentId: str
     userId: str
+    projectId: Optional[str] = None
+    stakeholderProfileId: Optional[str] = None
+    interviewRoundId: Optional[str] = None
+    continuedFromSessionId: Optional[str] = None
     status: Literal[
         "idle",
         "preparing",
@@ -46,6 +50,8 @@ class InterviewSessionCreate(BaseModel):
     documentId: str
     projectId: Optional[str] = None
     stakeholderProfileId: Optional[str] = None
+    interviewRoundId: Optional[str] = None
+    continueFromSessionId: Optional[str] = None
 
 
 class InterviewSessionUpdate(BaseModel):
@@ -122,7 +128,7 @@ class UtteranceSchema(BaseModel):
     id: str
     sessionId: str
     sectionId: Optional[str] = None
-    speaker: Literal["interviewer", "interviewee"] = "interviewee"
+    speaker: Literal["realtime", "interviewer", "interviewee"] = "realtime"
     transcript: str
     startedAt: Optional[datetime] = None
     endedAt: Optional[datetime] = None
@@ -139,7 +145,7 @@ class UtteranceCreate(BaseModel):
     transcript: str
     themeId: Optional[str] = None
     sectionId: Optional[str] = None
-    speaker: Literal["interviewer", "interviewee"] = "interviewee"
+    speaker: Literal["realtime", "interviewer", "interviewee"] = "realtime"
     startedAt: Optional[datetime] = None
     endedAt: Optional[datetime] = None
     realtimeItemId: Optional[str] = None
@@ -152,7 +158,7 @@ class PartialTranscriptMatchCreate(BaseModel):
     transcript: str = Field(min_length=1, max_length=4000)
     themeId: Optional[str] = None
     sectionId: Optional[str] = None
-    speaker: Literal["interviewer", "interviewee"] = "interviewee"
+    speaker: Literal["realtime", "interviewer", "interviewee"] = "realtime"
     realtimeItemId: Optional[str] = None
     activeCardId: Optional[str] = None
 
@@ -167,6 +173,8 @@ class InterviewSessionWithDocument(BaseModel):
     userId: str
     projectId: Optional[str] = None
     stakeholderProfileId: Optional[str] = None
+    interviewRoundId: Optional[str] = None
+    continuedFromSessionId: Optional[str] = None
     status: Literal[
         "idle",
         "preparing",

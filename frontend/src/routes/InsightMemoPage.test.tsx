@@ -29,6 +29,8 @@ const memo: InsightMemo = {
   sessionId: 'session-1',
   projectId: 'project-1',
   stakeholderProfileId: 'stakeholder-1',
+  interviewSeriesId: 'series-1',
+  interviewRoundId: 'round-1',
   interviewDate: '2026-07-14T09:30:00Z',
   interviewDurationMinutes: 32,
   topicsCovered: ['掛號來源', '資料確認流程'],
@@ -81,6 +83,7 @@ const secondMemo: InsightMemo = {
   interviewDate: '2026-07-15T02:00:00Z',
   interviewDurationMinutes: 18,
   topicsCovered: ['尖峰時段處理'],
+  interviewRoundId: 'round-2',
 }
 
 function renderPage() {
@@ -101,7 +104,7 @@ describe('InsightMemoPage', () => {
     mocks.apiGet.mockImplementation((url: string) => {
       if (url.includes('/utterances')) {
         return Promise.resolve({
-          data: [{ speaker: 'interviewer', transcript: '目前通常會先查哪些資料？' }],
+          data: [{ transcript: '目前通常會先查哪些資料？' }],
         })
       }
       return Promise.resolve({ data: { memos: [memo] } })
@@ -132,7 +135,8 @@ describe('InsightMemoPage', () => {
 
     expect(await screen.findByRole('heading', { name: '完整逐字稿' })).toBeInTheDocument()
     expect(screen.getByText('目前通常會先查哪些資料？')).toBeInTheDocument()
-    expect(screen.getAllByText('訪談者').length).toBeGreaterThan(0)
+    expect(screen.queryByText('訪談者')).not.toBeInTheDocument()
+    expect(screen.queryByText('受訪者')).not.toBeInTheDocument()
   })
 
   it('separates merged interview transcripts into session pages', async () => {
@@ -140,12 +144,12 @@ describe('InsightMemoPage', () => {
     mocks.apiGet.mockImplementation((url: string) => {
       if (url.includes('/session-1/utterances')) {
         return Promise.resolve({
-          data: [{ id: 'utterance-1', speaker: 'interviewer', transcript: '第一場逐字稿內容' }],
+          data: [{ id: 'utterance-1', transcript: '第一場逐字稿內容' }],
         })
       }
       if (url.includes('/session-2/utterances')) {
         return Promise.resolve({
-          data: [{ id: 'utterance-2', speaker: 'interviewee', transcript: '第二場逐字稿內容' }],
+          data: [{ id: 'utterance-2', transcript: '第二場逐字稿內容' }],
         })
       }
       return Promise.resolve({ data: { memos: [memo, secondMemo] } })
@@ -184,5 +188,29 @@ describe('InsightMemoPage', () => {
     await user.click(within(sessionNavigation).getByRole('button', { name: /第 2 場/ }))
 
     expect(await screen.findByText('此場訪談沒有可顯示的逐字稿。')).toBeInTheDocument()
+  })
+
+  it('does not merge another topic series from the same stakeholder', async () => {
+    const otherSeriesMemo: InsightMemo = {
+      ...secondMemo,
+      id: 'memo-other-series',
+      sessionId: 'session-other-series',
+      interviewSeriesId: 'series-2',
+      topicsCovered: ['完全不同的新主題'],
+      painPoints: [{
+        description: '不應出現在目前系列的洞察',
+        evidence_quote: '',
+        affected_roles: [],
+        severity: 'low',
+      }],
+    }
+    mocks.apiGet.mockResolvedValue({ data: { memos: [memo, secondMemo, otherSeriesMemo] } })
+
+    renderPage()
+
+    await screen.findByRole('heading', { name: '訪談紀錄' })
+    expect(screen.getByText('尖峰時段處理')).toBeInTheDocument()
+    expect(screen.queryByText('完全不同的新主題')).not.toBeInTheDocument()
+    expect(screen.queryByText('不應出現在目前系列的洞察')).not.toBeInTheDocument()
   })
 })

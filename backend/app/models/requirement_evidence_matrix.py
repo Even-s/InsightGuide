@@ -2,7 +2,17 @@
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import (
+    JSON,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base
@@ -17,9 +27,13 @@ class RequirementEvidenceMatrix(Base):
     """
 
     __tablename__ = "requirement_evidence_matrices"
+    __table_args__ = (
+        UniqueConstraint("project_id"),
+        Index("ix_evidence_matrices_project_id", "project_id"),
+    )
 
     id = Column(String, primary_key=True)
-    project_id = Column(String, ForeignKey("projects.id"), nullable=False, unique=True, index=True)
+    project_id = Column(String, ForeignKey("projects.id", ondelete="CASCADE"), nullable=False)
 
     status = Column(String, nullable=False, default="draft")
     last_updated_at = Column(DateTime, nullable=True)
@@ -44,7 +58,10 @@ class EvidenceMatrixEntry(Base):
 
     id = Column(String, primary_key=True)
     matrix_id = Column(
-        String, ForeignKey("requirement_evidence_matrices.id"), nullable=False, index=True
+        String,
+        ForeignKey("requirement_evidence_matrices.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
     )
 
     requirement_candidate = Column(Text, nullable=False)

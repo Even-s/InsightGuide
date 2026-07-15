@@ -2,7 +2,7 @@
 
 Used by: /api/interview-sessions/{id}/outputs/generate (InterviewReportPage)
          /api/projects/{id}/generate-brd (project-level BRD)
-Purpose: Generates BRD from card coverage evidence + transcript + Q/A reconstruction.
+Purpose: Generates BRD from card coverage evidence and the Realtime transcript.
 Produces markdown reports with theme-organized sections and open issues.
 
 See also: brd_generator_service.py — structured requirement extraction
@@ -12,7 +12,7 @@ After an interview session ends, this service generates:
 1. A BRD document based on structured evidence from card states
 2. A full interview transcript organized by theme
 
-Phase 1: Updated to read from final_utterances when available, with fallback to utterances.
+Realtime transcript segments are the canonical source for reports and analysis.
 """
 
 import logging
@@ -29,13 +29,11 @@ import uuid
 logger = logging.getLogger(__name__)
 
 from app.models.brd import BRDDraft, BRDStatus
-from app.models.card_coverage_evaluation import CardCoverageEvaluation
 from app.models.document import Document
-from app.models.final_utterance import FinalUtterance
 from app.models.interview_session import InterviewCardState, InterviewSession
 from app.models.interview_theme import InterviewTheme
+from app.models.live_utterance import LiveUtterance
 from app.models.question_card import QuestionCard
-from app.models.utterance import Utterance
 
 
 class BRDGenerationService:
@@ -76,79 +74,28 @@ class BRDGenerationService:
             .all()
         )
 
-        # Phase 2: Prefer final card coverage evaluations if available
-        final_evaluations = (
-            db.query(CardCoverageEvaluation)
-            .filter(
-                CardCoverageEvaluation.session_id == session_id,
-                CardCoverageEvaluation.basis_type == "final",
-            )
-            .order_by(CardCoverageEvaluation.evaluation_seq.desc())
-            .all()
-        )
-
-        # Group by card_id and take the latest evaluation_seq for each card
-        final_eval_by_card_id = {}
-        for eval_rec in final_evaluations:
-            if eval_rec.card_id not in final_eval_by_card_id:
-                final_eval_by_card_id[eval_rec.card_id] = eval_rec
-
-        # Fallback to InterviewCardState for backwards compatibility
+        # Card states are updated directly from Realtime transcript segments.
         card_states = (
             db.query(InterviewCardState).filter(InterviewCardState.session_id == session_id).all()
         )
         state_by_card_id = {cs.question_card_id: cs for cs in card_states}
 
-        # Phase 1: Load utterances - prefer final_utterances if available, fallback to old utterances
-        final_utterances = (
-            db.query(FinalUtterance)
-            .filter(FinalUtterance.session_id == session_id)
-            .order_by(FinalUtterance.sequence_index)
+        utterances = (
+            db.query(LiveUtterance)
+            .filter(
+                LiveUtterance.session_id == session_id,
+                LiveUtterance.is_partial == False,
+            )
+            .order_by(LiveUtterance.sequence_index)
             .all()
         )
 
-        if final_utterances:
-            utterances = final_utterances
-            logger.info(f"Using {len(final_utterances)} final utterances for BRD generation")
-        else:
-            # Fallback: try live_utterances, then old utterances
-            from app.models.live_utterance import LiveUtterance
-
-            live_utts = (
-                db.query(LiveUtterance)
-                .filter(
-                    LiveUtterance.session_id == session_id,
-                    LiveUtterance.is_partial == False,
-                )
-                .order_by(LiveUtterance.created_at)
-                .all()
-            )
-            if live_utts:
-                utterances = live_utts
-                logger.info(
-                    f"Using {len(live_utts)} live utterances for BRD generation (no final yet)"
-                )
-            else:
-                old_utterances = (
-                    db.query(Utterance)
-                    .filter(Utterance.session_id == session_id)
-                    .order_by(Utterance.created_at)
-                    .all()
-                )
-                utterances = old_utterances
-                logger.info(
-                    f"Using {len(old_utterances)} old utterances for BRD generation (backwards compat)"
-                )
-                if not old_utterances:
-                    logger.warning(f"No utterances found for session {session_id}")
+        logger.info(f"Using {len(utterances)} Realtime utterances for BRD generation")
 
         # Build structured data
-        brd_sections = self._build_brd_sections(themes, state_by_card_id, final_eval_by_card_id, db)
+        brd_sections = self._build_brd_sections(themes, state_by_card_id, db)
         open_issues = self._build_open_issues(themes, state_by_card_id, db)
         transcript_md = self._build_transcript(utterances, themes)
-
-        # Phase 4: Build Q/A report
-        qa_md, question_count = self._build_qa_report(db, session_id)
 
         # Use GPT to rewrite raw evidence into formal BRD paragraphs
         brd_sections = self._rewrite_sections_with_ai(
@@ -167,10 +114,6 @@ class BRDGenerationService:
             "transcript": {
                 "markdown": transcript_md,
                 "utteranceCount": len(utterances),
-            },
-            "qa": {
-                "markdown": qa_md,
-                "questionCount": question_count,
             },
         }
 
@@ -198,7 +141,6 @@ class BRDGenerationService:
         self,
         themes: List[InterviewTheme],
         state_by_card_id: Dict,
-        final_eval_by_card_id: Dict,
         db: Session,
     ) -> List[Dict[str, Any]]:
         """Build BRD content sections from theme/card evidence."""
@@ -213,18 +155,9 @@ class BRDGenerationService:
             )
 
             for card in cards:
-                # Phase 2: Use final evaluation if available, otherwise fall back to InterviewCardState
-                final_eval = final_eval_by_card_id.get(card.id)
                 state = state_by_card_id.get(card.id)
 
-                if final_eval:
-                    # Use final evaluation (basis_type='final')
-                    status = final_eval.state
-                    confidence = float(final_eval.confidence) if final_eval.confidence else None
-                    # TODO: Phase 3 will extract evidence quotes from final_eval.evidence
-                    evidence_text = state.evidence_transcript if state else ""
-                elif state:
-                    # Fall back to old InterviewCardState for backwards compatibility
+                if state:
                     status = state.status
                     confidence = float(state.confidence) if state.confidence else None
                     evidence_text = state.evidence_transcript or ""
@@ -325,10 +258,7 @@ class BRDGenerationService:
         return issues
 
     def _build_transcript(self, utterances, themes: List[InterviewTheme]) -> str:
-        """Build formatted transcript markdown.
-
-        Handles both FinalUtterance and Utterance objects for backwards compatibility.
-        """
+        """Build a speaker-neutral transcript from chronological segments."""
         if not utterances:
             return "# 訪談逐字稿\n\n（本次訪談無轉錄內容）\n"
 
@@ -350,13 +280,10 @@ class BRDGenerationService:
         if total_duration:
             lines.append(f"| 訪談時長 | {total_duration} |")
 
-        # For FinalUtterance, use theme_id; for Utterance, use section_id
         theme_ids = set()
         for u in utterances:
-            if hasattr(u, "theme_id") and u.theme_id:
+            if getattr(u, "theme_id", None):
                 theme_ids.add(u.theme_id)
-            elif hasattr(u, "section_id") and u.section_id:
-                theme_ids.add(u.section_id)
         lines.append(f"| 訪談單元數 | {len(theme_ids)} |")
         lines.append("")
         lines.append("---")
@@ -364,27 +291,13 @@ class BRDGenerationService:
 
         current_theme_title = None
         for utt in utterances:
-            # Handle both FinalUtterance (theme_id) and Utterance (section_id)
-            theme_id = getattr(utt, "theme_id", None) or getattr(utt, "section_id", None)
+            theme_id = getattr(utt, "theme_id", None)
             theme_title = theme_map.get(theme_id, "未分類")
 
             if theme_title != current_theme_title:
                 current_theme_title = theme_title
                 lines.append(f"## {current_theme_title}")
                 lines.append("")
-
-            # For FinalUtterance, prefer speaker_display_name; otherwise parse speaker
-            if hasattr(utt, "speaker_display_name") and utt.speaker_display_name:
-                speaker_label = utt.speaker_display_name
-            else:
-                raw = getattr(utt, "speaker_label", None) or getattr(utt, "speaker", None) or "?"
-                if raw.startswith("speaker_"):
-                    try:
-                        speaker_label = f"Speaker {int(raw.split('_')[1]) + 1}"
-                    except (IndexError, ValueError):
-                        speaker_label = raw
-                else:
-                    speaker_label = f"Speaker ({raw})"
 
             time_str = (
                 utt.created_at.replace(tzinfo=timezone.utc)
@@ -393,102 +306,13 @@ class BRDGenerationService:
                 if utt.created_at
                 else ""
             )
-            lines.append(f"**{speaker_label}** `{time_str}`")
-            lines.append("")
+            if time_str:
+                lines.append(f"`{time_str}`")
+                lines.append("")
             lines.append(f"> {utt.transcript}")
             lines.append("")
 
         return "\n".join(lines)
-
-    def _build_qa_report(self, db: Session, session_id: str) -> tuple[str, int]:
-        """Build Q/A report markdown.
-
-        Returns:
-            Tuple of (markdown_string, question_count)
-        """
-        from app.models.question_answer import QuestionAnswer
-        from app.models.question_instance import QuestionInstance
-
-        questions = (
-            db.query(QuestionInstance)
-            .filter(QuestionInstance.session_id == session_id)
-            .order_by(QuestionInstance.sequence_index)
-            .all()
-        )
-
-        if not questions:
-            return "## 每題回答整理\n\n（本次訪談無偵測到問答結構）\n", 0
-
-        lines = []
-        lines.append("# 每題回答整理")
-        lines.append("")
-        lines.append("本節整理訪談中實際被問出的問題與受訪者的回答。")
-        lines.append("")
-        lines.append("---")
-        lines.append("")
-
-        for idx, question in enumerate(questions, 1):
-            # Load answer
-            answer = (
-                db.query(QuestionAnswer)
-                .filter(QuestionAnswer.question_instance_id == question.id)
-                .first()
-            )
-
-            # Question header
-            q_type_label = {
-                "main_question": "主要問題",
-                "follow_up": "追問",
-                "clarification": "釐清",
-            }.get(question.question_type, "")
-
-            lines.append(f"### Q{idx}. {question.asked_text}")
-            if q_type_label:
-                lines.append(f"*{q_type_label}*")
-            lines.append("")
-
-            if not answer:
-                lines.append("**回答狀態**")
-                lines.append("未回答")
-                lines.append("")
-                continue
-
-            # Answer summary
-            if answer.answer_summary:
-                lines.append("**回答摘要**")
-                lines.append("")
-                lines.append(answer.answer_summary)
-                lines.append("")
-
-            # Evidence quotes
-            if answer.evidence_quotes and len(answer.evidence_quotes) > 0:
-                lines.append("**原文依據**")
-                lines.append("")
-                for quote_obj in answer.evidence_quotes[:3]:
-                    quote = (
-                        quote_obj.get("quote", "")
-                        if isinstance(quote_obj, dict)
-                        else str(quote_obj)
-                    )
-                    if quote:
-                        lines.append(f"> {quote}")
-                lines.append("")
-
-            # Answer status
-            status_label = {
-                "answered": "已回答",
-                "partially_answered": "部分回答",
-                "not_answered": "未回答",
-                "unclear": "不清楚",
-            }.get(answer.answer_status, "未知")
-
-            lines.append(f"**回答狀態**")
-            lines.append(status_label)
-            lines.append("")
-            lines.append("---")
-            lines.append("")
-
-        return "\n".join(lines), len(questions)
 
     def _rewrite_sections_with_ai(
         self,
@@ -614,7 +438,6 @@ class BRDGenerationService:
         Uses Evidence Matrix validated entries + all Insight Memos
         instead of a single session's card states.
         """
-        from app.models.interview_insight_memo import InterviewInsightMemo
         from app.models.project import Project
         from app.models.requirement_evidence_matrix import (
             EvidenceMatrixEntry,
@@ -632,6 +455,10 @@ class BRDGenerationService:
             .filter(RequirementEvidenceMatrix.project_id == project_id)
             .first()
         )
+        if not matrix or matrix.status != "ready":
+            raise ValueError(
+                "Evidence matrix is stale. Refresh project readiness before generating BRD."
+            )
 
         entries = []
         if matrix:
@@ -645,15 +472,9 @@ class BRDGenerationService:
                 .all()
             )
 
-        # Load all insight memos
-        memos = (
-            db.query(InterviewInsightMemo)
-            .filter(
-                InterviewInsightMemo.project_id == project_id,
-                InterviewInsightMemo.status == "completed",
-            )
-            .all()
-        )
+        from app.services.interview_round_aggregate_service import interview_round_aggregate_service
+
+        memos = interview_round_aggregate_service.latest_memos_for_project(db, project_id)
 
         # Load stakeholders
         profiles = (

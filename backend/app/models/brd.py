@@ -3,9 +3,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import JSON, Column, DateTime
-from sqlalchemy import Enum as SQLEnum
-from sqlalchemy import ForeignKey, String, Text
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base
@@ -45,10 +43,10 @@ class BRDDraft(Base):
 
     id = Column(String, primary_key=True)
     interview_session_id = Column(
-        String, ForeignKey("interview_sessions.id"), nullable=False, unique=True, index=True
+        String, ForeignKey("interview_sessions.id"), nullable=False, index=True
     )
     user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
-    status = Column(SQLEnum(BRDStatus), nullable=False, default=BRDStatus.GENERATING, index=True)
+    status = Column(String, nullable=False, default=BRDStatus.GENERATING.value, index=True)
 
     # BRD Content
     title = Column(String, nullable=True)
@@ -93,11 +91,11 @@ class Requirement(Base):
     # Requirement details
     title = Column(String, nullable=False)
     description = Column(Text, nullable=False)
-    type = Column(SQLEnum(RequirementType), nullable=False, index=True)
+    type = Column(String, nullable=False, index=True)
     priority = Column(
-        SQLEnum(RequirementPriority),
+        String,
         nullable=False,
-        default=RequirementPriority.SHOULD_HAVE,
+        default=RequirementPriority.SHOULD_HAVE.value,
         index=True,
     )
 

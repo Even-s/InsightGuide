@@ -1,0 +1,49 @@
+{
+	admin off
+	email {$ACME_EMAIL}
+}
+
+{$APP_DOMAIN} {
+	encode zstd gzip
+
+	@backend path /api/* /health /docs* /redoc* /openapi.json
+	handle @backend {
+		reverse_proxy backend:8002 {
+			flush_interval -1
+			transport http {
+				read_timeout 0
+			}
+		}
+	}
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+
+	header {
+		-Server
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
+
+{$FILES_DOMAIN} {
+	reverse_proxy minio:9000
+
+	header {
+		-Server
+		X-Content-Type-Options nosniff
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

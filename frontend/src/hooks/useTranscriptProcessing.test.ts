@@ -39,13 +39,6 @@ vi.mock('@/hooks/useRealtimeTranscription', () => ({
   },
 }))
 
-vi.mock('@/hooks/useMediaRecorder', () => ({
-  useMediaRecorder: () => ({
-    start: vi.fn(),
-    stop: vi.fn().mockResolvedValue(null),
-  }),
-}))
-
 vi.mock('@/utils/chineseConverter', () => ({
   simplifiedToTraditional: (text: string) => text,
 }))
@@ -90,7 +83,6 @@ describe('useTranscriptProcessing', () => {
     expect(result.current.pendingTranscript).toBe('')
     expect(result.current.transcriptionError).toBeNull()
     expect(result.current.isPreparingToPresent).toBe(false)
-    expect(result.current.isDiarizing).toBe(false)
   })
 
   it('handleStartRequested sets isPreparingToPresent', async () => {
@@ -127,23 +119,6 @@ describe('useTranscriptProcessing', () => {
     expect(result.current.transcriptionError).toBe('Mic not available')
   })
 
-  it('setIsDiarizing updates diarizing state', () => {
-    const { result } = renderHook(() =>
-      useTranscriptProcessing({
-        sessionId: 'session-1',
-        refs: createMockRefs(),
-        candidateCards: [],
-        onBufferedAnswer: vi.fn(),
-      }),
-    )
-
-    act(() => {
-      result.current.setIsDiarizing(true)
-    })
-
-    expect(result.current.isDiarizing).toBe(true)
-  })
-
   it('realtimeStatus starts as idle', () => {
     const { result } = renderHook(() =>
       useTranscriptProcessing({
@@ -155,20 +130,6 @@ describe('useTranscriptProcessing', () => {
     )
 
     expect(result.current.realtimeStatus).toBe('idle')
-  })
-
-  it('exposes recording refs', () => {
-    const { result } = renderHook(() =>
-      useTranscriptProcessing({
-        sessionId: 'session-1',
-        refs: createMockRefs(),
-        candidateCards: [],
-        onBufferedAnswer: vi.fn(),
-      }),
-    )
-
-    expect(result.current.recordingStartedAtRef.current).toBeNull()
-    expect(result.current.finalRecordingBlobRef.current).toBeNull()
   })
 
   it('keeps a richer streaming question when the completed transcript is truncated', async () => {
@@ -200,6 +161,38 @@ describe('useTranscriptProcessing', () => {
       undefined,
       undefined,
       'card-2',
+    )
+  })
+
+  it('stores Realtime transcript even when no interview unit is active', async () => {
+    const refs = createMockRefs()
+    refs.currentThemeRef.current = null
+
+    const { result } = renderHook(() =>
+      useTranscriptProcessing({
+        sessionId: 'session-1',
+        refs,
+        candidateCards: [],
+        onBufferedAnswer: vi.fn(),
+      }),
+    )
+
+    await act(async () => {
+      realtimeCallbacks.onTranscriptCompleted?.({
+        transcript: '這一段也必須保留在完整逐字稿。',
+        itemId: 'item-without-theme',
+      })
+      await result.current.flushTranscriptSaves()
+    })
+
+    expect(mockCreateUtterance).toHaveBeenCalledWith(
+      'session-1',
+      '這一段也必須保留在完整逐字稿。',
+      undefined,
+      'item-without-theme',
+      undefined,
+      undefined,
+      undefined,
     )
   })
 })
