@@ -13,9 +13,14 @@ It is intended for a controlled prototype, not a highly available production sys
 The EC2 runtime image intentionally excludes LibreOffice and Poppler because the current
 application does not invoke either tool; PDF report export is implemented with ReportLab.
 
+Two access modes are supported:
+
+- **Private SSM tunnel mode**: no public IP or inbound application ports; recommended for an early prototype.
+- **Public HTTPS mode**: Elastic IP, two DNS records, and Caddy-managed TLS certificates.
+
 ## 1. Create the EC2 instance
 
-Recommended starting point:
+Recommended public-mode starting point:
 
 - Ubuntu 24.04 LTS, x86_64
 - `t3.xlarge` (4 vCPU, 16 GiB RAM)
@@ -33,7 +38,34 @@ Security group inbound rules:
 
 Do not expose ports 8002, 5432, 6379, 9000, or 9001. Prefer AWS Systems Manager Session Manager instead of public SSH.
 
-## 2. Configure DNS
+For private SSM mode, the existing `t3.large` size is sufficient when `WEB_CONCURRENCY=1`
+and `CELERY_CONCURRENCY=1`. No application inbound rules or public IP are required.
+
+## 2. Configure access
+
+### Private SSM tunnel mode
+
+The EC2 instance only binds the gateway and MinIO API to loopback. Configure the environment with:
+
+```bash
+cd /opt/insightguide/deploy/ec2
+cp .env.ssm.example .env
+chmod 600 .env
+```
+
+After deployment, start both tunnels from the local repository and keep the terminal open:
+
+```bash
+INSTANCE_ID=i-xxxxxxxxxxxxxxxxx \
+AWS_PROFILE=your-profile \
+AWS_REGION=ap-northeast-1 \
+  deploy/ec2/start-ssm-tunnel.sh
+```
+
+Open `http://localhost:5174`. MinIO presigned URLs use `http://localhost:9000` through
+the second tunnel. Browsers treat localhost as a secure context for microphone access.
+
+### Public HTTPS mode
 
 Create two Route 53 `A` records pointing to the Elastic IP:
 
@@ -57,7 +89,11 @@ Sign out and back in after the script adds the current user to the `docker` grou
 
 ```bash
 cd /opt/insightguide/deploy/ec2
+# Public HTTPS mode:
 cp .env.example .env
+
+# Or private SSM mode:
+cp .env.ssm.example .env
 chmod 600 .env
 ```
 
@@ -67,7 +103,7 @@ Fill in every required value. Generate secrets with URL-safe characters because 
 openssl rand -hex 32
 ```
 
-The current prototype authentication is still a development stub. Until real authentication and per-user authorization are implemented, restrict HTTPS access by source IP, VPN, or another access gateway.
+The current prototype authentication is still a development stub. Until real authentication and per-user authorization are implemented, use private SSM mode or restrict HTTPS access by source IP, VPN, or another access gateway.
 
 ## 5. Deploy
 
@@ -120,14 +156,14 @@ Restore stops all application writers, restores PostgreSQL and MinIO, reapplies 
 
 After deployment, verify:
 
-1. Home page and React deep links load over HTTPS.
+1. Home page and React deep links load through the selected HTTPS or SSM access mode.
 2. Project creation and document upload work.
 3. Celery completes document analysis after a worker restart.
 4. Editor analysis progress arrives through SSE.
 5. OpenAI Realtime starts from the browser and completed utterances persist.
 6. An interrupted interview can resume with prior card completion state.
 7. Insight memo, evidence matrix, transcript, and BRD generation work.
-8. Presigned MinIO downloads use the public files domain.
+8. Presigned MinIO downloads use the configured public files origin or local MinIO tunnel.
 9. A backup can be restored on an empty test instance.
 
 ## Known prototype limitations

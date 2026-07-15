@@ -3,7 +3,7 @@
 	email {$ACME_EMAIL}
 }
 
-{$APP_DOMAIN} {
+{$APP_SITE_ADDRESS} {
 	encode zstd gzip
 
 	@backend path /api/* /health /docs* /redoc* /openapi.json
@@ -34,7 +34,7 @@
 	}
 }
 
-{$FILES_DOMAIN} {
+{$FILES_SITE_ADDRESS} {
 	reverse_proxy minio:9000
 
 	header {

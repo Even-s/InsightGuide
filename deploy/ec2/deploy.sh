@@ -16,7 +16,8 @@ set -a
 set +a
 
 required=(
-  APP_DOMAIN FILES_DOMAIN ACME_EMAIL POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB
+  APP_SITE_ADDRESS FILES_SITE_ADDRESS APP_ORIGIN FILES_ORIGIN ACME_EMAIL
+  WEB_HTTP_BIND WEB_HTTPS_BIND MINIO_API_BIND POSTGRES_USER POSTGRES_PASSWORD POSTGRES_DB
   REDIS_PASSWORD SECRET_KEY MINIO_ROOT_USER MINIO_ROOT_PASSWORD S3_BUCKET_NAME
   OPENAI_API_KEY
 )
@@ -55,7 +56,7 @@ echo "Creating the private MinIO bucket and CORS policy..."
 echo "Applying database migrations..."
 "${compose[@]}" run --rm migrate
 
-echo "Starting API, worker, and HTTPS frontend..."
+echo "Starting API, worker, and frontend gateway..."
 "${compose[@]}" up -d --wait --remove-orphans backend worker web
 
 echo "Checking the API inside the container network..."
@@ -66,7 +67,11 @@ echo
 "${compose[@]}" ps
 echo
 echo "Deployment completed."
-echo "Application: https://${APP_DOMAIN}"
-echo "Private files: https://${FILES_DOMAIN}"
+echo "Application: ${APP_ORIGIN}"
+echo "Private files: ${FILES_ORIGIN}"
 echo
-echo "Caddy may need a few minutes to obtain the first TLS certificates."
+if [[ ${APP_ORIGIN} == https://* ]]; then
+  echo "Caddy may need a few minutes to obtain the first TLS certificates."
+else
+  echo "Private mode is active. Start the local SSM tunnels before opening the application."
+fi

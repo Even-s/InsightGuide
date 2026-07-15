@@ -10,7 +10,7 @@ x-backend-environment: &backend-environment
   ENVIRONMENT: production
   DEBUG: "false"
   SECRET_KEY: ${SECRET_KEY}
-  CORS_ORIGINS: '["https://${APP_DOMAIN}"]'
+  CORS_ORIGINS: '["${APP_ORIGIN}"]'
   DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
   REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379/0
   CELERY_BROKER_URL: redis://:${REDIS_PASSWORD}@redis:6379/1
@@ -21,7 +21,7 @@ x-backend-environment: &backend-environment
   EMBEDDING_MODEL: ${EMBEDDING_MODEL:-text-embedding-3-large}
   REALTIME_TRANSCRIPTION_MODEL: ${REALTIME_TRANSCRIPTION_MODEL:-gpt-realtime-whisper}
   S3_ENDPOINT_URL: http://minio:9000
-  S3_PUBLIC_ENDPOINT_URL: https://${FILES_DOMAIN}
+  S3_PUBLIC_ENDPOINT_URL: ${FILES_ORIGIN}
   S3_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
   S3_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
   S3_BUCKET_NAME: ${S3_BUCKET_NAME}
@@ -73,7 +73,9 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-      MINIO_API_CORS_ALLOW_ORIGIN: https://${APP_DOMAIN}
+      MINIO_API_CORS_ALLOW_ORIGIN: ${APP_ORIGIN}
+    ports:
+      - "${MINIO_API_BIND:-127.0.0.1:9000}:9000"
     volumes:
       - minio_data:/data
     logging: *default-logging
@@ -170,16 +172,16 @@ services:
       context: ../..
       dockerfile: deploy/ec2/Dockerfile.web
       args:
-        VITE_API_BASE_URL: https://${APP_DOMAIN}
+        VITE_API_BASE_URL: ${APP_ORIGIN}
     restart: unless-stopped
     environment:
-      APP_DOMAIN: ${APP_DOMAIN}
-      FILES_DOMAIN: ${FILES_DOMAIN}
+      APP_SITE_ADDRESS: ${APP_SITE_ADDRESS}
+      FILES_SITE_ADDRESS: ${FILES_SITE_ADDRESS}
       ACME_EMAIL: ${ACME_EMAIL}
     ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
+      - "${WEB_HTTP_BIND:-0.0.0.0:80}:80"
+      - "${WEB_HTTPS_BIND:-0.0.0.0:443}:443"
+      - "${WEB_HTTPS_BIND:-0.0.0.0:443}:443/udp"
     volumes:
       - caddy_data:/data
       - caddy_config:/config
