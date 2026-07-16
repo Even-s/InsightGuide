@@ -9,12 +9,26 @@ interface ThemeCardsListProps {
   cardStates: CardState[]
   activeCardId: string | null
   detectedCardId: string | null
+  detectedCardIds?: string[]
+  previewDetectedCardIds?: string[]
   sessionId: string
   setActiveCardId: (id: string | null) => void
+  ignoreSuggestedCard: (id: string) => void
   updateCardFromEvent: (cardId: string | undefined, status: CardState['status'], confidence?: number, evidence?: unknown, evidenceTranscript?: string) => void
 }
 
-export default function ThemeCardsList({ currentTheme, cardStates, activeCardId, detectedCardId, sessionId, setActiveCardId, updateCardFromEvent }: ThemeCardsListProps) {
+export default function ThemeCardsList({
+  currentTheme,
+  cardStates,
+  activeCardId,
+  detectedCardId,
+  detectedCardIds = [],
+  previewDetectedCardIds = [],
+  sessionId,
+  setActiveCardId,
+  ignoreSuggestedCard,
+  updateCardFromEvent,
+}: ThemeCardsListProps) {
   const [pendingCardAction, setPendingCardAction] = useState<{ cardId: string; action: 'set' | 'clear' } | null>(null)
   const [cardActionError, setCardActionError] = useState<{ cardId: string; message: string } | null>(null)
   const feedbackTimerRef = useRef<number | null>(null)
@@ -37,7 +51,11 @@ export default function ThemeCardsList({ currentTheme, cardStates, activeCardId,
     }, 450)
   }
 
-  const handleActiveCardAction = async (cardId: string, isCardActive: boolean) => {
+  const handleActiveCardAction = async (
+    cardId: string,
+    isCardActive: boolean,
+    source = 'user_confirmed',
+  ) => {
     if (pendingCardAction) return
 
     const action = isCardActive ? 'clear' : 'set'
@@ -49,7 +67,7 @@ export default function ThemeCardsList({ currentTheme, cardStates, activeCardId,
         await interviewAPI.clearActiveCard(sessionId)
         setActiveCardId(null)
       } else {
-        await interviewAPI.confirmActiveCard(sessionId, cardId)
+        await interviewAPI.confirmActiveCard(sessionId, cardId, source)
         setActiveCardId(cardId)
       }
       releaseActionLock()
@@ -153,17 +171,34 @@ export default function ThemeCardsList({ currentTheme, cardStates, activeCardId,
                   // A completed card is terminal. Ignore stale routing IDs so
                   // completion styling always wins over the yellow active glow.
                   const isActive = !isDone && activeCardId === card.id
-                  const isDetected = !isDone && !isActive && detectedCardId === card.id
-                  const isHighlighted = isActive || isDetected
+                  const isDetected = !isDone && !isActive && (
+                    detectedCardId === card.id || detectedCardIds.includes(card.id)
+                  )
+                  const isPreviewDetected = !isDone && !isActive && !isDetected && previewDetectedCardIds.includes(card.id)
+                  const isSuggestion = isDetected || isPreviewDetected
+                  const isSecondaryDetected = isSuggestion
+                  const isHighlighted = isActive || isDetected || isPreviewDetected
+                  const sourceLabel = isActive ? '人工確認' : isSuggestion ? 'AI 建議' : null
                   const currentAction = pendingCardAction?.cardId === card.id ? pendingCardAction.action : null
                   const itemProgress = isDone ? 100 : status === 'listening' ? 0 : Math.round((confidence ?? 0) * 100)
+                  const canManuallyComplete =
+                    isActive || status === 'listening' || status === 'probably_sufficient' || status === 'at_risk'
 
                   return (
                     <div
                       key={card.id}
-                      data-ai-detected={isDetected || undefined}
+                      data-ai-detected={(isDetected || isPreviewDetected) || undefined}
+                      data-ai-preview-detected={isPreviewDetected || undefined}
                       data-current-card={isActive || undefined}
-                      className={`rounded-2xl border bg-white p-4 shadow-sm transition-[border-color,background-color,box-shadow,opacity,transform] duration-500 ease-out ${isHighlighted ? 'motion-ai-card-glow scale-[1.01] border-yellow-300 bg-yellow-50' : isDone ? 'border-sage-200 bg-sage-50/60' : 'border-cream-300'}`}
+                      className={`rounded-2xl border bg-white p-4 shadow-sm transition-[border-color,background-color,box-shadow,opacity,transform] duration-500 ease-out ${
+                        isActive
+                          ? 'motion-ai-card-glow scale-[1.01] border-yellow-300 bg-yellow-50'
+                        : isSecondaryDetected
+                            ? `${isPreviewDetected ? 'border-yellow-200 bg-yellow-50/40 shadow-yellow-100/50' : 'border-yellow-200 bg-yellow-50/50 shadow-yellow-100/60'}`
+                            : isDone
+                              ? 'border-sage-200 bg-sage-50/60'
+                              : 'border-cream-300'
+                      }`}
                     >
                       <div className="mb-3 flex items-center justify-between gap-3">
                         <div className="flex items-center gap-2">
@@ -175,6 +210,20 @@ export default function ThemeCardsList({ currentTheme, cardStates, activeCardId,
                           <span className="rounded-lg bg-cream-200 px-2 py-0.5 text-xs font-semibold tracking-wide text-natural-500">
                             建議提問
                           </span>
+                          {sourceLabel && (
+                            <span
+                              data-source-label={isActive ? 'manual' : 'ai'}
+                              className={`rounded-lg px-2 py-0.5 text-xs font-semibold tracking-wide transition-[background-color,color,opacity] duration-300 ${
+                                isActive
+                                  ? 'border border-wood-200 bg-wood-50 text-wood-600'
+                                  : isPreviewDetected
+                                    ? 'border border-yellow-200 bg-yellow-50 text-yellow-700'
+                                    : 'border border-yellow-300 bg-yellow-100 text-yellow-800'
+                              }`}
+                            >
+                             {sourceLabel}
+                            </span>
+                          )}
                         </div>
                         {!isDone && card.importance === 'must' && (
                           <span className="shrink-0 rounded-lg bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">必問</span>
@@ -242,39 +291,72 @@ export default function ThemeCardsList({ currentTheme, cardStates, activeCardId,
                         )
                       })()}
                       {!isDone && (
-                        <div className="mt-3 flex gap-2">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              interviewAPI.manualCompleteCard(sessionId, card.id)
-                              updateCardFromEvent(card.id, 'sufficient', 1.0, undefined, undefined)
-                            }}
-                            className="px-2.5 py-1 text-xs bg-sage-50 text-sage-500 border border-sage-200 rounded-xl hover:bg-sage-100 transition-colors"
-                          >
-                            標記完成
-                          </button>
-                          <button
-                            type="button"
-                            disabled={currentAction !== null}
-                            aria-busy={currentAction !== null}
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              void handleActiveCardAction(card.id, isActive)
-                            }}
-                            className={`px-2.5 py-1 text-xs border rounded-xl transition-[background-color,color,opacity] disabled:cursor-wait disabled:opacity-70 ${
-                              isActive
-                                ? 'bg-wood-100 text-wood-500 border-wood-200 hover:bg-wood-200'
-                                : 'bg-wood-50 text-wood-500 border-wood-200 hover:bg-wood-100'
-                            }`}
-                          >
-                            {currentAction === 'clear'
-                              ? (isActive ? '取消中…' : '已取消')
-                              : currentAction === 'set'
-                                ? (isActive ? '已設為目前問題' : '設定中…')
-                                : isActive
-                                  ? '取消目前問題'
-                                  : '設為目前問題'}
-                          </button>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {canManuallyComplete && (
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                interviewAPI.manualCompleteCard(sessionId, card.id)
+                                updateCardFromEvent(card.id, 'sufficient', 1.0, undefined, undefined)
+                              }}
+                              className="px-2.5 py-1 text-xs bg-sage-50 text-sage-500 border border-sage-200 rounded-xl hover:bg-sage-100 transition-colors"
+                            >
+                              標記完成
+                            </button>
+                          )}
+                          {isSuggestion && !isActive ? (
+                            <>
+                              <button
+                                type="button"
+                                disabled={currentAction !== null}
+                                aria-busy={currentAction !== null}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  void handleActiveCardAction(
+                                    card.id,
+                                    false,
+                                    'human_confirmed_ai_suggestion',
+                                  )
+                                }}
+                                className="px-2.5 py-1 text-xs border border-yellow-300 bg-yellow-100 text-yellow-800 rounded-xl hover:bg-yellow-200 transition-[background-color,color,opacity] disabled:cursor-wait disabled:opacity-70"
+                              >
+                                {currentAction === 'set' ? '確認中…' : '✓ 確認此題'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  ignoreSuggestedCard(card.id)
+                                }}
+                                className="px-2.5 py-1 text-xs border border-cream-300 bg-white text-natural-400 rounded-xl hover:bg-cream-100 transition-colors"
+                              >
+                                忽略
+                              </button>
+                            </>
+                          ) : (
+                            <button
+                              type="button"
+                              disabled={currentAction !== null}
+                              aria-busy={currentAction !== null}
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                void handleActiveCardAction(card.id, isActive)
+                              }}
+                              className={`px-2.5 py-1 text-xs border rounded-xl transition-[background-color,color,opacity] disabled:cursor-wait disabled:opacity-70 ${
+                                isActive
+                                  ? 'bg-wood-100 text-wood-500 border-wood-200 hover:bg-wood-200'
+                                  : 'bg-wood-50 text-wood-500 border-wood-200 hover:bg-wood-100'
+                              }`}
+                            >
+                              {currentAction === 'clear'
+                                ? (isActive ? '取消中…' : '已取消')
+                                : currentAction === 'set'
+                                  ? (isActive ? '已設為目前問題' : '設定中…')
+                                  : isActive
+                                    ? '取消目前問題'
+                                    : '設為目前問題'}
+                            </button>
+                          )}
                         </div>
                       )}
                       {cardActionError?.cardId === card.id && (

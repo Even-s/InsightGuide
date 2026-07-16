@@ -217,7 +217,7 @@ describe('useCardEventHandlers', () => {
     expect(result.current.activeCardId).toBeNull()
   })
 
-  it('moves an AI detection into detectedCardId without making it manually active', async () => {
+  it('moves an AI suggestion into detectedCardId without making it manually active', async () => {
     const { result } = renderHook(() =>
       useCardEventHandlers({
         sessionId: 'session-1',
@@ -234,16 +234,53 @@ describe('useCardEventHandlers', () => {
     const sseCalls = vi.mocked(useSSEEvents).mock.calls
     const eventHandlers = sseCalls[sseCalls.length - 1]?.[1]
     act(() => {
-      eventHandlers?.onCardListening?.({
-        type: 'CARD_TOPIC_DETECTED',
+      eventHandlers?.onQuestionCardSuggested?.({
+        type: 'QUESTION_CARD_SUGGESTED',
         card_id: 'card-1',
         old_status: 'pending',
-        new_status: 'listening',
+        new_status: 'pending',
       })
     })
 
     expect(result.current.detectedCardId).toBe('card-1')
     expect(result.current.activeCardId).toBeNull()
+    expect(result.current.cardStates[0].status).toBe('pending')
+  })
+
+  it('can ignore an AI suggestion locally without clearing the active card API', async () => {
+    const { result } = renderHook(() =>
+      useCardEventHandlers({
+        sessionId: 'session-1',
+        documentId: 'doc-1',
+        currentThemeId: 'theme-1',
+        currentSectionId: undefined,
+      }),
+    )
+
+    await waitFor(() => {
+      expect(result.current.cardStates).toHaveLength(1)
+    })
+
+    const sseCalls = vi.mocked(useSSEEvents).mock.calls
+    const eventHandlers = sseCalls[sseCalls.length - 1]?.[1]
+    act(() => {
+      eventHandlers?.onQuestionCardSuggested?.({
+        type: 'QUESTION_CARD_SUGGESTED',
+        card_id: 'card-1',
+        old_status: 'pending',
+        new_status: 'pending',
+      })
+    })
+
+    expect(result.current.detectedCardId).toBe('card-1')
+
+    act(() => {
+      result.current.ignoreSuggestedCard('card-1')
+    })
+
+    expect(result.current.detectedCardId).toBeNull()
+    expect(result.current.detectedCardIds).toEqual([])
+    expect(interviewAPI.clearActiveCard).not.toHaveBeenCalled()
   })
 
   it('clears the AI detection when a manual active card is confirmed', async () => {

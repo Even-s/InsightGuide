@@ -5,7 +5,7 @@ import { useTranscriptProcessing } from './useTranscriptProcessing'
 
 const mockMatchPartialTranscript = vi.fn().mockResolvedValue(undefined)
 const mockCreateUtterance = vi.fn().mockResolvedValue(undefined)
-const mockFindAskedCard = vi.fn().mockReturnValue(null)
+const mockFindAskedCards = vi.fn().mockReturnValue([])
 let realtimeCallbacks: {
   onTranscriptDelta?: (delta: string, itemId?: string) => void
   onTranscriptCompleted?: (payload: {
@@ -44,7 +44,7 @@ vi.mock('@/utils/chineseConverter', () => ({
 }))
 
 vi.mock('@/components/PresenterMode/presenterUtils', () => ({
-  findAskedCard: (...args: unknown[]) => mockFindAskedCard(...args),
+  findAskedCards: (...args: unknown[]) => mockFindAskedCards(...args),
   getActiveCardId: () => 'card-1',
 }))
 
@@ -62,7 +62,7 @@ describe('useTranscriptProcessing', () => {
     vi.clearAllMocks()
     vi.useFakeTimers()
     realtimeCallbacks = {}
-    mockFindAskedCard.mockReturnValue(null)
+    mockFindAskedCards.mockReturnValue([])
   })
 
   afterEach(() => {
@@ -143,7 +143,7 @@ describe('useTranscriptProcessing', () => {
     )
 
     const fullQuestion = '收到一筆掛號後，櫃台通常會先查哪些資料，再做哪些確認？'
-    mockFindAskedCard.mockReturnValue('card-2')
+    mockFindAskedCards.mockReturnValue(['card-2', 'card-3'])
 
     await act(async () => {
       realtimeCallbacks.onTranscriptDelta?.(fullQuestion, 'item-1')
@@ -161,6 +161,7 @@ describe('useTranscriptProcessing', () => {
       undefined,
       undefined,
       'card-2',
+      ['card-2', 'card-3'],
     )
   })
 
@@ -193,6 +194,39 @@ describe('useTranscriptProcessing', () => {
       undefined,
       undefined,
       undefined,
+      undefined,
     )
+  })
+
+  it('previews likely question cards from partial transcript without saving state', async () => {
+    const onPreviewDetectedCards = vi.fn()
+    mockFindAskedCards.mockReturnValue(['card-2', 'card-3'])
+
+    renderHook(() =>
+      useTranscriptProcessing({
+        sessionId: 'session-1',
+        refs: createMockRefs(),
+        candidateCards: [],
+        onBufferedAnswer: vi.fn(),
+        onPreviewDetectedCards,
+      }),
+    )
+
+    await act(async () => {
+      realtimeCallbacks.onTranscriptDelta?.('收到一筆掛號後，櫃台通常會先查哪些資料', 'item-1')
+    })
+
+    expect(mockFindAskedCards).toHaveBeenCalledWith(
+      '收到一筆掛號後，櫃台通常會先查哪些資料',
+      [],
+      'theme-1',
+      2,
+      {
+        requireQuestionEnding: false,
+        minScore: 1.4,
+        includeListening: false,
+      },
+    )
+    expect(onPreviewDetectedCards).toHaveBeenCalledWith(['card-2', 'card-3'])
   })
 })

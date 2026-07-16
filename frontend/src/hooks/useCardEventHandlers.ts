@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { interviewAPI } from '@/api/interview'
 import { useSSEEvents } from '@/hooks/useSSEEvents'
 import type { CardState, SessionStatus } from '@/types/interview'
@@ -30,6 +30,8 @@ export interface CardEventHandlersResult {
   candidateCards: Array<{ cardId: string; questionText: string; focusText: string; score: number }>
   activeCardId: string | null
   detectedCardId: string | null
+  detectedCardIds: string[]
+  previewDetectedCardIds: string[]
   bufferedAnswerCount: number
   followupQueue: string[]
   skippedCards: Set<string>
@@ -37,6 +39,9 @@ export interface CardEventHandlersResult {
   followupPrompt: ReturnType<typeof buildFollowupPrompt>
   followupQueueLength: number
   setActiveCardId: (id: string | null) => void
+  previewDetectedCards: (ids: string[]) => void
+  clearPreviewDetectedCards: () => void
+  ignoreSuggestedCard: (id: string) => void
   setCandidateCards: (cards: Array<{ cardId: string; questionText: string; focusText: string; score: number }>) => void
   setBufferedAnswerCount: React.Dispatch<React.SetStateAction<number>>
   handleSkipFollowup: () => void
@@ -57,9 +62,51 @@ export function useCardEventHandlers({
   const [candidateCards, setCandidateCards] = useState<Array<{ cardId: string; questionText: string; focusText: string; score: number }>>([])
   const [activeCardId, setActiveCardId] = useState<string | null>(null)
   const [detectedCardId, setDetectedCardId] = useState<string | null>(null)
+  const [detectedCardIds, setDetectedCardIds] = useState<string[]>([])
+  const [previewDetectedCardIds, setPreviewDetectedCardIds] = useState<string[]>([])
   const [bufferedAnswerCount, setBufferedAnswerCount] = useState(0)
   const [followupQueue, setFollowupQueue] = useState<string[]>([])
   const [skippedCards, setSkippedCards] = useState<Set<string>>(new Set())
+  const [ignoredSuggestionIds, setIgnoredSuggestionIds] = useState<Set<string>>(new Set())
+  const previewClearTimerRef = useRef<number | null>(null)
+
+  useEffect(() => () => {
+    if (previewClearTimerRef.current !== null) {
+      window.clearTimeout(previewClearTimerRef.current)
+    }
+  }, [])
+
+  const clearPreviewDetectedCards = useCallback(() => {
+    if (previewClearTimerRef.current !== null) {
+      window.clearTimeout(previewClearTimerRef.current)
+      previewClearTimerRef.current = null
+    }
+    setPreviewDetectedCardIds([])
+  }, [])
+
+  const previewDetectedCards = useCallback((ids: string[]) => {
+    const uniqueIds = [...new Set(ids.filter((id) => Boolean(id) && !ignoredSuggestionIds.has(id)))].slice(0, 2)
+    if (uniqueIds.length === 0) {
+      clearPreviewDetectedCards()
+      return
+    }
+
+    setPreviewDetectedCardIds(uniqueIds)
+    if (previewClearTimerRef.current !== null) {
+      window.clearTimeout(previewClearTimerRef.current)
+    }
+    previewClearTimerRef.current = window.setTimeout(() => {
+      setPreviewDetectedCardIds([])
+      previewClearTimerRef.current = null
+    }, 2200)
+  }, [clearPreviewDetectedCards, ignoredSuggestionIds])
+
+  const ignoreSuggestedCard = useCallback((id: string) => {
+    setIgnoredSuggestionIds((previous) => new Set([...previous, id]))
+    setDetectedCardId((previous) => previous === id ? null : previous)
+    setDetectedCardIds((previous) => previous.filter((cardId) => cardId !== id))
+    setPreviewDetectedCardIds((previous) => previous.filter((cardId) => cardId !== id))
+  }, [])
 
   const updateCardFromEvent = useCallback((
     cardId: string | undefined,
@@ -73,6 +120,8 @@ export function useCardEventHandlers({
     if (COMPLETED_CARD_STATUSES.has(status)) {
       setActiveCardId((previous) => previous === cardId ? null : previous)
       setDetectedCardId((previous) => previous === cardId ? null : previous)
+      setDetectedCardIds((previous) => previous.filter((id) => id !== cardId))
+      setPreviewDetectedCardIds((previous) => previous.filter((id) => id !== cardId))
     }
 
     const resolvedTranscript =
@@ -169,6 +218,11 @@ export function useCardEventHandlers({
           ? initialDetectedCardId
           : null,
       )
+      setDetectedCardIds(
+        initialDetectedCardId && initialDetectedCardId !== initialActiveCardId
+          ? [initialDetectedCardId]
+          : [],
+      )
     }
   }, [initialActiveCardId, initialDetectedCardId])
 
@@ -178,27 +232,36 @@ export function useCardEventHandlers({
         .filter((cardState) => COMPLETED_CARD_STATUSES.has(cardState.status))
         .map((cardState) => cardState.questionCard.id),
     )
-    const hasStaleRouting = Boolean(
-      (activeCardId && completedCardIds.has(activeCardId))
-      || (detectedCardId && completedCardIds.has(detectedCardId)),
+    setDetectedCardId((previous) =>
+      previous && completedCardIds.has(previous) ? null : previous,
     )
-    if (!hasStaleRouting) return
+    setDetectedCardIds((previous) => previous.filter((id) => !completedCardIds.has(id)))
+    setPreviewDetectedCardIds((previous) => previous.filter((id) => !completedCardIds.has(id)))
+
+    if (!activeCardId || !completedCardIds.has(activeCardId)) return
 
     setActiveCardId(null)
-    setDetectedCardId(null)
     void interviewAPI.clearActiveCard(sessionId).catch((error) => {
-      console.error('Failed to clear completed card routing:', error)
+      console.error('Failed to clear completed active card:', error)
     })
   }, [activeCardId, cardStates, detectedCardId, sessionId])
 
   useSSEEvents(sessionId, {
     onCardListening: (data) => {
       updateCardFromEvent(data.card_id, statusFromEvent(data, 'listening'), data.confidence, data.evidence, data.evidenceTranscript)
-      if (data.card_id) setDetectedCardId(data.card_id)
+      if (data.card_id) {
+        setPreviewDetectedCardIds((previous) => previous.filter((id) => id !== data.card_id))
+        setDetectedCardId(data.card_id)
+        setDetectedCardIds((previous) => {
+          if (previous.includes(data.card_id!)) return previous
+          return [...previous, data.card_id!].slice(-3)
+        })
+      }
     },
     onCardCovered: (data) => {
       updateCardFromEvent(data.card_id, statusFromEvent(data, 'sufficient'), data.confidence, data.evidence, data.evidenceTranscript)
       setDetectedCardId(previous => previous === data.card_id ? null : previous)
+      setDetectedCardIds(previous => previous.filter(id => id !== data.card_id))
     },
     onCardProbablyCovered: (data) => updateCardFromEvent(data.card_id, statusFromEvent(data, 'probably_sufficient'), data.confidence, data.evidence, data.evidenceTranscript),
     onCardAtRisk: (data) => updateCardFromEvent(data.card_id, statusFromEvent(data, 'at_risk'), data.confidence, data.evidence, data.evidenceTranscript),
@@ -206,12 +269,24 @@ export function useCardEventHandlers({
     onCardEvidenceAdded: (data) => {
       updateCriterionFromEvent(data.card_id, data.criterion_id, data.status, data.evidence_quote)
     },
+    onQuestionCardSuggested: (data) => {
+      if (!data.card_id || ignoredSuggestionIds.has(data.card_id)) return
+      setPreviewDetectedCardIds((previous) => previous.filter((id) => id !== data.card_id))
+      setDetectedCardId((previous) => previous ?? data.card_id ?? null)
+      setDetectedCardIds((previous) => {
+        if (previous.includes(data.card_id!)) return previous
+        return [...previous, data.card_id!].slice(-3)
+      })
+    },
     onQuestionCardCandidates: (data) => {
       setCandidateCards(data.candidates)
     },
     onActiveCardChanged: (data) => {
       setActiveCardId(data.card_id)
       setDetectedCardId(null)
+      setDetectedCardIds([])
+      setIgnoredSuggestionIds(new Set())
+      clearPreviewDetectedCards()
       setCandidateCards([])
       setBufferedAnswerCount(0)
       updateCardFromEvent(data.card_id, 'listening', 0, undefined, undefined)
@@ -220,10 +295,15 @@ export function useCardEventHandlers({
       updateCardFromEvent(data.card_id, statusFromEvent(data, 'sufficient'), 1.0, data.evidence, data.evidenceTranscript)
       setActiveCardId((prev) => prev === data.card_id ? null : prev)
       setDetectedCardId((prev) => prev === data.card_id ? null : prev)
+      setDetectedCardIds((prev) => prev.filter((id) => id !== data.card_id))
+      setPreviewDetectedCardIds((prev) => prev.filter((id) => id !== data.card_id))
     },
     onActiveCardCleared: () => {
       setActiveCardId(null)
       setDetectedCardId(null)
+      setDetectedCardIds([])
+      clearPreviewDetectedCards()
+      setIgnoredSuggestionIds(new Set())
       setCandidateCards([])
       setBufferedAnswerCount(0)
     },
@@ -278,6 +358,8 @@ export function useCardEventHandlers({
     candidateCards,
     activeCardId,
     detectedCardId,
+    detectedCardIds,
+    previewDetectedCardIds,
     bufferedAnswerCount,
     followupQueue,
     skippedCards,
@@ -285,6 +367,9 @@ export function useCardEventHandlers({
     followupPrompt,
     followupQueueLength,
     setActiveCardId,
+    previewDetectedCards,
+    clearPreviewDetectedCards,
+    ignoreSuggestedCard,
     setCandidateCards,
     setBufferedAnswerCount,
     handleSkipFollowup,

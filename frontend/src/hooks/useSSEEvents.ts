@@ -11,6 +11,8 @@ interface SSEEvent {
   evidence?: Record<string, unknown>;
   evidenceTranscript?: string;
   evaluationSeq?: number;
+  suggestionScore?: number;
+  source?: string;
 }
 
 interface SSEEvidenceEvent {
@@ -53,6 +55,7 @@ interface UseSSEEventsOptions {
   onCardAtRisk?: (data: SSEEvent) => void;
   onCardSkipped?: (data: SSEEvent) => void;
   onCardEvidenceAdded?: (data: SSEEvidenceEvent) => void;
+  onQuestionCardSuggested?: (data: SSEEvent) => void;
   onQuestionCardCandidates?: (data: QuestionCandidatesEvent) => void;
   onActiveCardChanged?: (data: ActiveCardChangedEvent) => void;
   onCardManuallyCompleted?: (data: SSEEvent) => void;
@@ -81,6 +84,11 @@ export function useSSEEvents(sessionId: string, options: UseSSEEventsOptions = {
     eventSource.addEventListener('CARD_TOPIC_DETECTED', (e) => {
       const data: SSEEvent = JSON.parse(e.data);
       optionsRef.current.onCardListening?.(data);
+    });
+
+    eventSource.addEventListener('QUESTION_CARD_SUGGESTED', (e) => {
+      const data: SSEEvent = JSON.parse(e.data);
+      optionsRef.current.onQuestionCardSuggested?.(data);
     });
 
     eventSource.addEventListener('CARD_PROGRESS_CHANGED', (e) => {

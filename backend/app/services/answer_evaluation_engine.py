@@ -3,6 +3,7 @@
 import logging
 import uuid
 from datetime import datetime
+from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
@@ -139,9 +140,15 @@ class AnswerEvaluationEngine:
         section_id: str,
         speaker: str = "interviewee",
         asked_card_id: Optional[str] = None,
+        asked_card_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Process a new utterance. Routes questions to cards; evaluates answers for completion.
+        Process a new speaker-neutral utterance.
+
+        Realtime transcripts no longer distinguish interviewer and interviewee.
+        Routing is therefore based on utterance function: question-like text
+        suggests related cards, while answer-like text may add evidence only
+        to cards that have already been confirmed by a human.
         """
         try:
             if should_skip_utterance(utterance_text):
@@ -155,13 +162,21 @@ class AnswerEvaluationEngine:
                 f"section={section_id}, speaker={speaker}, text='{utterance_text[:50]}...'"
             )
 
-            # The frontend-provided card is an explicit routing decision and
+            explicit_card_ids = self._normalize_card_ids(asked_card_ids, asked_card_id)
+
+            # The frontend-provided cards are explicit routing decisions and
             # must win over heuristic utterance classification. This prevents
             # question wording such as "通常會...？" from being evaluated as
             # an answer merely because it contains an answer-like marker.
-            if asked_card_id or is_question_like(utterance_text):
+            if explicit_card_ids or is_question_like(utterance_text):
                 return self._route_question_to_card(
-                    db, session_id, utterance_id, utterance_text, section_id, asked_card_id
+                    db,
+                    session_id,
+                    utterance_id,
+                    utterance_text,
+                    section_id,
+                    asked_card_id,
+                    explicit_card_ids,
                 )
             else:
                 return self._evaluate_answer(
@@ -173,6 +188,19 @@ class AnswerEvaluationEngine:
             db.rollback()
             return []
 
+    def _normalize_card_ids(
+        self,
+        card_ids: Optional[List[str]] = None,
+        fallback_card_id: Optional[str] = None,
+    ) -> List[str]:
+        """Return unique, non-empty card ids while preserving order."""
+        normalized: List[str] = []
+        for card_id in [*(card_ids or []), fallback_card_id]:
+            if not card_id or card_id in normalized:
+                continue
+            normalized.append(card_id)
+        return normalized
+
     def _route_question_to_card(
         self,
         db: Session,
@@ -181,122 +209,126 @@ class AnswerEvaluationEngine:
         utterance_text: str,
         section_id: str,
         asked_card_id: Optional[str] = None,
+        asked_card_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
-        """Route an interviewer question to the most relevant card. No completion scoring."""
-        from app.models.interview_session import InterviewSession
+        """Suggest one or more related cards for a question-like utterance.
 
-        # Initialize answer buffer — subsequent answers will be buffered until user confirms
-        session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
-        if session and not asked_card_id:
-            session.pending_answer_buffer = []
+        AI question routing is advisory only. It must not activate cards or
+        change the current card; a human confirmation via /active-card is
+        required before transcripts are attributed to that card.
+        """
+        explicit_card_ids = self._normalize_card_ids(asked_card_ids, asked_card_id)
 
-        # Find target card
-        if asked_card_id:
-            target_card_id = asked_card_id
-            logger.info(f"Question routing: using frontend-provided askedCardId={asked_card_id}")
-        else:
-            target_card_id = self._find_best_matching_card(
-                db, session_id, section_id, utterance_text
+        # Find target cards
+        if explicit_card_ids:
+            target_candidates = [
+                {
+                    "cardId": card_id,
+                    "score": 1.0,
+                    "status": "pending",
+                    "source": "frontend",
+                }
+                for card_id in explicit_card_ids[:3]
+            ]
+            logger.info(
+                "Question routing: using frontend-provided askedCardIds=%s",
+                explicit_card_ids[:3],
             )
-            logger.info(f"Question routing: router found target={target_card_id}")
+        else:
+            target_candidates = self.find_candidate_cards(
+                db, session_id, section_id, utterance_text, top_k=3
+            )
+            best_score = (
+                float(target_candidates[0].get("score", 0) or 0) if target_candidates else 0
+            )
+            threshold = max(0.5, best_score * 0.65)
+            target_candidates = [
+                candidate
+                for candidate in target_candidates
+                if float(candidate.get("score", 0) or 0) >= threshold
+            ][:3]
+            logger.info(
+                "Question routing: router suggested targets=%s",
+                [candidate.get("cardId") for candidate in target_candidates],
+            )
 
-        if not target_card_id:
+        if not target_candidates:
             logger.info("Question routing: no matching card found")
             return []
 
-        # Load the card state
-        card_state = (
-            db.query(InterviewCardState)
-            .filter(
-                InterviewCardState.session_id == session_id,
-                InterviewCardState.question_card_id == target_card_id,
+        updates: List[Dict[str, Any]] = []
+        for target_candidate in target_candidates:
+            target_card_id = target_candidate["cardId"]
+            card_state = (
+                db.query(InterviewCardState)
+                .filter(
+                    InterviewCardState.session_id == session_id,
+                    InterviewCardState.question_card_id == target_card_id,
+                )
+                .first()
             )
-            .first()
-        )
 
-        if not card_state:
-            logger.info(f"Question routing: no card state for {target_card_id}")
-            return []
+            if not card_state:
+                logger.info(f"Question routing: no card state for {target_card_id}")
+                continue
 
-        # Don't re-route already completed cards
-        if card_state.status in ("sufficient", "covered", "manually_checked"):
-            return []
+            # Don't re-route already completed cards
+            if card_state.status in ("sufficient", "covered", "manually_checked"):
+                continue
 
-        card = db.query(QuestionCard).filter(QuestionCard.id == target_card_id).first()
-        if not card:
-            return []
+            card = db.query(QuestionCard).filter(QuestionCard.id == target_card_id).first()
+            if not card:
+                continue
 
-        # Update session active_card_hint
-        session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
-        if session:
-            session.active_card_hint_id = target_card_id
+            old_status = card_state.status
 
-        # Activate card (pending → listening) with activation only, no completion
-        old_status = card_state.status
-        if old_status == "pending":
-            card_state.status = "listening"
-            card_state.activation_score = 1.0
-            card_state.updated_at = datetime.utcnow()
-
-            # Write audit record
-            evaluation_seq = self._get_next_evaluation_seq(db, session_id, card.id)
-            coverage_eval = CardCoverageEvaluation(
-                id=f"cce_{uuid.uuid4().hex[:12]}",
-                session_id=session_id,
-                card_id=card.id,
-                state="listening",
-                confidence=0,
-                covered_element_ids=[],
-                missing_element_ids=[],
-                evidence=[],
-                evaluation_seq=evaluation_seq,
-                model="router",
-                prompt_version=None,
-                created_at=datetime.utcnow(),
-            )
-            db.add(coverage_eval)
-            db.commit()
-
-            logger.info(f"Question routed: {target_card_id} pending → listening")
-
-            return [
+            updates.append(
                 {
                     "card_id": card.id,
                     "card_state_id": card_state.id,
                     "old_status": old_status,
-                    "new_status": "listening",
-                    "confidence": 0,
-                    "activation_score": 1.0,
-                    "completion_score": 0.0,
-                    "evidence": None,
-                    "evidence_transcript": None,
+                    "new_status": old_status,
+                    "confidence": float(target_candidate.get("score", 0) or 0),
+                    "activation_score": 0.0,
+                    "completion_score": (
+                        float(card_state.completion_score or 0)
+                        if card_state.completion_score is not None
+                        else 0.0
+                    ),
+                    "evidence": card_state.evidence,
+                    "evidence_transcript": card_state.evidence_transcript,
                     "judgment": {"response_status": "question_only", "suggested_followup": ""},
-                    "evaluation_seq": evaluation_seq,
-                    "topic_detected": True,
+                    "evaluation_seq": None,
+                    "question_suggested": True,
+                    "suggestion_score": float(target_candidate.get("score", 0) or 0),
+                    "suggestion_source": target_candidate.get("source", "router"),
                 }
-            ]
+            )
 
-        # The card may already be listening from an earlier hint. Return a
-        # detection-only update so the frontend can still show which card the
-        # latest question matched without mutating its progress state.
-        if session:
-            db.commit()
+        return updates
+
+    def _find_matching_card_ids(
+        self,
+        db: Session,
+        session_id: str,
+        section_id: str,
+        question_text: str,
+        top_k: int = 3,
+    ) -> List[str]:
+        """Find one primary card plus close related cards for a question-like utterance."""
+        candidates = self.find_candidate_cards(
+            db, session_id, section_id, question_text, top_k=top_k
+        )
+        if not candidates:
+            return []
+
+        best_score = float(candidates[0].get("score", 0) or 0)
+        threshold = max(0.5, best_score * 0.65)
         return [
-            {
-                "card_id": card.id,
-                "card_state_id": card_state.id,
-                "old_status": old_status,
-                "new_status": old_status,
-                "confidence": float(card_state.confidence or 0),
-                "activation_score": float(card_state.activation_score or 1),
-                "completion_score": float(card_state.completion_score or 0),
-                "evidence": card_state.evidence,
-                "evidence_transcript": card_state.evidence_transcript,
-                "judgment": {"response_status": "question_only", "suggested_followup": ""},
-                "evaluation_seq": None,
-                "topic_detected": True,
-            }
-        ]
+            candidate["cardId"]
+            for candidate in candidates
+            if float(candidate.get("score", 0) or 0) >= threshold
+        ][:top_k]
 
     def _find_best_matching_card(
         self,
@@ -321,40 +353,7 @@ class AnswerEvaluationEngine:
 
         for card_data in candidates:
             card = card_data["card"]
-            score = 0.0
-
-            # Focus text overlap (highest signal for routing)
-            if card.focus_text:
-                overlap = self._chinese_overlap_score(text_lower, card.focus_text.lower())
-                if overlap > 0.1:
-                    score += 3.0 * overlap
-
-            # Question text overlap
-            if card.question_text:
-                overlap = self._chinese_overlap_score(text_lower, card.question_text.lower())
-                if overlap > 0.1:
-                    score += 2.0 * overlap
-
-            # Keywords
-            coverage_rule = getattr(card, "coverage_rule", None) or {}
-            keywords = (
-                coverage_rule.get("expectedKeywords", [])
-                or coverage_rule.get("expected_keywords", [])
-                or []
-            )
-            for kw in keywords:
-                if kw and kw.lower() in text_lower:
-                    score += 3.0
-
-            # Semantic anchors
-            anchors = (
-                coverage_rule.get("semanticAnchors", [])
-                or coverage_rule.get("semantic_anchors", [])
-                or []
-            )
-            for anchor in anchors:
-                if anchor and anchor.lower() in text_lower:
-                    score += 2.0
+            score = self._score_question_route(text_lower, card)
 
             if score > best_score:
                 best_score = score
@@ -388,36 +387,7 @@ class AnswerEvaluationEngine:
 
         for card_data in candidates:
             card = card_data["card"]
-            score = 0.0
-
-            if card.focus_text:
-                overlap = self._chinese_overlap_score(text_lower, card.focus_text.lower())
-                if overlap > 0.1:
-                    score += 3.0 * overlap
-
-            if card.question_text:
-                overlap = self._chinese_overlap_score(text_lower, card.question_text.lower())
-                if overlap > 0.1:
-                    score += 2.0 * overlap
-
-            coverage_rule = getattr(card, "coverage_rule", None) or {}
-            keywords = (
-                coverage_rule.get("expectedKeywords", [])
-                or coverage_rule.get("expected_keywords", [])
-                or []
-            )
-            for kw in keywords:
-                if kw and kw.lower() in text_lower:
-                    score += 3.0
-
-            anchors = (
-                coverage_rule.get("semanticAnchors", [])
-                or coverage_rule.get("semantic_anchors", [])
-                or []
-            )
-            for anchor in anchors:
-                if anchor and anchor.lower() in text_lower:
-                    score += 2.0
+            score = self._score_question_route(text_lower, card)
 
             if score > 0.3:
                 scored.append((score, card_data))
@@ -444,12 +414,7 @@ class AnswerEvaluationEngine:
         section_id: str,
         speaker: str = "interviewee",
     ) -> List[Dict[str, Any]]:
-        """Evaluate an answer for completion.
-
-        When a manual active card or AI-detected card hint exists, evaluation
-        is EXCLUSIVE to that card. Other cards cannot accumulate completion
-        from the same answer utterance.
-        """
+        """Evaluate speaker-neutral content for one or more related cards."""
         from app.models.interview_session import InterviewSession
 
         session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
@@ -457,91 +422,75 @@ class AnswerEvaluationEngine:
         active_source = session.active_card_source if session else None
         active_hint_id = active_card_id or (session.active_card_hint_id if session else None)
 
-        # If no active card and pending_answer_buffer exists, buffer this utterance
-        if not active_hint_id and session and session.pending_answer_buffer is not None:
+        manual_selection_sources = {
+            "user_confirmed",
+            "manual_selected",
+            "human_confirmed_ai_suggestion",
+        }
+        is_manual_selection = bool(active_card_id) and active_source in manual_selection_sources
+
+        # If no card has been confirmed by a human yet, keep a short replay
+        # buffer.  This lets the interviewer confirm an AI suggestion a moment
+        # late without losing the answer segment, while avoiding unlimited
+        # attribution of older small talk to the next selected card.
+        if not is_manual_selection and session:
             buffer = session.pending_answer_buffer or []
             buffer.append(utterance_id)
-            session.pending_answer_buffer = buffer
+            session.pending_answer_buffer = buffer[-5:]
             db.commit()
             logger.info(
-                f"Buffered utterance {utterance_id} (waiting for card confirmation, buffer={len(buffer)})"
+                f"Buffered utterance {utterance_id} "
+                f"(waiting for card confirmation, buffer={len(session.pending_answer_buffer)})"
             )
             return []
 
-        # Once either the user or the question router has selected a card, the
-        # following answer belongs to that card only. A manually selected card
-        # still wins over the AI hint via active_hint_id above.
-        is_manual_selection = active_card_id and active_source in (
-            "user_confirmed",
-            "manual_selected",
+        primary_card_id = active_card_id if is_manual_selection else active_hint_id
+        candidate_cards = self._load_candidate_cards(
+            db,
+            session_id,
+            section_id,
+            statuses=["listening", "probably_sufficient", "at_risk"],
         )
-        evaluation_card_id = active_card_id if is_manual_selection else active_hint_id
-        is_exclusive = bool(evaluation_card_id)
+        if not candidate_cards:
+            logger.info("No candidate cards found for answer; skipping")
+            return []
 
-        if is_exclusive:
-            # Only load and evaluate the selected/detected card. If it is no
-            # longer evaluable, stop instead of leaking the answer to a pending
-            # sibling card.
-            candidate_cards = self._load_candidate_cards(
-                db,
-                session_id,
-                section_id,
-                active_card_id=evaluation_card_id,
-                statuses=["listening", "probably_sufficient", "at_risk"],
+        filtered_candidates = self._prefilter_candidates(utterance_text, candidate_cards)
+
+        if primary_card_id and not any(
+            c["card"].id == primary_card_id for c in filtered_candidates
+        ):
+            primary_card = next(
+                (c for c in candidate_cards if c["card"].id == primary_card_id),
+                None,
             )
-            if not candidate_cards:
-                logger.info(
-                    "Selected card %s not in evaluable state; skipping",
-                    evaluation_card_id,
-                )
-                return []
+            if primary_card:
+                filtered_candidates.insert(0, primary_card)
 
-            filtered_candidates = [
-                c
-                for c in candidate_cards
-                if question_rubric_service.get_rubric_if_cached(c["card"]) is not None
-            ]
-            if not filtered_candidates:
-                return []
+        deduped_candidates = []
+        seen_card_ids = set()
+        for candidate in filtered_candidates:
+            card_id = candidate["card"].id
+            if card_id in seen_card_ids:
+                continue
+            seen_card_ids.add(card_id)
+            deduped_candidates.append(candidate)
 
-            logger.info(
-                "Exclusive mode: evaluating only %s card %s",
-                "manual" if is_manual_selection else "AI-detected",
-                evaluation_card_id,
-            )
-        else:
-            # NON-EXCLUSIVE: evaluate all candidates (legacy/no-active-card mode)
-            candidate_cards = self._load_candidate_cards(
-                db,
-                session_id,
-                section_id,
-                statuses=["pending", "listening", "probably_sufficient", "at_risk"],
-            )
-            if not candidate_cards:
-                logger.info("No candidate cards found for answer; skipping")
-                return []
+        filtered_candidates = [
+            c
+            for c in deduped_candidates[:5]
+            if question_rubric_service.get_rubric_if_cached(c["card"]) is not None
+        ]
 
-            filtered_candidates = self._prefilter_candidates(utterance_text, candidate_cards)
-            filtered_candidates = [
-                c
-                for c in filtered_candidates
-                if question_rubric_service.get_rubric_if_cached(c["card"]) is not None
-            ]
+        if not filtered_candidates:
+            logger.info("No rubric-ready candidates after prefilter")
+            return []
 
-            if active_hint_id and not any(
-                c["card"].id == active_hint_id for c in filtered_candidates
-            ):
-                hint_card = next(
-                    (c for c in candidate_cards if c["card"].id == active_hint_id), None
-                )
-                if hint_card and question_rubric_service.get_rubric_if_cached(hint_card["card"]):
-                    filtered_candidates.insert(0, hint_card)
-
-            if not filtered_candidates:
-                logger.info("No rubric-ready candidates after prefilter")
-                return []
-
-            logger.info(f"Non-exclusive mode: evaluating {len(filtered_candidates)} candidates")
+        logger.info(
+            "Multi-card evaluation: evaluating %s candidates (primary=%s)",
+            len(filtered_candidates),
+            primary_card_id,
+        )
 
         recent_context = self._build_structured_context(
             db,
@@ -559,20 +508,13 @@ class AnswerEvaluationEngine:
             db=db,
         )
 
-        # In exclusive mode, no pending-card gating needed (only active card is evaluated)
-        # In non-exclusive mode, one answer turn can advance at most one pending card
-        has_advanced_pending = False
-        max_confidence = (
-            max((j.get("confidence", 0) for j in judgments), default=0) if not is_exclusive else 0
-        )
-
         updates = []
         for card_data, judgment in zip(filtered_candidates, judgments):
             card = card_data["card"]
             card_state = card_data["state"]
             conf = judgment.get("confidence", 0)
 
-            if not is_exclusive and card_state.status == "pending":
+            if card_state.status == "pending":
                 response_status = judgment.get("response_status")
                 if conf < 0.35 or response_status in {
                     "question_only",
@@ -580,11 +522,6 @@ class AnswerEvaluationEngine:
                     "not_yet",
                 }:
                     continue
-                if conf < max_confidence:
-                    continue
-                if has_advanced_pending:
-                    continue
-                has_advanced_pending = True
 
             update = self._update_card_state(
                 db=db,
@@ -709,6 +646,59 @@ class AnswerEvaluationEngine:
         if not ref_ngrams:
             return 0.0
         return len(text_ngrams & ref_ngrams) / len(ref_ngrams)
+
+    def _score_question_route(self, text_lower: str, card: QuestionCard) -> float:
+        """Score how strongly a question-like utterance routes to a card.
+
+        The spoken question should primarily match the card's actual question
+        text. Coverage keywords and anchors are recall hints, but many are broad
+        domain words such as "預約" or "當日"; they should not overtake a
+        near-identical question.
+        """
+        score = 0.0
+
+        question_text = (card.question_text or "").lower()
+        if question_text:
+            question_overlap = self._chinese_overlap_score(text_lower, question_text)
+            if question_overlap > 0.1:
+                score += 6.0 * question_overlap
+
+            sequence_similarity = SequenceMatcher(None, text_lower, question_text).ratio()
+            if sequence_similarity > 0.25:
+                score += 4.0 * sequence_similarity
+
+        focus_text = (card.focus_text or "").lower()
+        if focus_text:
+            focus_overlap = self._chinese_overlap_score(text_lower, focus_text)
+            if focus_overlap > 0.1:
+                score += 1.5 * focus_overlap
+
+        coverage_rule = getattr(card, "coverage_rule", None) or {}
+        keywords = (
+            coverage_rule.get("expectedKeywords", [])
+            or coverage_rule.get("expected_keywords", [])
+            or []
+        )
+        keyword_score = 0.0
+        for keyword in keywords:
+            keyword_lower = str(keyword or "").lower().strip()
+            if keyword_lower and keyword_lower in text_lower:
+                keyword_score += 0.4
+        score += min(keyword_score, 1.6)
+
+        anchors = (
+            coverage_rule.get("semanticAnchors", [])
+            or coverage_rule.get("semantic_anchors", [])
+            or []
+        )
+        anchor_score = 0.0
+        for anchor in anchors:
+            anchor_lower = str(anchor or "").lower().strip()
+            if anchor_lower and anchor_lower in text_lower:
+                anchor_score += 1.0
+        score += min(anchor_score, 3.0)
+
+        return score
 
     _STATE_PRIORITY_BONUS = {
         "listening": 5.0,
@@ -958,7 +948,7 @@ class AnswerEvaluationEngine:
             "【重要】輸入來自即時語音辨識，可能有錯字、漏字、斷句不完整。請根據語意而非字面判斷。\n\n"
             "【最重要規則：區分「話題啟動」與「回答完成」】\n"
             "話題啟動 = 有人提到這張卡片的主題（提問、引導、或概述）。\n"
-            "回答完成 = 受訪者提供了具體的情境、例子、行動、決策、數據或結果。\n"
+            "回答完成 = 語句內容提供了具體的情境、例子、行動、決策、數據或結果。\n"
             "話題啟動 ≠ 回答完成。提問只是啟動，不是完成。\n\n"
             "如果對話中最新的相關內容是提問形式（結尾是「嗎」「呢」「？」或含「哪些」「什麼」「如何」等疑問詞），"
             "即使提到了 criterion 的關鍵字：\n"
@@ -967,32 +957,32 @@ class AnswerEvaluationEngine:
             "- 所有 criteria 必須設為 not_addressed\n"
             "- 不得給 partially_satisfied 或 satisfied\n\n"
             "只有以下情況才可標記 partially_satisfied 或 satisfied：\n"
-            "- 受訪者描述了一個具體情境（「像是客戶要我...」「上次遇到...」）\n"
-            "- 受訪者提供了一個具體例子或行動\n"
-            "- 受訪者表達了明確的觀點或決策\n"
-            "- 受訪者提供了數據或量化資訊\n\n"
+            "- 語句描述了一個具體情境（「像是客戶要我...」「上次遇到...」）\n"
+            "- 語句提供了一個具體例子或行動\n"
+            "- 語句表達了明確的觀點或決策\n"
+            "- 語句提供了數據或量化資訊\n\n"
             "判斷規則：\n"
             "1. 每張卡片有多個 criteria（評估項目），你必須逐項判斷。\n"
             "2. 只有實質回答（描述具體情況、表達明確觀點、提供資訊）才算滿足 criterion。\n"
             "3. 提問本身絕對不算滿足任何 criterion，即使提問中包含 criterion 的關鍵字。\n"
             "4. 每個 criterion 的 status 必須是以下之一：\n"
-            "   - satisfied：受訪者已給出明確、完整的回答，且有原文引述\n"
-            "   - partially_satisfied：受訪者有提供部分資訊但不完整（必須是回答內容，不是提問）\n"
-            "   - attempted_but_unresolved：受訪者嘗試回答但未能解決（如「不確定」「要再確認」）\n"
+            "   - satisfied：已有明確、完整的回答內容，且有原文引述\n"
+            "   - partially_satisfied：有提供部分資訊但不完整（必須是回答內容，不是提問）\n"
+            "   - attempted_but_unresolved：語句嘗試回答但未能解決（如「不確定」「要再確認」）\n"
             "   - not_addressed：未提及，或僅在提問中提到關鍵字但尚無回答\n"
             "   - contradicted：前後矛盾或否定先前的回答\n"
             "   - not_applicable：該 criterion 不適用於此情境\n"
-            "5. evidence_quotes 必須來自受訪者的回答句，不能來自提問句。\n"
+            "5. evidence_quotes 必須來自具有實質資訊的回答句，不能來自提問句。\n"
             "6. 沒有原文支持就不能標記 satisfied。\n\n"
             "每張卡片的 relation 欄位判斷：\n"
-            "- answer：受訪者正在回答這個問題（必須有具體回答內容）\n"
+            "- answer：語句正在回答這個問題（必須有具體回答內容）\n"
             "- topic_mention：話題被提到但尚無實質回答（含提問、引導語）\n"
             "- tangential：提到了相關主題但不是直接回答\n"
             "- irrelevant：完全無關\n\n"
             "response_status 判斷：\n"
-            "- responded：受訪者已給出實質回應（具體情境、例子、觀點、數據）\n"
+            "- responded：語句已給出實質回應（具體情境、例子、觀點、數據）\n"
             "- question_only：目前只有提問或引導語，尚無實質回答\n"
-            "- clarification_question：受訪者反問以釐清問題\n"
+            "- clarification_question：語句是在反問以釐清問題\n"
             "- not_yet：尚未被討論\n\n"
             "resolution_status 判斷：\n"
             "- resolved：問題已被充分回答\n"
@@ -1009,7 +999,8 @@ class AnswerEvaluationEngine:
             "重要限制：\n"
             "- evaluations 陣列長度必須等於卡片數量，順序一一對應。\n"
             "- 禁止輸出 completion_score 或 is_sufficient（由程式計算）。\n"
-            "- 每句話通常只對應 0 或 1 張卡片。relation 為 answer 的卡片不應超過 1 張。\n"
+            "- 一句話可以同時回答多張卡片，但每張 relation 為 answer 的卡片都必須有自己的具體 evidence_quotes。\n"
+            "- 不得因為主題相近就替其他卡片累積完成度；只有完成條件被明確回答才可更新該卡。\n"
             "- 判斷時要看整段累計對話，不只看最新一句。\n"
             "- 如果對話中只有提問尚無回答，response_status 必須是 question_only，relation 必須是 topic_mention，"
             "所有 criteria 必須是 not_addressed。\n"
@@ -1187,6 +1178,12 @@ class AnswerEvaluationEngine:
         new_status, new_activation, new_completion = reduce_card_state(
             current_status=old_status, judgment=judgment, is_partial=is_partial
         )
+        # AI can suggest that a card is probably covered, but completion is a
+        # product decision left to the interviewer.  Terminal completion states
+        # are only produced by explicit manual actions (see manual_complete_card).
+        if not is_partial and new_status == "sufficient":
+            new_status = "probably_sufficient"
+            new_completion = min(new_completion, 0.85)
         # Scores only accumulate upward (never decrease)
         new_activation = max(current_activation, new_activation)
         new_completion = max(current_completion, new_completion)

@@ -78,6 +78,8 @@ function renderCards(
   setActiveCardId = vi.fn(),
   detectedCardId: string | null = null,
   cardStates: CardState[] = listeningCardStates,
+  previewDetectedCardIds: string[] = [],
+  ignoreSuggestedCard = vi.fn(),
 ) {
   const rendered = render(
     <ThemeCardsList
@@ -85,12 +87,14 @@ function renderCards(
       cardStates={cardStates}
       activeCardId={activeCardId}
       detectedCardId={detectedCardId}
+      previewDetectedCardIds={previewDetectedCardIds}
       sessionId="session-1"
       setActiveCardId={setActiveCardId}
+      ignoreSuggestedCard={ignoreSuggestedCard}
       updateCardFromEvent={vi.fn()}
     />,
   )
-  return { setActiveCardId, ...rendered }
+  return { setActiveCardId, ignoreSuggestedCard, ...rendered }
 }
 
 describe('ThemeCardsList active card controls', () => {
@@ -105,23 +109,64 @@ describe('ThemeCardsList active card controls', () => {
     expect(screen.queryByRole('button', { name: '取消目前問題' })).not.toBeInTheDocument()
   })
 
-  it('uses the same unlabeled yellow glow for AI detection and manual selection', () => {
+  it('shows AI suggestions as confirmable suggestions and manual selection as active', () => {
     const { container, unmount } = renderCards(null, vi.fn(), 'card-1')
 
     const detectedCard = container.querySelector('[data-ai-detected="true"]')
-    expect(detectedCard).toHaveClass('motion-ai-card-glow', 'border-yellow-300', 'bg-yellow-50')
-    expect(screen.queryByText('AI 偵測中')).not.toBeInTheDocument()
-    expect(screen.queryByText('目前問題')).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '設為目前問題' })).toBeInTheDocument()
+    expect(detectedCard).toHaveClass('border-yellow-200', 'bg-yellow-50/50')
+    expect(screen.getByText('AI 建議')).toBeInTheDocument()
+    expect(screen.getByText('AI 建議')).toHaveAttribute('data-source-label', 'ai')
+    expect(screen.getByRole('button', { name: '✓ 確認此題' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '忽略' })).toBeInTheDocument()
 
     unmount()
     const manuallySelected = renderCards('card-1', vi.fn(), 'card-1')
 
     const currentCard = manuallySelected.container.querySelector('[data-current-card="true"]')
     expect(currentCard).toHaveClass('motion-ai-card-glow', 'border-yellow-300', 'bg-yellow-50')
-    expect(screen.queryByText('目前問題')).not.toBeInTheDocument()
-    expect(screen.queryByText('AI 偵測中')).not.toBeInTheDocument()
+    expect(screen.getByText('人工確認')).toBeInTheDocument()
+    expect(screen.getByText('人工確認')).toHaveAttribute('data-source-label', 'manual')
+    expect(screen.queryByText('AI 建議')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: '取消目前問題' })).toBeInTheDocument()
+  })
+
+  it('shows a softer AI label for front-end preview detection', () => {
+    const { container } = renderCards(null, vi.fn(), null, listeningCardStates, ['card-1'])
+
+    const previewCard = container.querySelector('[data-ai-preview-detected="true"]')
+    expect(previewCard).toHaveClass('border-yellow-200', 'bg-yellow-50/40')
+    expect(screen.getByText('AI 建議')).toHaveAttribute('data-source-label', 'ai')
+    expect(screen.getByRole('button', { name: '✓ 確認此題' })).toBeInTheDocument()
+  })
+
+  it('confirms an AI suggestion before activating the card', async () => {
+    vi.mocked(interviewAPI.confirmActiveCard).mockResolvedValueOnce({ ok: true, cardId: 'card-1' })
+    const setActiveCardId = vi.fn()
+    renderCards(null, setActiveCardId, 'card-1')
+
+    fireEvent.click(screen.getByRole('button', { name: '✓ 確認此題' }))
+
+    expect(screen.getByRole('button', { name: '確認中…' })).toBeDisabled()
+
+    await waitFor(() => {
+      expect(interviewAPI.confirmActiveCard).toHaveBeenCalledWith(
+        'session-1',
+        'card-1',
+        'human_confirmed_ai_suggestion',
+      )
+    })
+    expect(setActiveCardId).toHaveBeenCalledWith('card-1')
+  })
+
+  it('ignores an AI suggestion without changing backend state', () => {
+    const ignoreSuggestedCard = vi.fn()
+    renderCards(null, vi.fn(), 'card-1', listeningCardStates, [], ignoreSuggestedCard)
+
+    fireEvent.click(screen.getByRole('button', { name: '忽略' }))
+
+    expect(ignoreSuggestedCard).toHaveBeenCalledWith('card-1')
+    expect(interviewAPI.clearActiveCard).not.toHaveBeenCalled()
+    expect(interviewAPI.confirmActiveCard).not.toHaveBeenCalled()
   })
 
   it('never shows yellow glow on a completed card with stale routing ids', () => {

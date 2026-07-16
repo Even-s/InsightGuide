@@ -38,21 +38,36 @@ export function getActiveCardId(cardStates: CardState[], activeSectionId?: strin
   return activeCard?.questionCard.id ?? null
 }
 
-export function findAskedCard(text: string, cardStates: CardState[], activeSectionId?: string): string | null {
-  if (!activeSectionId || !text) return null
+export function findAskedCards(
+  text: string,
+  cardStates: CardState[],
+  activeSectionId?: string,
+  limit = 3,
+  options: {
+    requireQuestionEnding?: boolean
+    minScore?: number
+    includeListening?: boolean
+  } = {},
+): string[] {
+  if (!activeSectionId || !text) return []
 
+  const trimmed = text.trim()
   const QUESTION_ENDINGS = ['?', '？', '呢', '嗎']
-  const isQuestion = QUESTION_ENDINGS.some(e => text.trim().endsWith(e))
-  if (!isQuestion) return null
+  const questionCuePattern = /(哪|哪些|什麼|甚麼|如何|怎麼|為什麼|是否|會不會|能不能|可不可以|幾|誰|多少|嗎|呢|？|\?)/
+  const isQuestion =
+    QUESTION_ENDINGS.some(e => trimmed.endsWith(e)) || questionCuePattern.test(trimmed)
+  if ((options.requireQuestionEnding ?? true) && !isQuestion) return []
 
   const sectionCards = cardStates.filter(cs => {
     const qc = cs.questionCard
     return (qc.interviewThemeId === activeSectionId || qc.sectionId === activeSectionId)
       && cs.status !== 'sufficient'
+      && cs.status !== 'covered'
+      && cs.status !== 'manually_checked'
+      && ((options.includeListening ?? true) || cs.status !== 'listening')
   })
 
-  let bestScore = 0
-  let bestId: string | null = null
+  const scored: Array<{ id: string; score: number }> = []
   const textLower = text.toLowerCase()
 
   for (const cs of sectionCards) {
@@ -74,13 +89,20 @@ export function findAskedCard(text: string, cardStates: CardState[], activeSecti
       }
     }
 
-    if (score > bestScore) {
-      bestScore = score
-      bestId = qc.id
-    }
+    if (score > 1.0) scored.push({ id: qc.id, score })
   }
 
-  return bestScore > 1.0 ? bestId : null
+  scored.sort((a, b) => b.score - a.score)
+  const bestScore = scored[0]?.score ?? 0
+  const threshold = Math.max(options.minScore ?? 1.0, bestScore * 0.65)
+  return scored
+    .filter(item => item.score >= threshold)
+    .slice(0, limit)
+    .map(item => item.id)
+}
+
+export function findAskedCard(text: string, cardStates: CardState[], activeSectionId?: string): string | null {
+  return findAskedCards(text, cardStates, activeSectionId, 1)[0] ?? null
 }
 
 export interface FollowupPrompt {

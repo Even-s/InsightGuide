@@ -150,6 +150,7 @@ class UtteranceCreate(BaseModel):
     endedAt: Optional[datetime] = None
     realtimeItemId: Optional[str] = None
     askedCardId: Optional[str] = None
+    askedCardIds: Optional[List[str]] = None
 
 
 class PartialTranscriptMatchCreate(BaseModel):

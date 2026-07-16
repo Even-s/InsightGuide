@@ -3,7 +3,7 @@ import { interviewAPI } from '@/api/interview'
 import { useRealtimeTranscription } from '@/hooks/useRealtimeTranscription'
 import type { PresenterSessionRefs } from './usePresenterSessionRefs'
 import { simplifiedToTraditional } from '@/utils/chineseConverter'
-import { findAskedCard, getActiveCardId } from '@/components/PresenterMode/presenterUtils'
+import { findAskedCards, getActiveCardId } from '@/components/PresenterMode/presenterUtils'
 import type {
   AudioDiagnosticsSnapshot,
   AudioProcessingProfile,
@@ -14,6 +14,8 @@ interface UseTranscriptProcessingOptions {
   refs: PresenterSessionRefs
   candidateCards: Array<{ cardId: string; questionText: string; focusText: string; score: number }>
   onBufferedAnswer: () => void
+  onPreviewDetectedCards?: (cardIds: string[]) => void
+  onClearPreviewDetectedCards?: () => void
   diagnosticsEnabled?: boolean
   audioProcessingProfile?: AudioProcessingProfile
 }
@@ -68,6 +70,8 @@ export function useTranscriptProcessing({
   refs,
   candidateCards,
   onBufferedAnswer,
+  onPreviewDetectedCards,
+  onClearPreviewDetectedCards,
   diagnosticsEnabled = false,
   audioProcessingProfile = 'standard',
 }: UseTranscriptProcessingOptions): TranscriptProcessingResult {
@@ -81,6 +85,7 @@ export function useTranscriptProcessing({
   const partialMatchInFlightRef = useRef(false)
   const pendingPartialMatchRef = useRef<string | null>(null)
   const lastPartialMatchTextRef = useRef('')
+  const lastPreviewTextRef = useRef('')
   const pendingSavePromisesRef = useRef(new Set<Promise<unknown>>())
 
   useEffect(() => {
@@ -134,6 +139,34 @@ export function useTranscriptProcessing({
     }, 800)
   }, [sendPartialTranscriptMatch])
 
+  const previewQuestionCardsFromPartial = useCallback((text: string) => {
+    const activeTheme = refs.currentThemeRef.current
+    const activeSlide = refs.currentSectionRef.current
+    const activeId = activeTheme?.id ?? activeSlide?.id
+    const trimmed = text.trim()
+
+    if (!activeId || !refs.isPresentingRef.current || trimmed.length < 15) return
+    if (trimmed === lastPreviewTextRef.current) return
+    if (trimmed.length - lastPreviewTextRef.current.length < 8) return
+
+    const askedCards = findAskedCards(
+      trimmed,
+      refs.cardStatesRef.current,
+      activeId,
+      2,
+      {
+        requireQuestionEnding: false,
+        minScore: 1.4,
+        includeListening: false,
+      },
+    )
+
+    if (askedCards.length > 0) {
+      lastPreviewTextRef.current = trimmed
+      onPreviewDetectedCards?.(askedCards)
+    }
+  }, [onPreviewDetectedCards, refs])
+
   const handleTranscriptCompleted = useCallback((payload: {
     transcript: string
     itemId?: string
@@ -147,6 +180,7 @@ export function useTranscriptProcessing({
 
     partialTranscriptRef.current = ''
     lastPartialMatchTextRef.current = ''
+    lastPreviewTextRef.current = ''
     pendingPartialMatchRef.current = null
     if (partialMatchTimeoutRef.current) {
       clearTimeout(partialMatchTimeoutRef.current)
@@ -167,9 +201,16 @@ export function useTranscriptProcessing({
     setPendingTranscript('')
     setTranscriptionError(null)
 
-    const askedCard = activeId
-      ? findAskedCard(text, refs.cardStatesRef.current, activeId)
-      : null
+    const askedCards = activeId
+      ? findAskedCards(text, refs.cardStatesRef.current, activeId)
+      : []
+    const askedCard = askedCards[0] ?? null
+
+    if (askedCards.length > 0) {
+      onPreviewDetectedCards?.(askedCards.slice(0, 2))
+    } else {
+      onClearPreviewDetectedCards?.()
+    }
 
     const savePromise = interviewAPI.createUtterance(
       sessionId,
@@ -179,6 +220,7 @@ export function useTranscriptProcessing({
       payload.startedAt,
       payload.endedAt,
       askedCard ?? undefined,
+      askedCards.length > 0 ? askedCards : undefined,
     )
       .then(() => {
         if (candidateCards.length > 0 && !askedCard) {
@@ -193,7 +235,7 @@ export function useTranscriptProcessing({
         pendingSavePromisesRef.current.delete(savePromise)
       })
     pendingSavePromisesRef.current.add(savePromise)
-  }, [sessionId, refs, candidateCards.length, onBufferedAnswer])
+  }, [sessionId, refs, candidateCards.length, onBufferedAnswer, onPreviewDetectedCards, onClearPreviewDetectedCards])
 
   const flushTranscriptSaves = useCallback(async () => {
     await Promise.allSettled(Array.from(pendingSavePromisesRef.current))
@@ -215,6 +257,8 @@ export function useTranscriptProcessing({
       setTranscriptionError(null)
       setPendingTranscript('正在聽取...')
       partialTranscriptRef.current = ''
+      lastPreviewTextRef.current = ''
+      onClearPreviewDetectedCards?.()
     },
     onTranscriptDelta: (delta, itemId) => {
       const convertedDelta = simplifiedToTraditional(delta)
@@ -225,6 +269,7 @@ export function useTranscriptProcessing({
             : `${previous}${convertedDelta}`
 
         partialTranscriptRef.current = nextTranscript
+        previewQuestionCardsFromPartial(nextTranscript)
         schedulePartialTranscriptMatch(nextTranscript, itemId)
         return nextTranscript
       })

@@ -28,13 +28,17 @@ export default function CandidateSuggestionBar({
 
   return (
     <div className="mx-auto max-w-3xl mb-4 rounded-xl border border-wood-200 bg-wood-50 p-3 shadow-natural animate-themeFadeIn">
-      <p className="text-xs font-medium text-wood-500 mb-2">系統建議正在問的問題：</p>
+      <p className="text-xs font-medium text-wood-500 mb-2">AI 建議可能正在問的問題：</p>
       <div className="space-y-1.5">
         {candidateCards.map((c) => (
           <button
             key={c.cardId}
             onClick={() => {
-              interviewAPI.confirmActiveCard(sessionId, c.cardId)
+              interviewAPI.confirmActiveCard(
+                sessionId,
+                c.cardId,
+                'human_confirmed_ai_suggestion',
+              )
               setActiveCardId(c.cardId)
               setCandidateCards([])
               setBufferedAnswerCount(0)

@@ -60,6 +60,7 @@ async def create_utterance(
             theme_id,
             utterance_obj.speaker or "realtime",
             utterance.askedCardId,
+            utterance.askedCardIds,
         )
 
         return convert_utterance_to_schema(utterance_obj)
@@ -79,6 +80,7 @@ def process_utterance_evaluation_background(
     section_id: Optional[str],
     speaker: str,
     asked_card_id: Optional[str] = None,
+    asked_card_ids: Optional[List[str]] = None,
 ):
     """Background task to process utterance evaluation with debounce.
 
@@ -149,11 +151,17 @@ def process_utterance_evaluation_background(
             section_id=section_id,
             speaker=speaker,
             asked_card_id=asked_card_id,
+            asked_card_ids=asked_card_ids,
         )
         eval_elapsed = (time.perf_counter() - eval_start) * 1000
 
-        # If question was detected and no card was auto-activated, emit candidates
-        if not updates and not asked_card_id and is_question_like(transcript):
+        # If question was detected and no card was suggested, emit candidates
+        if (
+            not updates
+            and not asked_card_id
+            and not asked_card_ids
+            and is_question_like(transcript)
+        ):
             candidates = answer_evaluation_engine.find_candidate_cards(
                 db, session_id, section_id or "", transcript, top_k=3
             )
@@ -176,8 +184,8 @@ def process_utterance_evaluation_background(
             activation_score = update.get("activation_score", 0.0)
 
             # Determine event type
-            if update.get("topic_detected"):
-                event_type = "CARD_TOPIC_DETECTED"
+            if update.get("question_suggested"):
+                event_type = "QUESTION_CARD_SUGGESTED"
             elif new_status == "sufficient":
                 event_type = "CARD_COVERED"
             elif new_status == "probably_sufficient":
@@ -204,6 +212,8 @@ def process_utterance_evaluation_background(
                     "evidence": update.get("evidence"),
                     "evidenceTranscript": update.get("evidence_transcript"),
                     "evaluationSeq": update.get("evaluation_seq"),
+                    "suggestionScore": update.get("suggestion_score"),
+                    "source": update.get("suggestion_source"),
                 },
             )
 

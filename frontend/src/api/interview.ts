@@ -158,10 +158,11 @@ export const interviewAPI = {
     startedAt?: string,
     endedAt?: string,
     askedCardId?: string,
+    askedCardIds?: string[],
   ) {
     const response = await apiClient.post(
       `/api/interview-sessions/${sessionId}/utterances`,
-      { transcript, themeId, sectionId: themeId, realtimeItemId, startedAt, endedAt, askedCardId }
+      { transcript, themeId, sectionId: themeId, realtimeItemId, startedAt, endedAt, askedCardId, askedCardIds }
     );
     return response.data;
   },

@@ -56,10 +56,15 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
     candidateCards,
     activeCardId,
     detectedCardId,
+    detectedCardIds,
+    previewDetectedCardIds,
     bufferedAnswerCount,
     followupPrompt,
     followupQueueLength,
     setActiveCardId,
+    previewDetectedCards,
+    clearPreviewDetectedCards,
+    ignoreSuggestedCard,
     setCandidateCards,
     setBufferedAnswerCount,
     handleSkipFollowup,
@@ -100,6 +105,8 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
     refs,
     candidateCards,
     onBufferedAnswer: () => setBufferedAnswerCount(prev => prev + 1),
+    onPreviewDetectedCards: previewDetectedCards,
+    onClearPreviewDetectedCards: clearPreviewDetectedCards,
     diagnosticsEnabled: audioDiagnosticsEnabled,
     audioProcessingProfile: audioDiagnosticsEnabled ? audioProcessingProfile : 'standard',
   })
@@ -294,8 +301,11 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
                   cardStates={cardStates}
                   activeCardId={activeCardId}
                   detectedCardId={detectedCardId}
+                  detectedCardIds={detectedCardIds}
+                  previewDetectedCardIds={previewDetectedCardIds}
                   sessionId={sessionId}
                   setActiveCardId={setActiveCardId}
+                  ignoreSuggestedCard={ignoreSuggestedCard}
                   updateCardFromEvent={updateCardFromEvent}
                 />
               ) : currentSection ? (
