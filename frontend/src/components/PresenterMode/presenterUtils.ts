@@ -24,15 +24,13 @@ export function statusFromEvent(
   return fallback
 }
 
-export function getActiveCardId(cardStates: CardState[], activeSectionId?: string) {
-  if (!activeSectionId) return null
+export function getActiveCardId(cardStates: CardState[], activeThemeId?: string) {
+  if (!activeThemeId) return null
 
   const activeCard = cardStates.find((cardState) => {
     const questionCard = cardState.questionCard
-    const isInActiveSection =
-      questionCard.interviewThemeId === activeSectionId ||
-      questionCard.sectionId === activeSectionId
-    return isInActiveSection && cardState.status === 'listening'
+    const isInActiveTheme = questionCard.themeId === activeThemeId
+    return isInActiveTheme && cardState.status === 'listening'
   })
 
   return activeCard?.questionCard.id ?? null
@@ -41,7 +39,7 @@ export function getActiveCardId(cardStates: CardState[], activeSectionId?: strin
 export function findAskedCards(
   text: string,
   cardStates: CardState[],
-  activeSectionId?: string,
+  activeThemeId?: string,
   limit = 3,
   options: {
     requireQuestionEnding?: boolean
@@ -49,7 +47,7 @@ export function findAskedCards(
     includeListening?: boolean
   } = {},
 ): string[] {
-  if (!activeSectionId || !text) return []
+  if (!activeThemeId || !text) return []
 
   const trimmed = text.trim()
   const QUESTION_ENDINGS = ['?', '？', '呢', '嗎']
@@ -58,9 +56,9 @@ export function findAskedCards(
     QUESTION_ENDINGS.some(e => trimmed.endsWith(e)) || questionCuePattern.test(trimmed)
   if ((options.requireQuestionEnding ?? true) && !isQuestion) return []
 
-  const sectionCards = cardStates.filter(cs => {
+  const themeCards = cardStates.filter(cs => {
     const qc = cs.questionCard
-    return (qc.interviewThemeId === activeSectionId || qc.sectionId === activeSectionId)
+    return qc.themeId === activeThemeId
       && cs.status !== 'sufficient'
       && cs.status !== 'covered'
       && cs.status !== 'manually_checked'
@@ -70,7 +68,7 @@ export function findAskedCards(
   const scored: Array<{ id: string; score: number }> = []
   const textLower = text.toLowerCase()
 
-  for (const cs of sectionCards) {
+  for (const cs of themeCards) {
     const qc = cs.questionCard
     let score = 0
 
@@ -101,8 +99,8 @@ export function findAskedCards(
     .map(item => item.id)
 }
 
-export function findAskedCard(text: string, cardStates: CardState[], activeSectionId?: string): string | null {
-  return findAskedCards(text, cardStates, activeSectionId, 1)[0] ?? null
+export function findAskedCard(text: string, cardStates: CardState[], activeThemeId?: string): string | null {
+  return findAskedCards(text, cardStates, activeThemeId, 1)[0] ?? null
 }
 
 export interface FollowupPrompt {
@@ -114,16 +112,14 @@ export interface FollowupPrompt {
 
 export function buildFollowupPrompt(
   cardStates: CardState[],
-  activeSectionId?: string,
+  activeThemeId?: string,
 ): FollowupPrompt | null {
-  if (!activeSectionId) return null
+  if (!activeThemeId) return null
 
   const activeCardState = cardStates.find((cardState) => {
     const questionCard = cardState.questionCard
-    const isInActiveSection =
-      questionCard.interviewThemeId === activeSectionId ||
-      questionCard.sectionId === activeSectionId
-    return isInActiveSection && (cardState.status === 'listening' || cardState.status === 'probably_sufficient')
+    const isInActiveTheme = questionCard.themeId === activeThemeId
+    return isInActiveTheme && (cardState.status === 'listening' || cardState.status === 'probably_sufficient')
   })
   if (!activeCardState) return null
 
@@ -146,7 +142,7 @@ export function buildFollowupPrompt(
   }
 }
 
-export function getEvidenceReason(evidence: Record<string, unknown>) {
+function getEvidenceReason(evidence: Record<string, unknown>) {
   const directReason = evidence.reason
   if (typeof directReason === 'string' && directReason.trim()) return directReason.trim()
 
@@ -178,7 +174,7 @@ export function getEvidenceSuggestedFollowup(evidence: Record<string, unknown>) 
   return undefined
 }
 
-export function getMissingItems(cardState: CardState) {
+function getMissingItems(cardState: CardState) {
   const evidence = cardState.evidence
   if (!evidence) return []
 
@@ -200,7 +196,7 @@ export function getMissingItems(cardState: CardState) {
     .filter((text): text is string => Boolean(text))
 }
 
-export function resolveCoverageItemText(
+function resolveCoverageItemText(
   id: string,
   coverageRule: CardState['questionCard']['coverageRule'],
 ) {

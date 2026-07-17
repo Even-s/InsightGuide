@@ -26,7 +26,7 @@ def _memo_to_response(memo) -> dict:
         "interviewDurationMinutes": memo.interview_duration_minutes,
         "topicsCovered": memo.topics_covered or [],
         "stakeholderSummary": memo.stakeholder_summary,
-        "qaSummaries": memo.qa_summaries or [],
+        "questionSummaries": memo.question_summaries or [],
         "painPoints": memo.pain_points or [],
         "requirementCandidates": memo.requirement_candidates or [],
         "constraintsAndAssumptions": memo.constraints_and_assumptions or [],
@@ -78,8 +78,8 @@ async def get_insight_memo(session_id: str, db: Session = Depends(get_db)):
 
 @router.get("/projects/{project_id}/insight-memos")
 async def list_project_insight_memos(project_id: str, db: Session = Depends(get_db)):
-    """List all insight memos for a project."""
-    memos = insight_memo_service.get_memos_for_project(db, project_id)
+    """List current insight memos for ready interview rounds in a project."""
+    memos = insight_memo_service.get_current_memos_for_project(db, project_id)
     return {
         "memos": [_memo_to_response(m) for m in memos],
         "total": len(memos),

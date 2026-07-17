@@ -18,7 +18,6 @@ vi.mock('@/hooks/usePresenterSessionRefs', () => ({
   usePresenterSessionRefs: () => ({
     cardStatesRef: { current: [] },
     currentThemeRef: { current: null },
-    currentSectionRef: { current: null },
     isPresentingRef: { current: false },
   }),
 }))
@@ -88,8 +87,6 @@ const defaultSessionReturn = {
   themes: [],
   currentTheme: null,
   currentThemeIndex: 0,
-  currentSection: null,
-  sections: [],
   isLoading: true,
   themePreparing: false,
   error: null,

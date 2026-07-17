@@ -9,7 +9,6 @@ from unittest.mock import Mock, patch
 import pytest
 
 from app.models.question_card import QuestionCard
-from app.models.section import Section
 from app.schemas.question_card import QuestionCardCreate, QuestionCardUpdate
 from app.services.question_card_service import QuestionCardService, question_card_service
 
@@ -34,7 +33,7 @@ class TestQuestionCardService:
         return QuestionCard(
             id="card-123",
             document_id="doc-456",
-            section_id="section-789",
+            interview_theme_id="theme-789",
             question_text="What are the main objectives?",
             question_type="objectives",
             importance="must",

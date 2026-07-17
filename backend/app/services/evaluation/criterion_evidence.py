@@ -41,7 +41,7 @@ def persist_criterion_evidence(
             session_id=session_id,
             card_id=card_id,
             criterion_id=crit_eval.get("criterion_id", ""),
-            utterance_id=utterance_id if not utterance_id.startswith("partial_") else None,
+            utterance_id=utterance_id,
             evaluation_turn_text=utterance_text[:500] if utterance_text else None,
             status=status,
             evidence_quote=(crit_eval.get("evidence_quotes") or [None])[0],
@@ -110,7 +110,6 @@ def derive_state_from_ledger(
     session_id: str,
     card_id: str,
     rubric_criteria: List[Dict[str, Any]],
-    is_partial: bool = False,
 ) -> tuple:
     """Derive card state from evidence ledger using deterministic scorer.
 
@@ -121,8 +120,6 @@ def derive_state_from_ledger(
         session_id: Interview session ID
         card_id: Question card ID
         rubric_criteria: List of rubric criteria dicts
-        is_partial: Whether this is a partial evaluation
-
     Returns:
         Tuple of (state_string, completion_score)
     """
@@ -156,6 +153,6 @@ def derive_state_from_ledger(
     )
 
     state = answer_completion_scorer.determine_state(
-        completion_score, is_sufficient, has_response, is_partial
+        completion_score, is_sufficient, has_response
     )
     return (state, completion_score)

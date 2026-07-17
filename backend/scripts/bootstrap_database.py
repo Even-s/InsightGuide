@@ -10,13 +10,22 @@ already have Alembic ownership continue through the normal upgrade path.
 from __future__ import annotations
 
 import os
+import sys
+from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import inspect, text
 
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
 import app.models  # noqa: F401  Registers every current model on Base.metadata.
 from app.db.session import Base, engine
+
+DEFAULT_USER_ID = "user_default"
+DEFAULT_USER_EMAIL = "demo@insightguide.local"
 
 
 def alembic_config() -> Config:
@@ -24,6 +33,20 @@ def alembic_config() -> Config:
     config = Config("alembic.ini")
     config.set_main_option("sqlalchemy.url", os.environ["DATABASE_URL"])
     return config
+
+
+def ensure_default_user() -> None:
+    """Ensure the development/default user required by FK relationships exists."""
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO users (id, email, hashed_password, created_at, updated_at) "
+                "VALUES (:id, :email, 'not_used', NOW(), NOW()) "
+                "ON CONFLICT (id) DO UPDATE SET "
+                "email = EXCLUDED.email, updated_at = NOW()"
+            ),
+            {"id": DEFAULT_USER_ID, "email": DEFAULT_USER_EMAIL},
+        )
 
 
 def main() -> None:
@@ -42,6 +65,7 @@ def main() -> None:
             connection.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
             Base.metadata.create_all(bind=connection)
         command.stamp(config, "head")
+        ensure_default_user()
         print("Database baseline created and stamped at the current Alembic head.")
         return
 
@@ -53,6 +77,7 @@ def main() -> None:
 
     print("Existing Alembic-managed database detected; applying migrations.")
     command.upgrade(config, "head")
+    ensure_default_user()
     print("Database migrations completed.")
 
 

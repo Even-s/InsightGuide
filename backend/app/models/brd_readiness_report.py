@@ -27,8 +27,8 @@ class BRDReadinessReport(Base):
     generation_mode = Column(String, nullable=True)
     recommendation = Column(Text, nullable=True)
 
-    ready_sections = Column(JSON, nullable=False, default=[])
-    insufficient_sections = Column(JSON, nullable=False, default=[])
+    ready_chapters = Column(JSON, nullable=False, default=[])
+    insufficient_chapters = Column(JSON, nullable=False, default=[])
     unresolved_conflicts = Column(JSON, nullable=False, default=[])
     suggested_next_interviews = Column(JSON, nullable=False, default=[])
 

@@ -30,9 +30,8 @@ def convert_session_to_schema(session, db: Optional[Session] = None) -> Intervie
         interviewRoundId=session.interview_round_id,
         continuedFromSessionId=session.continued_from_session_id,
         status=session.status,
-        currentSectionId=session.current_section_id,
+        currentThemeId=session.current_theme_id,
         activeCardId=session.active_card_id,
-        activeCardHintId=session.active_card_hint_id,
         startedAt=session.started_at,
         endedAt=session.ended_at,
         pausedAt=session.paused_at,
@@ -45,21 +44,16 @@ def convert_session_to_schema(session, db: Optional[Session] = None) -> Intervie
 
 
 def convert_utterance_to_schema(utterance) -> UtteranceSchema:
-    """Convert any transcript row to the speaker-neutral public schema."""
-    realtime_id = getattr(utterance, "realtime_event_id", None) or getattr(
-        utterance, "realtime_item_id", None
-    )
-    section_id = getattr(utterance, "section_id", None) or getattr(utterance, "theme_id", None)
-
+    """Convert any Realtime transcript row to the role-neutral public schema."""
     return UtteranceSchema(
         id=utterance.id,
         sessionId=utterance.session_id,
-        sectionId=section_id,
-        speaker="realtime",
+        themeId=getattr(utterance, "theme_id", None),
+        askedCardIds=getattr(utterance, "asked_card_ids", None) or [],
         transcript=utterance.transcript,
         startedAt=getattr(utterance, "started_at", None),
         endedAt=getattr(utterance, "ended_at", None),
-        realtimeItemId=realtime_id,
+        realtimeItemId=getattr(utterance, "realtime_event_id", None),
         createdAt=getattr(utterance, "created_at", None),
     )
 

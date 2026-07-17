@@ -2,6 +2,7 @@
 
 from typing import List
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -38,7 +39,7 @@ class Settings(BaseSettings):
 
     # OpenAI
     OPENAI_API_KEY: str = ""
-    DOCUMENT_ANALYSIS_MODEL: str = "gpt-5.5"  # For requirements document analysis
+    DOCUMENT_ANALYSIS_MODEL: str = "gpt-5.5"  # For interview guide document analysis
     REALTIME_TRANSCRIPTION_MODEL: str = (
         "gpt-realtime-whisper"  # Realtime Whisper model for transcription
     )
@@ -69,5 +70,19 @@ class Settings(BaseSettings):
     # Session
     SESSION_TIMEOUT_SECONDS: int = 7200
     REALTIME_SESSION_TIMEOUT_SECONDS: int = 3600
+    UTTERANCE_EVALUATION_DEBOUNCE_SECONDS: float = 0.4
+
+    @field_validator("DEBUG", mode="before")
+    @classmethod
+    def normalize_debug(cls, value):
+        """Accept legacy environment labels that used to be stored in DEBUG."""
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"release", "prod", "production"}:
+                return False
+            if normalized in {"dev", "development"}:
+                return True
+        return value
+
 
 settings = Settings()

@@ -10,13 +10,10 @@ from app.api.routes import (
     prep_sessions,
     question_cards,
     realtime,
-    sections,
-    session_reports,
 )
 
 __all__ = [
     "documents",
-    "sections",
     "question_cards",
     "interview_sessions",
     "interview_rounds",
@@ -24,5 +21,4 @@ __all__ = [
     "realtime",
     "prep_sessions",
     "events",
-    "session_reports",
 ]

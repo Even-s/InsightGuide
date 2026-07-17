@@ -30,7 +30,6 @@ class InterviewTheme(Base):
     brd_mapping = Column(ARRAY(String), nullable=True, server_default="{}")
     priority = Column(Integer, nullable=False, default=99)
     estimated_minutes = Column(Integer, nullable=True)
-    source_section_ids = Column(ARRAY(String), nullable=True)
 
     order_index = Column(Integer, nullable=False, default=0)
     is_required = Column(Boolean, nullable=False, default=True)

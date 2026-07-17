@@ -40,13 +40,9 @@ class InterviewSession(Base):
         index=True,
     )
     interview_objective = Column(Text, nullable=True)
-    interview_scope = Column(
-        JSON, nullable=True
-    )  # DEPRECATED: Never populated or read. Candidate for removal in schema cleanup.
     status = Column(
         String, nullable=False, default="idle", index=True
     )  # idle, preparing, ready, interviewing, paused, ended, failed
-    current_section_id = Column(String, ForeignKey("sections.id"), nullable=True)
     current_theme_id = Column(String, ForeignKey("interview_themes.id"), nullable=True)
     started_at = Column(DateTime, nullable=True)
     ended_at = Column(DateTime, nullable=True)
@@ -55,7 +51,6 @@ class InterviewSession(Base):
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
 
     # Active card routing — which card is currently being discussed
-    active_card_hint_id = Column(String, nullable=True)  # legacy, kept for compat
     active_card_id = Column(String, nullable=True)
     active_card_source = Column(
         String, nullable=True
@@ -96,10 +91,6 @@ class InterviewSession(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
-    brd_draft = relationship(
-        "BRDDraft", back_populates="interview_session", uselist=False, cascade="all, delete-orphan"
-    )
-
 
 class InterviewCardState(Base):
     """InterviewCardState model - tracks question card state during an interview session."""

@@ -63,7 +63,7 @@ class DocumentService:
 
         Args:
             db: Database session
-            file: Uploaded requirements document file (PDF, Word, Markdown, Text)
+            file: Uploaded interview guide source file (PDF, Word, Markdown, Text)
             title: Optional document title (defaults to filename)
             user_id: User ID creating the document
 
@@ -241,14 +241,28 @@ class DocumentService:
     ) -> Document:
         """Create a document directly from text content (no file upload)."""
         document_id = f"doc_{uuid.uuid4().hex[:12]}"
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        object_key = f"documents/{document_id}/source/{timestamp}.txt"
+        try:
+            source_file_url = s3_service.upload_file(
+                BytesIO(content.encode("utf-8")),
+                object_key,
+                content_type="text/plain; charset=utf-8",
+            )
+        except Exception as e:
+            logger.error(f"Failed to upload direct text document: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to store document content",
+            )
 
         document = Document(
             id=document_id,
             user_id=user_id,
             project_id=project_id,
             title=title,
-            source_file_url="topic://direct-input",
-            file_type="text",
+            source_file_url=source_file_url,
+            file_type="txt",
             status="uploaded",
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
@@ -257,20 +271,6 @@ class DocumentService:
         db.add(document)
         db.commit()
         db.refresh(document)
-
-        # Create a single section with the topic content
-        from app.models.section import Section
-
-        section = Section(
-            id=f"sec_{uuid.uuid4().hex[:12]}",
-            document_id=document_id,
-            section_number=1,
-            title=title,
-            extracted_text=content,
-            created_at=datetime.utcnow(),
-        )
-        db.add(section)
-        db.commit()
 
         # Create prep session
         try:

@@ -21,10 +21,9 @@ interface PresenterLayoutProps {
 }
 
 export default function PresenterLayout({ sessionId, documentId }: PresenterLayoutProps) {
-  const [slideOrientation] = useState<'landscape' | 'portrait' | 'unknown'>('unknown')
   const [audioDiagnosticsEnabled, setAudioDiagnosticsEnabled] = useState(false)
   const [audioProcessingProfile, setAudioProcessingProfile] = useState<AudioProcessingProfile>('standard')
-  const { layoutConfig } = useResponsiveLayout(slideOrientation)
+  const { layoutConfig } = useResponsiveLayout('unknown')
   const hasRequestedInitialPreparationRef = useRef(false)
 
   const {
@@ -32,8 +31,6 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
     themes,
     currentTheme,
     currentThemeIndex,
-    currentSection,
-    sections,
     isLoading,
     themePreparing,
     error,
@@ -47,7 +44,6 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
   const refs = usePresenterSessionRefs(
     [] as CardState[], // initial, will sync via cardStates effect below
     currentTheme,
-    currentSection,
     session?.status,
   )
 
@@ -71,11 +67,9 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
     updateCardFromEvent,
   } = useCardEventHandlers({
     sessionId,
-    documentId,
     currentThemeId: currentTheme?.id,
-    currentSectionId: currentSection?.id,
     initialActiveCardId: session?.activeCardId,
-    initialDetectedCardId: session?.activeCardHintId,
+    initialDetectedCardId: null,
     sessionStatus: session?.status,
   })
 
@@ -134,7 +128,7 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
 
   useEffect(() => {
     if (hasRequestedInitialPreparationRef.current) return
-    if (!session || !currentSection) return
+    if (!session || !currentTheme) return
 
     if (session.status === 'idle' || session.status === 'ready') {
       hasRequestedInitialPreparationRef.current = true
@@ -142,7 +136,7 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
     }
 
     setIsPreparingToPresent(false)
-  }, [currentSection, session, setIsPreparingToPresent])
+  }, [currentTheme, session, setIsPreparingToPresent])
 
   useEffect(() => {
     if (session?.status === 'interviewing' && realtimeStatus === 'idle') {
@@ -228,9 +222,9 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
         documentId={documentId}
         isRecording={isRecording}
         isPreparingToPresent={isStartControlPreparing}
-        currentThemeTitle={currentTheme ? `${currentTheme.themeNumber}. ${formatThemeTitle(currentTheme.title)}` : `段落 ${currentSection?.pageNumber ?? ''}`}
+        currentThemeTitle={currentTheme ? `${currentTheme.themeNumber}. ${formatThemeTitle(currentTheme.title)}` : '尚無訪談單元'}
         currentThemeIndex={currentThemeIndex}
-        totalThemes={themes.length || sections.length}
+        totalThemes={themes.length}
         onStart={handleStartRequested}
         onPause={pausePresenting}
         onEnd={async () => {
@@ -277,7 +271,7 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
             <button
               type="button"
               onClick={nextTheme}
-              disabled={currentThemeIndex >= (themes.length || sections.length) - 1}
+              disabled={currentThemeIndex >= themes.length - 1}
               className="absolute right-[2%] top-1/2 -translate-y-1/2 z-10 flex h-11 w-11 items-center justify-center rounded-full border border-cream-300 bg-white shadow-natural text-natural-400 hover:text-natural-600 hover:border-cream-400 transition-all disabled:opacity-0 disabled:pointer-events-none"
             >
               <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -308,11 +302,11 @@ export default function PresenterLayout({ sessionId, documentId }: PresenterLayo
                   ignoreSuggestedCard={ignoreSuggestedCard}
                   updateCardFromEvent={updateCardFromEvent}
                 />
-              ) : currentSection ? (
+              ) : (
                 <div className="mx-auto max-w-3xl">
-                  <p className="text-base text-natural-600 whitespace-pre-wrap">{currentSection.extractedText}</p>
+                  <p className="text-base text-natural-500">目前沒有可用的訪談單元。</p>
                 </div>
-              ) : null}
+              )}
             </div>
 
             <FollowupPromptPanel prompt={followupPrompt} queueLength={followupQueueLength} onSkip={handleSkipFollowup} />

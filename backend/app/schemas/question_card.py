@@ -81,9 +81,7 @@ class QuestionCardSchema(BaseModel):
 
     id: str
     documentId: str
-    interviewThemeId: Optional[str] = None
-    sectionId: Optional[str] = None
-    sectionNumber: Optional[int] = None
+    themeId: Optional[str] = None
     focusText: Optional[str] = None
     questionText: str = Field(min_length=1, max_length=200)
     questionType: str = "clarification"
@@ -124,7 +122,7 @@ class QuestionCardSchema(BaseModel):
 class QuestionCardCreate(BaseModel):
     """Schema for creating a question card (simplified - user provides question and importance)."""
 
-    sectionId: Optional[str] = Field(None, alias="sectionId")
+    themeId: Optional[str] = Field(None, alias="themeId")
     questionText: Optional[str] = Field(None, min_length=1, max_length=200)
     title: Optional[str] = Field(None, min_length=1, max_length=200)
     suggestedFollowup: Optional[str] = Field(None, min_length=1, max_length=2000)
@@ -142,8 +140,8 @@ class QuestionCardCreate(BaseModel):
         populate_by_name = True
 
     @property
-    def resolved_section_id(self) -> str:
-        return self.sectionId or ""
+    def resolved_theme_id(self) -> str:
+        return self.themeId or ""
 
     @property
     def resolved_question_text(self) -> str:

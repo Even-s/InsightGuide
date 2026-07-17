@@ -8,14 +8,13 @@ from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
-from app.models.requirement_evidence_matrix import EvidenceMatrixEntry, RequirementEvidenceMatrix
+from app.models.requirement_evidence_matrix import RequirementEvidenceMatrix
 from app.models.stakeholder_profile import StakeholderProfile
 
 logger = logging.getLogger(__name__)
 
 
 class EvidenceMatrixService:
-
     def get_or_create_matrix(self, db: Session, project_id: str) -> RequirementEvidenceMatrix:
         """Get existing matrix or create a new one."""
         matrix = (
@@ -36,23 +35,65 @@ class EvidenceMatrixService:
 
         return matrix
 
-    def update_matrix(self, db: Session, project_id: str) -> RequirementEvidenceMatrix:
-        """Rebuild the matrix from one canonical cumulative memo per round."""
-        matrix = self.get_or_create_matrix(db, project_id)
-        matrix.status = "updating"
-        db.flush()
+    def build_entries_from_round_aggregates(
+        self, db: Session, project_id: str
+    ) -> tuple[List[Dict], List[Any]]:
+        """Build canonical requirement entries from ready RoundAggregate rows.
 
+        RoundAggregate is the only upstream source for project-level evidence.
+        The Evidence Matrix metadata row is not a requirement source read by
+        BRD or readiness generation.
+        """
         from app.services.interview_round_aggregate_service import interview_round_aggregate_service
 
         memos = interview_round_aggregate_service.latest_memos_for_project(db, project_id)
+        candidates = self._collect_requirement_candidates_from_memos(db, memos)
+        if not candidates:
+            return [], memos
+        return self._deduplicate_and_merge(candidates), memos
 
-        if not memos:
-            matrix.status = "draft"
-            matrix.memo_count = 0
-            db.commit()
-            return matrix
+    def summarize_entries(
+        self, entries: List[Dict], memos: List[Any], status: str = "derived"
+    ) -> Dict[str, Any]:
+        """Summarize RoundAggregate-derived evidence matrix entries."""
+        status_counts: Dict[str, int] = {}
+        all_roles = set()
+        missing_roles = set()
+        for entry in entries:
+            validation_status = self._entry_get(entry, "validation_status", "candidate")
+            status_counts[validation_status] = status_counts.get(validation_status, 0) + 1
+            all_roles.update(self._entry_get(entry, "source_roles", []) or [])
+            missing_roles.update(self._entry_get(entry, "missing_validation_from", []) or [])
 
-        # Collect all requirement candidates from all memos
+        latest_generated_at = None
+        for memo in memos:
+            generated_at = getattr(memo, "generated_at", None)
+            if generated_at and (latest_generated_at is None or generated_at > latest_generated_at):
+                latest_generated_at = generated_at
+
+        return {
+            "total_candidates": len(entries),
+            "validated": status_counts.get("validated", 0),
+            "conflicted": status_counts.get("conflicted", 0),
+            "needs_more_evidence": status_counts.get("needs_more_evidence", 0),
+            "candidate": status_counts.get("candidate", 0),
+            "roles_heard_from": sorted(all_roles),
+            "roles_missing": sorted(missing_roles - all_roles),
+            "memo_count": len(memos),
+            "status": status if memos else "empty",
+            "last_updated_at": latest_generated_at.isoformat() if latest_generated_at else None,
+        }
+
+    @staticmethod
+    def _entry_get(entry: Any, key: str, default: Any = None) -> Any:
+        if isinstance(entry, dict):
+            return entry.get(key, default)
+        return getattr(entry, key, default)
+
+    def _collect_requirement_candidates_from_memos(
+        self, db: Session, memos: List[Any]
+    ) -> List[Dict]:
+        """Collect requirement candidates from cumulative round memos."""
         all_candidates = []
         for memo in memos:
             stakeholder = None
@@ -78,30 +119,30 @@ class EvidenceMatrixService:
                         "needs_validation_from": candidate.get("needs_validation_from", []),
                     }
                 )
+        return all_candidates
 
-        # Deduplicate and merge candidates into entries
-        merged_entries = self._deduplicate_and_merge(all_candidates)
+    def update_matrix(self, db: Session, project_id: str) -> RequirementEvidenceMatrix:
+        """Refresh derived matrix metadata from one canonical cumulative memo per round.
 
-        # Clear existing entries and rebuild
-        db.query(EvidenceMatrixEntry).filter(EvidenceMatrixEntry.matrix_id == matrix.id).delete()
+        Requirement rows are deliberately not persisted. RoundAggregate remains
+        the only source read by BRD, Readiness, and Evidence Matrix responses.
+        """
+        matrix = self.get_or_create_matrix(db, project_id)
+        matrix.status = "updating"
         db.flush()
 
-        for entry_data in merged_entries:
-            entry = EvidenceMatrixEntry(
-                id=f"entry_{uuid.uuid4().hex[:12]}",
-                matrix_id=matrix.id,
-                requirement_candidate=entry_data["requirement_candidate"],
-                category=entry_data.get("category"),
-                source_roles=entry_data["source_roles"],
-                source_memo_ids=entry_data["source_memo_ids"],
-                supporting_evidence=entry_data["supporting_evidence"],
-                conflicts=entry_data.get("conflicts", []),
-                validation_status=entry_data["validation_status"],
-                missing_validation_from=entry_data.get("missing_validation_from", []),
-                mention_count=entry_data["mention_count"],
-                stakeholder_agreement_level=entry_data["stakeholder_agreement_level"],
-            )
-            db.add(entry)
+        merged_entries, memos = self.build_entries_from_round_aggregates(db, project_id)
+        matrix._derived_entries = merged_entries
+        matrix._source_memos = memos
+
+        if not memos:
+            matrix.status = "draft"
+            matrix.memo_count = 0
+            matrix.last_memo_id = None
+            matrix.last_updated_at = datetime.utcnow()
+            matrix.markdown_content = self._render_matrix_markdown([])
+            db.commit()
+            return matrix
 
         matrix.status = "ready"
         matrix.memo_count = len(memos)
@@ -111,6 +152,8 @@ class EvidenceMatrixService:
 
         db.commit()
         db.refresh(matrix)
+        matrix._derived_entries = merged_entries
+        matrix._source_memos = memos
 
         # Update stakeholder plan based on evidence gaps
         try:
@@ -301,59 +344,9 @@ class EvidenceMatrixService:
         return "single_source"
 
     def get_matrix_summary(self, db: Session, project_id: str) -> Dict[str, Any]:
-        """Get matrix summary statistics."""
-        matrix = (
-            db.query(RequirementEvidenceMatrix)
-            .filter(RequirementEvidenceMatrix.project_id == project_id)
-            .first()
-        )
-
-        if not matrix:
-            return {"total_candidates": 0, "status": "empty"}
-
-        entries = (
-            db.query(EvidenceMatrixEntry).filter(EvidenceMatrixEntry.matrix_id == matrix.id).all()
-        )
-
-        status_counts = {}
-        all_roles = set()
-        missing_roles = set()
-        for entry in entries:
-            s = entry.validation_status
-            status_counts[s] = status_counts.get(s, 0) + 1
-            all_roles.update(entry.source_roles or [])
-            missing_roles.update(entry.missing_validation_from or [])
-
-        return {
-            "total_candidates": len(entries),
-            "validated": status_counts.get("validated", 0),
-            "conflicted": status_counts.get("conflicted", 0),
-            "needs_more_evidence": status_counts.get("needs_more_evidence", 0),
-            "candidate": status_counts.get("candidate", 0),
-            "roles_heard_from": sorted(all_roles),
-            "roles_missing": sorted(missing_roles - all_roles),
-            "memo_count": matrix.memo_count,
-            "status": matrix.status,
-            "last_updated_at": (
-                matrix.last_updated_at.isoformat() if matrix.last_updated_at else None
-            ),
-        }
-
-    def update_entry(
-        self, db: Session, entry_id: str, data: Dict[str, Any]
-    ) -> Optional[EvidenceMatrixEntry]:
-        """Manually update a matrix entry (e.g. mark as rejected)."""
-        entry = db.query(EvidenceMatrixEntry).filter(EvidenceMatrixEntry.id == entry_id).first()
-        if not entry:
-            return None
-
-        for key, value in data.items():
-            if value is not None and hasattr(entry, key):
-                setattr(entry, key, value)
-        entry.updated_at = datetime.utcnow()
-        db.commit()
-        db.refresh(entry)
-        return entry
+        """Get RoundAggregate-derived matrix summary statistics."""
+        entries, memos = self.build_entries_from_round_aggregates(db, project_id)
+        return self.summarize_entries(entries, memos)
 
     def _render_matrix_markdown(self, entries: List[Dict]) -> str:
         """Render matrix as markdown table."""

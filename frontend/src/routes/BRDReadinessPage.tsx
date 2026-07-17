@@ -139,15 +139,15 @@ export default function BRDReadinessPage() {
         </div>
       )}
 
-      {/* Ready Sections */}
-      {report.readySections.length > 0 && (
+      {/* Ready Chapters */}
+      {report.readyChapters.length > 0 && (
         <div className="mb-6">
           <h3 className="text-sm font-semibold text-green-700 mb-2">已具備足夠證據</h3>
           <div className="space-y-2">
-            {report.readySections.map((s, i) => (
+            {report.readyChapters.map((s, i) => (
               <div key={i} className="flex items-center gap-3 p-3 bg-green-50 rounded-lg">
                 <span className="text-green-500">✓</span>
-                <span className="text-sm font-medium text-natural-700">{s.section}</span>
+                <span className="text-sm font-medium text-natural-700">{s.chapter}</span>
                 <span className="text-xs text-natural-400 ml-auto">{s.evidence_count} 條證據</span>
                 <span className="text-xs text-green-600">{s.source_roles.join(', ')}</span>
               </div>
@@ -156,16 +156,16 @@ export default function BRDReadinessPage() {
         </div>
       )}
 
-      {/* Insufficient Sections */}
-      {report.insufficientSections.length > 0 && (
+      {/* Insufficient Chapters */}
+      {report.insufficientChapters.length > 0 && (
         <div className="mb-6">
           <h3 className="text-sm font-semibold text-red-700 mb-2">證據不足</h3>
           <div className="space-y-2">
-            {report.insufficientSections.map((s, i) => (
+            {report.insufficientChapters.map((s, i) => (
               <div key={i} className="flex items-center gap-3 p-3 bg-red-50 rounded-lg">
                 <span className="text-red-400">✕</span>
                 <div className="flex-1">
-                  <span className="text-sm font-medium text-natural-700">{s.section}</span>
+                  <span className="text-sm font-medium text-natural-700">{s.chapter}</span>
                   <span className="text-xs text-natural-500 ml-2">{s.reason}</span>
                 </div>
                 {s.missing_roles.length > 0 && (

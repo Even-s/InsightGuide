@@ -42,10 +42,8 @@ def test_transcript_analysis_keeps_visits_separate_and_includes_both():
         LiveUtterance(
             id="utt-1",
             session_id="session-1",
-            speaker="realtime",
             transcript="第一次訪談內容",
             sequence_index=0,
-            is_partial=False,
         )
     ]
     second_query = Mock()
@@ -53,10 +51,8 @@ def test_transcript_analysis_keeps_visits_separate_and_includes_both():
         LiveUtterance(
             id="utt-2",
             session_id="session-2",
-            speaker="realtime",
             transcript="第二次補充內容",
             sequence_index=0,
-            is_partial=False,
         )
     ]
     db = Mock()
@@ -80,7 +76,7 @@ def test_ai_prompt_explicitly_requests_cumulative_round_evaluation():
     ) as completion:
         service._ai_analyze_interview(
             stakeholder=None,
-            qa_records=[],
+            question_records=[],
             transcript_text="訪談內容",
             session=session,
             visit_count=2,

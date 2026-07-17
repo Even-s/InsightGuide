@@ -77,6 +77,8 @@ describe('ProjectDetailPage add-role form', () => {
       setEditingSlot: vi.fn(),
       editForm: { rationale: '', expectedContributions: '', keyQuestions: '', priority: 'required' },
       setEditForm: vi.fn(),
+      slotActionError: null,
+      setSlotActionError: vi.fn(),
       showAddSlot: true,
       setShowAddSlot: vi.fn(),
       newSlotLabel: '',
@@ -101,6 +103,7 @@ describe('ProjectDetailPage add-role form', () => {
       handleDeleteSlot: vi.fn(),
       handleAddSlot: vi.fn(),
       handleDeleteProfile: vi.fn(),
+      handleReassignProfile: vi.fn(),
       handleUpdateSlot: vi.fn(),
     }
     vi.mocked(useSlotManagement).mockReturnValue(slotManagementResult)

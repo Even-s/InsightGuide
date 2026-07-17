@@ -201,17 +201,6 @@ class InterviewBriefService:
         self, project: Project, stakeholder: StakeholderProfile, cards: List[QuestionCard]
     ) -> Dict[str, Any]:
         """Fallback brief when AI is unavailable."""
-        expertise_str = (
-            ", ".join(stakeholder.expertise_tags[:3])
-            if stakeholder.expertise_tags
-            else stakeholder.stakeholder_type
-        )
-        boundary_str = (
-            ", ".join(stakeholder.knowledge_boundaries[:3])
-            if stakeholder.knowledge_boundaries
-            else "無"
-        )
-
         return {
             "interview_objective": f"了解 {stakeholder.name}（{stakeholder.role_title or stakeholder.stakeholder_type}）對專案需求的觀點",
             "recommended_topics": [

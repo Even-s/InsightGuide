@@ -195,11 +195,11 @@
 | PST-003 | P1 | Memo 快取與重生 | 已有 memo 再開啟、再按重新產生 | 一般讀取不重複花費；重生規則明確並更新時間／內容 | API/E2E |
 | PST-004 | P0 | 各場逐字稿分頁 | 切換同一輪不同 session | 每頁只顯示該場 Realtime transcript；內容不標 speaker | E2E |
 | PST-005 | P1 | 累積洞察 | 同輪完成第二場續訪 | 最新 memo 與 Aggregate 納入兩場內容，專案輸出只計算一次 | API/E2E |
-| PST-006 | P0 | 訪談報告生成 | 開啟 report route，等待 outputs generate | 顯示 BRD 與 transcript 分頁；失敗可重試；不無限 loading | API/E2E |
-| PST-007 | P1 | 報告分析正確性 | TD-06 固定時間軸與卡片狀態 | 覆蓋率、時間軸、提問與語速統計符合 fixture | API |
-| PST-008 | P1 | 下載 Markdown | 下載 BRD 與逐字稿 | 檔名、UTF-8、章節、證據與換行正確；檔案非空 | E2E |
+| PST-006 | P0 | Round Aggregate 輸出 | 同輪完成多場續訪後重建 aggregate | 最新 memo、coverage snapshot、evidence snapshot 累積兩場內容；不讀 session report 舊端點 | API |
+| PST-007 | P1 | 專案級 Readiness / Evidence | TD-06 固定多輪資料 | Readiness 與 Evidence Matrix 僅從 ready RoundAggregate 計算；資料不重複 | API/E2E |
+| PST-008 | P1 | 逐字稿分頁下載/複製 | 在訪談紀錄中切換各場逐字稿 | 每場只顯示該場 Realtime transcript；UTF-8 與換行正確；不標 speaker | E2E |
 | PST-009 | P1 | Session log | 依事件類型篩選並返回後台 | 摘要數與列表一致；篩選不改動資料；空狀態正確 | E2E/API |
-| PST-010 | P1 | 背景後處理失敗 | Memo、Round Aggregate、Evidence Matrix 或 report 任一任務失敗 | 其他已完成產物仍可查看；失敗項可重試且不重複資料，失效狀態不會被誤標為 ready | INT |
+| PST-010 | P1 | 背景後處理失敗 | Memo、Round Aggregate 或 Evidence Matrix 任一任務失敗 | 其他已完成產物仍可查看；失敗項可重試且不重複資料，失效狀態不會被誤標為 ready | INT |
 
 ### H. 證據矩陣與 BRD 準備度
 

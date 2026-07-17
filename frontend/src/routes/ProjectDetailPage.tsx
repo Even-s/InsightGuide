@@ -57,6 +57,7 @@ export default function ProjectDetailPage() {
     setEditingSlot,
     editForm,
     setEditForm,
+    slotActionError,
     showAddSlot,
     setShowAddSlot,
     newSlotLabel,
@@ -81,6 +82,7 @@ export default function ProjectDetailPage() {
     handleDeleteSlot,
     handleAddSlot,
     handleDeleteProfile,
+    handleReassignProfile,
     handleUpdateSlot,
   } = useSlotManagement({ projectId, plan, loadData })
 
@@ -362,6 +364,12 @@ export default function ProjectDetailPage() {
           </button>
         </div>
 
+        {slotActionError && (
+          <div role="alert" className="motion-status-in mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
+            {slotActionError}
+          </div>
+        )}
+
         {showAddSlot && (
           <div className="motion-reveal-in mb-5 space-y-4 rounded-xl border border-cream-300 bg-cream-50 p-5 shadow-natural">
             <div className="flex items-start justify-between gap-4 border-b border-cream-200 pb-3">
@@ -583,6 +591,7 @@ export default function ProjectDetailPage() {
           onUpdateSlot={handleUpdateSlot}
           onAddProfile={(slotId) => setShowAddProfile(slotId)}
           onDeleteProfile={handleDeleteProfile}
+          onReassignProfile={handleReassignProfile}
           onShowGuideSettings={(profileId) => setShowGuideSettings(profileId)}
         />
       </div>

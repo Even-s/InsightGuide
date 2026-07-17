@@ -173,28 +173,23 @@ class TestIsSufficient:
 class TestDetermineState:
     """Test state mapping from scores."""
 
-    def test_sufficient_when_is_sufficient_and_not_partial(self):
-        assert answer_completion_scorer.determine_state(0.9, True, True, False) == "sufficient"
-
-    def test_partial_never_sufficient(self):
-        assert (
-            answer_completion_scorer.determine_state(0.9, True, True, True) == "probably_sufficient"
-        )
+    def test_sufficient_when_is_sufficient(self):
+        assert answer_completion_scorer.determine_state(0.9, True, True) == "sufficient"
 
     def test_high_score_not_sufficient_is_probably(self):
         assert (
-            answer_completion_scorer.determine_state(0.6, False, True, False)
+            answer_completion_scorer.determine_state(0.6, False, True)
             == "probably_sufficient"
         )
 
     def test_low_score_with_response_is_listening(self):
-        assert answer_completion_scorer.determine_state(0.2, False, True, False) == "listening"
+        assert answer_completion_scorer.determine_state(0.2, False, True) == "listening"
 
     def test_zero_score_no_response_is_pending(self):
-        assert answer_completion_scorer.determine_state(0.0, False, False, False) == "pending"
+        assert answer_completion_scorer.determine_state(0.0, False, False) == "pending"
 
     def test_zero_score_with_response_is_listening(self):
-        assert answer_completion_scorer.determine_state(0.0, False, True, False) == "listening"
+        assert answer_completion_scorer.determine_state(0.0, False, True) == "listening"
 
 
 class TestGetMissingCriteria:

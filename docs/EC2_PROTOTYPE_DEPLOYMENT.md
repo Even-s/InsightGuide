@@ -174,8 +174,8 @@ After deployment, verify:
 - FastAPI background tasks that have not moved to Celery can be lost during a restart.
 - Authentication and authorization must be completed before unrestricted public access.
 - `/health` is currently a liveness response, not a full PostgreSQL/Redis readiness check.
-- The historical Alembic chain assumes a legacy schema. The deployment bootstrap therefore creates
-  the current model schema and stamps the Alembic head only when the database is empty; it refuses
-  to guess the state of a populated database that has no `alembic_version` table.
+- The prototype uses the clean baseline Alembic migration. Deployment bootstrap can initialize an
+  empty database and stamp the current head, but it refuses to guess the state of a populated
+  database that has no `alembic_version` table.
 - PDF and DOCX source-document parsing needs a separate implementation review. The EC2 image does
   not install LibreOffice or Poppler because neither executable is called by the current application.

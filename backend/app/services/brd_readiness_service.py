@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 
 from app.models.brd_readiness_report import BRDReadinessReport
 from app.models.project import Project
-from app.models.requirement_evidence_matrix import EvidenceMatrixEntry, RequirementEvidenceMatrix
 from app.models.stakeholder_profile import StakeholderProfile
 from app.models.stakeholder_slot import StakeholderSlot
 
@@ -18,34 +17,22 @@ logger = logging.getLogger(__name__)
 
 class BRDReadinessService:
 
+    @staticmethod
+    def _entry_get(entry: Any, key: str, default: Any = None) -> Any:
+        """Read a RoundAggregate-derived entry from a dict or focused test object."""
+        if isinstance(entry, dict):
+            return entry.get(key, default)
+        return getattr(entry, key, default)
+
     def generate_report(self, db: Session, project_id: str) -> BRDReadinessReport:
-        """Generate a BRD Readiness Report for a project."""
+        """Generate a BRD Readiness Report from ready RoundAggregate evidence."""
         project = db.query(Project).filter(Project.id == project_id).first()
         if not project:
             raise ValueError(f"Project {project_id} not found")
 
-        # Gather data
-        matrix = (
-            db.query(RequirementEvidenceMatrix)
-            .filter(RequirementEvidenceMatrix.project_id == project_id)
-            .first()
-        )
-        if not matrix or matrix.status != "ready":
-            from app.services.evidence_matrix_service import evidence_matrix_service
+        from app.services.evidence_matrix_service import evidence_matrix_service
 
-            matrix = evidence_matrix_service.update_matrix(db, project_id)
-
-        entries = []
-        if matrix:
-            entries = (
-                db.query(EvidenceMatrixEntry)
-                .filter(EvidenceMatrixEntry.matrix_id == matrix.id)
-                .all()
-            )
-
-        from app.services.interview_round_aggregate_service import interview_round_aggregate_service
-
-        memos = interview_round_aggregate_service.latest_memos_for_project(db, project_id)
+        entries, memos = evidence_matrix_service.build_entries_from_round_aggregates(db, project_id)
 
         slots = db.query(StakeholderSlot).filter(StakeholderSlot.project_id == project_id).all()
 
@@ -60,13 +47,13 @@ class BRDReadinessService:
 
         # Evaluate
         stakeholder_coverage = self._evaluate_stakeholder_coverage(slots, profiles)
-        section_readiness = self._evaluate_section_readiness(entries, memos)
+        chapter_readiness = self._evaluate_chapter_readiness(entries, memos)
         conflicts = self._gather_conflicts(entries)
         suggestions = self._build_suggestions(entries, slots, stakeholder_coverage)
 
         # Calculate score
         readiness_score = self._calculate_readiness_score(
-            section_readiness, stakeholder_coverage, conflicts, entries
+            chapter_readiness, stakeholder_coverage, conflicts, entries
         )
 
         # Determine generation mode
@@ -84,7 +71,9 @@ class BRDReadinessService:
             recommendation = "建議補訪後再生成 BRD。目前證據不足以產出可靠文件。"
 
         # Build report
-        validated_count = len([e for e in entries if e.validation_status == "validated"])
+        validated_count = len(
+            [e for e in entries if self._entry_get(e, "validation_status") == "validated"]
+        )
 
         report = BRDReadinessReport(
             id=f"ready_{uuid.uuid4().hex[:12]}",
@@ -93,8 +82,8 @@ class BRDReadinessService:
             readiness_score=round(readiness_score, 3),
             generation_mode=generation_mode,
             recommendation=recommendation,
-            ready_sections=section_readiness["ready"],
-            insufficient_sections=section_readiness["insufficient"],
+            ready_chapters=chapter_readiness["ready"],
+            insufficient_chapters=chapter_readiness["insufficient"],
             unresolved_conflicts=conflicts,
             suggested_next_interviews=suggestions,
             stakeholder_coverage=stakeholder_coverage,
@@ -122,18 +111,7 @@ class BRDReadinessService:
         )
 
     def can_generate_brd(self, db: Session, project_id: str) -> Dict[str, Any]:
-        """Quick check: can we generate a BRD?"""
-        matrix = (
-            db.query(RequirementEvidenceMatrix)
-            .filter(RequirementEvidenceMatrix.project_id == project_id)
-            .first()
-        )
-        if not matrix or matrix.status != "ready":
-            return {
-                "can_generate": False,
-                "mode": "not_ready",
-                "reason": "訪談資料已更新，請先重新整理證據矩陣與準備度報告",
-            }
+        """Quick check: can we generate a BRD from the latest readiness report?"""
         report = self.get_latest_report(db, project_id)
         if not report:
             return {"can_generate": False, "mode": "not_ready", "reason": "尚未產生準備度報告"}
@@ -170,21 +148,21 @@ class BRDReadinessService:
             ),
         }
 
-    def _evaluate_section_readiness(self, entries: List, memos: List) -> Dict[str, List]:
-        """Evaluate which BRD sections have enough evidence."""
+    def _evaluate_chapter_readiness(self, entries: List, memos: List) -> Dict[str, List]:
+        """Evaluate which BRD chapters have enough evidence."""
         ready = []
         insufficient = []
 
-        # Derive sections from entry categories and memo content
+        # Derive BRD chapters from entry categories and memo content
         categories_with_evidence = {}
         for entry in entries:
-            cat = entry.category or "general"
+            cat = self._entry_get(entry, "category", "general") or "general"
             if cat not in categories_with_evidence:
                 categories_with_evidence[cat] = {"entries": 0, "validated": 0, "roles": set()}
             categories_with_evidence[cat]["entries"] += 1
-            if entry.validation_status == "validated":
+            if self._entry_get(entry, "validation_status") == "validated":
                 categories_with_evidence[cat]["validated"] += 1
-            for role in entry.source_roles or []:
+            for role in self._entry_get(entry, "source_roles", []) or []:
                 categories_with_evidence[cat]["roles"].add(role)
 
         # Check pain points and process coverage from memos
@@ -195,7 +173,7 @@ class BRDReadinessService:
         if has_pain_points:
             ready.append(
                 {
-                    "section": "業務流程痛點",
+                    "chapter": "業務流程痛點",
                     "evidence_count": sum(len(m.pain_points or []) for m in memos),
                     "source_roles": sorted(
                         {
@@ -210,7 +188,7 @@ class BRDReadinessService:
         else:
             insufficient.append(
                 {
-                    "section": "業務流程痛點",
+                    "chapter": "業務流程痛點",
                     "reason": "尚無訪談提及痛點",
                     "missing_roles": [],
                     "priority": "high",
@@ -220,7 +198,7 @@ class BRDReadinessService:
         if has_process:
             ready.append(
                 {
-                    "section": "現有流程描述",
+                    "chapter": "現有流程描述",
                     "evidence_count": sum(len(m.process_descriptions or []) for m in memos),
                     "source_roles": sorted(
                         {
@@ -236,7 +214,7 @@ class BRDReadinessService:
         if has_constraints:
             ready.append(
                 {
-                    "section": "限制與假設",
+                    "chapter": "限制與假設",
                     "evidence_count": sum(len(m.constraints_and_assumptions or []) for m in memos),
                     "source_roles": sorted(
                         {
@@ -249,9 +227,9 @@ class BRDReadinessService:
                 }
             )
 
-        # Check categories from evidence matrix
+        # Check categories from RoundAggregate-derived requirement entries
         for cat, info in categories_with_evidence.items():
-            section_name = {
+            chapter_name = {
                 "functional": "功能性需求",
                 "non_functional": "非功能性需求",
                 "integration": "系統整合需求",
@@ -264,7 +242,7 @@ class BRDReadinessService:
             if info["validated"] >= 2 or (info["entries"] >= 3 and len(info["roles"]) >= 2):
                 ready.append(
                     {
-                        "section": section_name,
+                        "chapter": chapter_name,
                         "evidence_count": info["entries"],
                         "source_roles": sorted(info["roles"]),
                         "confidence": "high" if info["validated"] >= 2 else "medium",
@@ -273,7 +251,7 @@ class BRDReadinessService:
             elif info["entries"] > 0:
                 insufficient.append(
                     {
-                        "section": section_name,
+                        "chapter": chapter_name,
                         "reason": (
                             f"僅 {len(info['roles'])} 個角色提供證據"
                             if len(info["roles"]) < 2
@@ -284,12 +262,14 @@ class BRDReadinessService:
                     }
                 )
 
-        # Check for technical sections
-        tech_roles_heard = any("engineering" in (e.source_roles or []) for e in entries)
+        # Check for technical chapters
+        tech_roles_heard = any(
+            "engineering" in (self._entry_get(e, "source_roles", []) or []) for e in entries
+        )
         if not tech_roles_heard and entries:
             insufficient.append(
                 {
-                    "section": "技術限制與系統整合",
+                    "chapter": "技術限制與系統整合",
                     "reason": "尚無工程/IT角色訪談",
                     "missing_roles": ["engineering", "IT"],
                     "priority": "high",
@@ -299,14 +279,16 @@ class BRDReadinessService:
         return {"ready": ready, "insufficient": insufficient}
 
     def _gather_conflicts(self, entries: List) -> List[Dict]:
-        """Gather unresolved conflicts from matrix entries."""
+        """Gather unresolved conflicts from RoundAggregate-derived entries."""
         conflicts = []
         for entry in entries:
-            if entry.validation_status == "conflicted" and entry.conflicts:
-                for c in entry.conflicts:
+            if self._entry_get(entry, "validation_status") == "conflicted" and self._entry_get(
+                entry, "conflicts"
+            ):
+                for c in self._entry_get(entry, "conflicts", []):
                     conflicts.append(
                         {
-                            "topic": entry.requirement_candidate[:60],
+                            "topic": self._entry_get(entry, "requirement_candidate", "")[:60],
                             "conflicting_parties": c.get("conflicting_roles", []),
                             "details": c.get("description", ""),
                         }
@@ -337,7 +319,7 @@ class BRDReadinessService:
         # From missing_validation_from in entries
         role_demand: Dict[str, int] = {}
         for entry in entries:
-            for role in entry.missing_validation_from or []:
+            for role in self._entry_get(entry, "missing_validation_from", []) or []:
                 role_demand[role] = role_demand.get(role, 0) + 1
 
         for role, count in sorted(role_demand.items(), key=lambda x: -x[1]):
@@ -355,21 +337,23 @@ class BRDReadinessService:
         return suggestions[:5]
 
     def _calculate_readiness_score(
-        self, section_readiness: Dict, coverage: Dict, conflicts: List, entries: List
+        self, chapter_readiness: Dict, coverage: Dict, conflicts: List, entries: List
     ) -> float:
         """Calculate overall readiness score (0.0 - 1.0)."""
-        ready_count = len(section_readiness["ready"])
-        insufficient_count = len(section_readiness["insufficient"])
-        total_sections = ready_count + insufficient_count
+        ready_count = len(chapter_readiness["ready"])
+        insufficient_count = len(chapter_readiness["insufficient"])
+        total_chapters = ready_count + insufficient_count
 
-        # Section coverage (40% weight)
-        section_score = ready_count / max(total_sections, 1)
+        # BRD chapter coverage (40% weight)
+        chapter_score = ready_count / max(total_chapters, 1)
 
         # Stakeholder coverage (30% weight)
         stakeholder_score = coverage.get("coverage_percentage", 0) / 100
 
         # Evidence validation (20% weight)
-        validated = len([e for e in entries if e.validation_status == "validated"])
+        validated = len(
+            [e for e in entries if self._entry_get(e, "validation_status") == "validated"]
+        )
         total_entries = len(entries)
         evidence_score = validated / max(total_entries, 1)
 
@@ -378,7 +362,7 @@ class BRDReadinessService:
         conflict_score = 1.0 - conflict_penalty
 
         score = (
-            section_score * 0.4
+            chapter_score * 0.4
             + stakeholder_score * 0.3
             + evidence_score * 0.2
             + conflict_score * 0.1
@@ -416,26 +400,26 @@ class BRDReadinessService:
         lines.append(f"| 已驗證需求 | {report.validated_requirements} |")
         lines.append("")
 
-        # Ready sections
-        if report.ready_sections:
+        # Ready chapters
+        if report.ready_chapters:
             lines.append("## 已具備足夠證據的區塊")
             lines.append("")
-            for s in report.ready_sections:
+            for s in report.ready_chapters:
                 roles = ", ".join(s.get("source_roles", []))
                 lines.append(
-                    f"- **{s['section']}** — {s.get('evidence_count', 0)} 條證據 ({roles})"
+                    f"- **{s['chapter']}** — {s.get('evidence_count', 0)} 條證據 ({roles})"
                 )
             lines.append("")
 
-        # Insufficient sections
-        if report.insufficient_sections:
+        # Insufficient chapters
+        if report.insufficient_chapters:
             lines.append("## 證據不足的區塊")
             lines.append("")
-            for s in report.insufficient_sections:
+            for s in report.insufficient_chapters:
                 missing = ", ".join(s.get("missing_roles", []))
                 reason = s.get("reason", "")
                 lines.append(
-                    f"- **{s['section']}** — {reason}" + (f" (缺: {missing})" if missing else "")
+                    f"- **{s['chapter']}** — {reason}" + (f" (缺: {missing})" if missing else "")
                 )
             lines.append("")
 

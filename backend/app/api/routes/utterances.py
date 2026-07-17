@@ -1,6 +1,7 @@
 """Utterance-related routes."""
 
 import logging
+import threading
 from typing import List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
@@ -8,8 +9,9 @@ from fastapi.concurrency import run_in_threadpool
 from sqlalchemy.orm import Session
 
 from app.api.routes.interview_helpers import convert_utterance_to_schema
+from app.core.config import settings
 from app.db.session import get_db
-from app.schemas.interview import PartialTranscriptMatchCreate, UtteranceCreate, UtteranceSchema
+from app.schemas.interview import UtteranceCreate, UtteranceSchema
 from app.services.evaluation.utterance_classifier import is_question_like
 from app.services.interview_service import interview_service
 
@@ -17,7 +19,10 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-_EVALUATION_DEBOUNCE_SECONDS = 1.5
+_EVALUATION_DEBOUNCE_SECONDS = settings.UTTERANCE_EVALUATION_DEBOUNCE_SECONDS
+_EVALUATION_TIMER_LOCK = threading.Lock()
+_PENDING_EVALUATION_TIMERS: dict[str, threading.Timer] = {}
+_PENDING_EVALUATION_UTTERANCE_IDS: dict[str, str] = {}
 
 
 @router.post(
@@ -35,11 +40,9 @@ async def create_utterance(
     This endpoint receives transcripts from the frontend Realtime client
     and stores them for answer evaluation.
 
-    Realtime segments are the canonical transcript. The endpoint URL and speaker
-    field remain compatible with older clients, but new segments use one neutral
-    source label instead of attempting speaker identification.
+    Realtime segments are the canonical transcript. Role splitting is
+    intentionally not part of this flow.
     """
-    utterance.speaker = "realtime"
 
     logger.info(f"Creating utterance for session {session_id}: {utterance.transcript[:50]}...")
 
@@ -51,15 +54,13 @@ async def create_utterance(
             utterance,
         )
 
-        theme_id = utterance.themeId or getattr(utterance_obj, "section_id", None)
+        theme_id = utterance.themeId
         background_tasks.add_task(
-            process_utterance_evaluation_background,
+            schedule_utterance_evaluation_background,
             session_id,
             utterance_obj.id,
             utterance_obj.transcript,
             theme_id,
-            utterance_obj.speaker or "realtime",
-            utterance.askedCardId,
             utterance.askedCardIds,
         )
 
@@ -73,20 +74,63 @@ async def create_utterance(
         raise HTTPException(status_code=500, detail=f"Failed to create utterance: {str(e)}")
 
 
+def schedule_utterance_evaluation_background(
+    session_id: str,
+    utterance_id: str,
+    transcript: str,
+    theme_id: Optional[str],
+    asked_card_ids: Optional[List[str]] = None,
+):
+    """Schedule the latest utterance evaluation for a session.
+
+    Instead of creating one sleeping task per utterance, keep one pending timer
+    per session. New utterances cancel the earlier pending timer, so evaluation
+    runs once for the most recent transcript segment after the debounce window.
+    """
+    if _EVALUATION_DEBOUNCE_SECONDS <= 0:
+        process_utterance_evaluation_background(
+            session_id,
+            utterance_id,
+            transcript,
+            theme_id,
+            asked_card_ids,
+            debounce_elapsed_ms=0.0,
+        )
+        return
+
+    timer = threading.Timer(
+        _EVALUATION_DEBOUNCE_SECONDS,
+        process_utterance_evaluation_background,
+        kwargs={
+            "session_id": session_id,
+            "utterance_id": utterance_id,
+            "transcript": transcript,
+            "theme_id": theme_id,
+            "asked_card_ids": asked_card_ids,
+            "debounce_elapsed_ms": _EVALUATION_DEBOUNCE_SECONDS * 1000,
+        },
+    )
+    timer.daemon = True
+
+    with _EVALUATION_TIMER_LOCK:
+        previous = _PENDING_EVALUATION_TIMERS.get(session_id)
+        if previous:
+            previous.cancel()
+        _PENDING_EVALUATION_TIMERS[session_id] = timer
+        _PENDING_EVALUATION_UTTERANCE_IDS[session_id] = utterance_id
+
+    timer.start()
+
+
 def process_utterance_evaluation_background(
     session_id: str,
     utterance_id: str,
     transcript: str,
-    section_id: Optional[str],
-    speaker: str,
-    asked_card_id: Optional[str] = None,
+    theme_id: Optional[str],
     asked_card_ids: Optional[List[str]] = None,
+    debounce_elapsed_ms: float = 0.0,
 ):
-    """Background task to process utterance evaluation with debounce.
-
-    Waits briefly, then checks if newer utterances have arrived.
-    If yes, skips (the newer task will evaluate with more context).
-    """
+    """Process the latest utterance evaluation after debounce."""
     import time
 
     from app.db.session import SessionLocal
@@ -95,18 +139,24 @@ def process_utterance_evaluation_background(
     from app.services.event_service import event_service
 
     perf_start = time.perf_counter()
-    time.sleep(_EVALUATION_DEBOUNCE_SECONDS)
-    debounce_elapsed = (time.perf_counter() - perf_start) * 1000
+    with _EVALUATION_TIMER_LOCK:
+        pending_utterance_id = _PENDING_EVALUATION_UTTERANCE_IDS.get(session_id)
+        if pending_utterance_id and pending_utterance_id != utterance_id:
+            logger.info(
+                f"Debounce: skipping evaluation for {utterance_id}, "
+                f"newer pending utterance {pending_utterance_id} will handle it"
+            )
+            return
+        if pending_utterance_id == utterance_id:
+            _PENDING_EVALUATION_TIMERS.pop(session_id, None)
+            _PENDING_EVALUATION_UTTERANCE_IDS.pop(session_id, None)
 
     db = SessionLocal()
     try:
         # Check if newer utterances arrived during debounce window
         latest_utt = (
             db.query(LiveUtterance)
-            .filter(
-                LiveUtterance.session_id == session_id,
-                LiveUtterance.is_partial == False,
-            )
+            .filter(LiveUtterance.session_id == session_id)
             .order_by(LiveUtterance.sequence_index.desc())
             .first()
         )
@@ -118,28 +168,12 @@ def process_utterance_evaluation_background(
             )
             return
 
-        if not section_id:
-            from app.models.interview_session import InterviewSession as IS
-            from app.models.interview_theme import InterviewTheme
-
-            session_obj = db.query(IS).filter(IS.id == session_id).first()
-            if session_obj:
-                first_theme = (
-                    db.query(InterviewTheme)
-                    .filter(
-                        InterviewTheme.document_id == session_obj.document_id,
-                        InterviewTheme.is_enabled == True,
-                    )
-                    .order_by(InterviewTheme.order_index)
-                    .first()
-                )
-                if first_theme:
-                    section_id = first_theme.id
-            if not section_id:
-                logger.warning(
-                    f"Utterance {utterance_id} has no section_id and no fallback theme, skipping evaluation"
-                )
-                return
+        if not theme_id:
+            logger.warning(
+                "Utterance %s has no theme_id; transcript was saved but card evaluation is skipped",
+                utterance_id,
+            )
+            return
 
         # Process utterance and get card state updates
         eval_start = time.perf_counter()
@@ -148,22 +182,15 @@ def process_utterance_evaluation_background(
             session_id=session_id,
             utterance_id=utterance_id,
             utterance_text=transcript,
-            section_id=section_id,
-            speaker=speaker,
-            asked_card_id=asked_card_id,
+            theme_id=theme_id,
             asked_card_ids=asked_card_ids,
         )
         eval_elapsed = (time.perf_counter() - eval_start) * 1000
 
         # If question was detected and no card was suggested, emit candidates
-        if (
-            not updates
-            and not asked_card_id
-            and not asked_card_ids
-            and is_question_like(transcript)
-        ):
+        if not updates and not asked_card_ids and is_question_like(transcript):
             candidates = answer_evaluation_engine.find_candidate_cards(
-                db, session_id, section_id or "", transcript, top_k=3
+                db, session_id, theme_id or "", transcript, top_k=3
             )
             if candidates:
                 event_service.publish_sync(
@@ -241,7 +268,7 @@ def process_utterance_evaluation_background(
         # Log performance metrics
         total_elapsed = (time.perf_counter() - perf_start) * 1000
         logger.info(
-            f"[PERF] Utterance evaluation: debounce={debounce_elapsed:.0f}ms "
+            f"[PERF] Utterance evaluation: debounce={debounce_elapsed_ms:.0f}ms "
             f"eval={eval_elapsed:.0f}ms sse={sse_elapsed:.0f}ms "
             f"total={total_elapsed:.0f}ms cards_updated={len(updates)}"
         )
@@ -261,98 +288,10 @@ def process_utterance_evaluation_background(
 @router.get("/{session_id}/utterances", response_model=List[UtteranceSchema])
 async def get_session_utterances(
     session_id: str,
-    section_id: Optional[str] = Query(None, alias="sectionId"),
     limit: int = Query(100, ge=1, le=1000),
     db: Session = Depends(get_db),
 ):
     """Get chronological Realtime transcript segments for an interview session."""
     logger.info(f"Retrieving utterances for session {session_id}")
-    utterances = interview_service.get_utterances(
-        db=db, session_id=session_id, section_id=section_id, limit=limit
-    )
+    utterances = interview_service.get_utterances(db=db, session_id=session_id, limit=limit)
     return [convert_utterance_to_schema(u) for u in utterances]
-
-
-@router.post("/{session_id}/partial-transcript-match")
-async def match_partial_transcript(
-    session_id: str,
-    partial: PartialTranscriptMatchCreate,
-    background_tasks: BackgroundTasks,
-):
-    """
-    Match an in-flight streaming transcript without storing it as an utterance.
-
-    The completed transcript still goes through /utterances for durable storage.
-    """
-    transcript = partial.transcript.strip()
-    if len(transcript) < 8:
-        return {"accepted": False, "reason": "partial transcript too short"}
-
-    theme_id = partial.themeId or partial.sectionId
-    background_tasks.add_task(
-        process_partial_transcript_evaluation_background,
-        session_id,
-        transcript,
-        theme_id,
-        partial.speaker,
-        partial.activeCardId,
-    )
-    return {"accepted": True}
-
-
-def process_partial_transcript_evaluation_background(
-    session_id: str,
-    transcript: str,
-    section_id: Optional[str],
-    speaker: str,
-    active_card_id: Optional[str] = None,
-):
-    """Background task to process partial transcript evaluation."""
-    from app.db.session import SessionLocal
-    from app.services.answer_evaluation_engine import answer_evaluation_engine
-    from app.services.event_service import event_service
-
-    db = SessionLocal()
-    try:
-        if not section_id:
-            logger.warning(f"Partial transcript has no section_id, skipping evaluation")
-            return
-
-        # Process partial transcript
-        updates = answer_evaluation_engine.process_partial_transcript(
-            db=db,
-            session_id=session_id,
-            transcript_text=transcript,
-            section_id=section_id,
-            speaker=speaker,
-            active_card_id=active_card_id,
-        )
-
-        # Emit events for card state changes (use event names frontend expects)
-        STATUS_TO_EVENT = {
-            "sufficient": "CARD_COVERED",
-            "probably_sufficient": "CARD_PROBABLY_COVERED",
-            "listening": "CARD_LISTENING",
-            "at_risk": "CARD_AT_RISK",
-            "skipped": "CARD_SKIPPED",
-        }
-        for update in updates:
-            event_type = STATUS_TO_EVENT.get(update["new_status"], "CARD_LISTENING")
-            event_service.publish_sync(
-                session_id,
-                {
-                    "type": event_type,
-                    "card_id": update["card_id"],
-                    "old_status": update["old_status"],
-                    "new_status": update["new_status"],
-                    "confidence": update["confidence"],
-                    "evidence": update.get("evidence"),
-                    "evidenceTranscript": update.get("evidence_transcript"),
-                    "evaluationSeq": update.get("evaluation_seq"),  # Phase 2: for versioned SSE
-                },
-            )
-
-    except Exception as e:
-        logger.error(f"Error processing partial transcript evaluation: {str(e)}", exc_info=True)
-    finally:
-        db.close()

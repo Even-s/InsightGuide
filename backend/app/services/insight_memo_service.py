@@ -71,7 +71,7 @@ class InsightMemoService:
         # Generate insights using AI
         insights = self._ai_analyze_interview(
             stakeholder=stakeholder,
-            qa_records=[],
+            question_records=[],
             transcript_text=transcript_text,
             session=session,
             visit_count=len(analysis_sessions),
@@ -101,7 +101,7 @@ class InsightMemoService:
             interview_duration_minutes=duration_minutes,
             topics_covered=insights.get("topics_covered", []),
             stakeholder_summary=stakeholder_summary,
-            qa_summaries=insights.get("qa_summaries", []),
+            question_summaries=insights.get("question_summaries", []),
             pain_points=insights.get("pain_points", []),
             requirement_candidates=insights.get("requirement_candidates", []),
             constraints_and_assumptions=insights.get("constraints_and_assumptions", []),
@@ -147,16 +147,20 @@ class InsightMemoService:
             .first()
         )
 
-    def get_memos_for_project(self, db: Session, project_id: str) -> List[InterviewInsightMemo]:
-        return (
-            db.query(InterviewInsightMemo)
-            .filter(
-                InterviewInsightMemo.project_id == project_id,
-                InterviewInsightMemo.status == "completed",
-            )
-            .order_by(InterviewInsightMemo.interview_date.desc())
-            .all()
+    def get_current_memos_for_project(
+        self, db: Session, project_id: str
+    ) -> List[InterviewInsightMemo]:
+        """Return current project memos through ready RoundAggregate rows.
+
+        Project-level memo lists use the same canonical aggregate pointer as
+        BRD, Readiness and Evidence Matrix. They do not scan historical session
+        memos directly.
+        """
+        from app.services.interview_round_aggregate_service import (
+            interview_round_aggregate_service,
         )
+
+        return interview_round_aggregate_service.latest_memos_for_project(db, project_id)
 
     def _analysis_sessions(self, db: Session, session: InterviewSession) -> List[InterviewSession]:
         """Return this session and every earlier visit in the same round."""
@@ -178,10 +182,7 @@ class InsightMemoService:
         for visit_index, session_id in enumerate(session_ids, 1):
             utterances = (
                 db.query(LiveUtterance)
-                .filter(
-                    LiveUtterance.session_id == session_id,
-                    LiveUtterance.is_partial == False,
-                )
+                .filter(LiveUtterance.session_id == session_id)
                 .order_by(LiveUtterance.sequence_index)
                 .limit(200)
                 .all()
@@ -196,7 +197,7 @@ class InsightMemoService:
     def _ai_analyze_interview(
         self,
         stakeholder: Optional[StakeholderProfile],
-        qa_records: List[Dict],
+        question_records: List[Dict],
         transcript_text: str,
         session: InterviewSession,
         visit_count: int = 1,
@@ -213,16 +214,16 @@ class InsightMemoService:
                     f"不熟悉：{', '.join(stakeholder.knowledge_boundaries or [])}\n"
                 )
 
-            qa_text = ""
-            for i, r in enumerate(qa_records[:20], 1):
+            question_text = ""
+            for i, r in enumerate(question_records[:20], 1):
                 status_label = {
-                    "answered": "已回答",
-                    "partially_answered": "部分回答",
-                    "not_answered": "未回答",
-                }.get(r["answer_status"], r["answer_status"])
-                qa_text += f"Q{i}. {r['question']} [{status_label}]\n"
-                if r["answer_summary"]:
-                    qa_text += f"   摘要：{r['answer_summary']}\n"
+                    "covered": "已涵蓋",
+                    "partial": "部分涵蓋",
+                    "uncovered": "未涵蓋",
+                }.get(r["status"], r["status"])
+                question_text += f"{i}. {r['question']} [{status_label}]\n"
+                if r["summary"]:
+                    question_text += f"   摘要：{r['summary']}\n"
 
             # Truncate transcript for token limits
             transcript_excerpt = transcript_text[:6000] if transcript_text else "(無逐字稿)"
@@ -231,12 +232,12 @@ class InsightMemoService:
                 "你是專業的商業分析師。請分析以下訪談內容，產生結構化的訪談洞察紀錄。\n\n"
                 f"本次分析合併同一輪的 {visit_count} 次訪談，請綜合所有場次，不可只評估最後一場。\n\n"
                 f"{stakeholder_info}\n"
-                f"## Q/A 摘要\n{qa_text}\n\n"
+                f"## 問題卡涵蓋摘要\n{question_text}\n\n"
                 f"## 逐字稿摘錄\n{transcript_excerpt}\n\n"
                 "請以 JSON 格式產出：\n"
                 "{\n"
                 '  "topics_covered": ["涵蓋的主題"],\n'
-                '  "qa_summaries": [{"question": "...", "answer_summary": "...", "answer_status": "answered|partial|unanswered", "confidence": 0.8}],\n'
+                '  "question_summaries": [{"question": "...", "summary": "...", "status": "covered|partial|uncovered", "confidence": 0.8}],\n'
                 '  "pain_points": [{"description": "...", "evidence_quote": "原文", "affected_roles": ["角色"], "severity": "high|medium|low"}],\n'
                 '  "requirement_candidates": [{"description": "...", "source": "explicit|inferred|unverified", "confidence": "high|medium|low", "evidence_quote": "...", "needs_validation_from": ["角色"], "brd_ready": false}],\n'
                 '  "constraints_and_assumptions": [{"type": "assumption|constraint|limitation", "content": "...", "source": "explicit|inferred", "evidence_quote": "..."}],\n'
@@ -279,23 +280,23 @@ class InsightMemoService:
 
         except Exception as e:
             logger.error(f"AI insight analysis failed: {e}")
-            return self._fallback_insights(qa_records)
+            return self._fallback_insights(question_records)
 
-    def _fallback_insights(self, qa_records: List[Dict]) -> Dict[str, Any]:
+    def _fallback_insights(self, question_records: List[Dict]) -> Dict[str, Any]:
         """Generate minimal insights without AI."""
-        qa_summaries = [
+        question_summaries = [
             {
                 "question": r["question"],
-                "answer_summary": r["answer_summary"] or "",
-                "answer_status": r["answer_status"],
+                "summary": r["summary"] or "",
+                "status": r["status"],
                 "confidence": r["confidence"],
             }
-            for r in qa_records
+            for r in question_records
         ]
 
         return {
             "topics_covered": [],
-            "qa_summaries": qa_summaries,
+            "question_summaries": question_summaries,
             "pain_points": [],
             "requirement_candidates": [],
             "constraints_and_assumptions": [],
@@ -332,19 +333,19 @@ class InsightMemoService:
             lines.append(f"- 涵蓋主題：{', '.join(memo.topics_covered)}")
         lines.append("")
 
-        # Section 2: Q/A
-        if memo.qa_summaries:
+        # Section 2: question-card summaries
+        if memo.question_summaries:
             lines.append("## 2. 每題回答整理")
             lines.append("")
-            for i, qa in enumerate(memo.qa_summaries, 1):
-                lines.append(f"### Q{i}. {qa.get('question', '')}")
+            for i, question_summary in enumerate(memo.question_summaries, 1):
+                lines.append(f"### {i}. {question_summary.get('question', '')}")
                 lines.append("")
-                if qa.get("answer_summary"):
-                    lines.append(f"**回答摘要**：{qa['answer_summary']}")
+                if question_summary.get("summary"):
+                    lines.append(f"**內容摘要**：{question_summary['summary']}")
                     lines.append("")
-                status_map = {"answered": "已回答", "partial": "部分回答", "unanswered": "未回答"}
+                status_map = {"covered": "已涵蓋", "partial": "部分涵蓋", "uncovered": "未涵蓋"}
                 lines.append(
-                    f"**狀態**：{status_map.get(qa.get('answer_status', ''), qa.get('answer_status', ''))}"
+                    f"**狀態**：{status_map.get(question_summary.get('status', ''), question_summary.get('status', ''))}"
                 )
                 lines.append("")
 

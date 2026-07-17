@@ -22,9 +22,10 @@ from app.db.session import Base
 class InterviewInsightMemo(Base):
     """InterviewInsightMemo model - structured insight document from a single interview.
 
-    Generated after Q/A reconstruction. Contains pain points, requirement
-    candidates, constraints, process descriptions, and unresolved questions.
-    Each item is tagged with source distinction (explicit/inferred/unverified).
+    Generated from role-neutral Realtime transcript segments. Contains
+    question-level summaries, pain points, requirement candidates, constraints,
+    process descriptions, and unresolved questions. Each item is tagged with
+    source distinction (explicit/inferred/unverified).
     """
 
     __tablename__ = "interview_insight_memos"
@@ -58,8 +59,8 @@ class InterviewInsightMemo(Base):
     topics_covered = Column(JSON, nullable=False, default=[])
     stakeholder_summary = Column(JSON, nullable=True)
 
-    # Section 2: Q/A summaries
-    qa_summaries = Column(JSON, nullable=False, default=[])
+    # Section 2: question-card summaries
+    question_summaries = Column(JSON, nullable=False, default=[])
 
     # Section 3: Pain points
     pain_points = Column(JSON, nullable=False, default=[])

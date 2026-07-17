@@ -2,20 +2,27 @@
 
 import logging
 import re
+from dataclasses import dataclass
 from datetime import datetime
+from io import BytesIO
 
 from app.db.session import SessionLocal
 from app.models.document import Document
-from app.models.section import Section
 from app.services.openai_service import openai_service
-from app.services.question_card_service import question_card_service
 from app.services.s3_service import s3_service
 
-# from app.services.document_service import document_service  # Circular import - not used
-from app.services.section_service import section_service
 from app.workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class GuideChunk:
+    """A parsed portion of guide text used only during analysis."""
+
+    chunk_number: int
+    title: str
+    text: str
 
 
 def _snake_to_camel(name: str) -> str:
@@ -37,7 +44,7 @@ def analyze_document(self, document_id: str):
     Theme-first document analysis pipeline.
 
     Flow:
-    1. Load document + sections
+    1. Load document + guide text chunks
     2. Phase 1: Full-text analysis → generate InterviewThemes
     3. Phase 2: For each theme → generate QuestionCards
     4. Update document status
@@ -65,22 +72,19 @@ def analyze_document(self, document_id: str):
         db.commit()
         logger.info(f"Updated document {document_id} status to 'analyzing'")
 
-        # 2. Load or create sections
-        sections = section_service.get_sections_by_document(db, document_id)
-        if not sections:
-            logger.info(f"No sections found, extracting from file...")
-            sections = _extract_sections_from_file(db, document)
-            if not sections:
-                document.status = "failed"
-                db.commit()
-                return {"status": "error", "message": "No sections could be extracted"}
+        # 2. Extract guide chunks from file
+        chunks = _extract_guide_chunks_from_file(document)
+        if not chunks:
+            document.status = "failed"
+            db.commit()
+            return {"status": "error", "message": "No guide content could be extracted"}
 
-        logger.info(f"Found {len(sections)} sections for document {document_id}")
+        logger.info(f"Found {len(chunks)} guide chunks for document {document_id}")
 
         # Build full document text for theme analysis
         full_text = "\n\n".join(
-            f"## {s.title or f'Section {s.section_number}'}\n{s.extracted_text or ''}"
-            for s in sections
+            f"## {chunk.title or f'Guide chunk {chunk.chunk_number}'}\n{chunk.text or ''}"
+            for chunk in chunks
         )
 
         # 3. Phase 1: Generate interview themes from full document
@@ -100,7 +104,7 @@ def analyze_document(self, document_id: str):
         theme_result = openai_service.generate_interview_themes(
             document_title=document.title,
             full_text=full_text,
-            sections=sections,
+            guide_chunks=chunks,
             document_id=document_id,
         )
 
@@ -112,15 +116,10 @@ def analyze_document(self, document_id: str):
 
         # Create InterviewTheme records
         themes_data = theme_result.get("themes", [])
-        section_map = {s.section_number: s for s in sections}
         created_themes = []
 
         for theme_data in themes_data:
             theme_id = f"theme_{uuid.uuid4().hex[:12]}"
-            source_section_numbers = theme_data.get("source_section_numbers", [])
-            source_section_ids = [
-                section_map[n].id for n in source_section_numbers if n in section_map
-            ]
 
             theme = InterviewTheme(
                 id=theme_id,
@@ -131,7 +130,6 @@ def analyze_document(self, document_id: str):
                 brd_mapping=theme_data.get("brd_mapping", []),
                 priority=theme_data.get("priority", 99),
                 estimated_minutes=theme_data.get("estimated_minutes"),
-                source_section_ids=source_section_ids,
                 order_index=theme_data.get("theme_number", 0),
                 is_required=True,
                 is_enabled=True,
@@ -180,15 +178,10 @@ def analyze_document(self, document_id: str):
                 except Exception:
                     pass
 
-                # Collect source section text
-                source_text_parts = []
-                for sec_id in theme.source_section_ids or []:
-                    sec = db.query(Section).filter(Section.id == sec_id).first()
-                    if sec and sec.extracted_text:
-                        source_text_parts.append(f"### {sec.title or ''}\n{sec.extracted_text}")
-
-                source_sections_text = (
-                    "\n\n".join(source_text_parts) if source_text_parts else full_text[:4000]
+                source_guide_text = _select_guide_text_for_theme(
+                    theme_data=themes_data[theme_index] if theme_index < len(themes_data) else {},
+                    chunks=chunks,
+                    full_text=full_text,
                 )
 
                 # Call OpenAI to generate cards for this theme
@@ -198,13 +191,12 @@ def analyze_document(self, document_id: str):
                     theme_title=theme.title,
                     theme_rationale=theme.rationale,
                     theme_brd_mapping=theme.brd_mapping or [],
-                    source_sections_text=source_sections_text,
+                    source_guide_text=source_guide_text,
                     document_id=document_id,
                 )
 
                 # Create QuestionCard records
                 cards_data = cards_result.get("cards", [])
-                first_source_section_id = (theme.source_section_ids or [None])[0]
                 created_cards = []
 
                 for card_index, card_data in enumerate(cards_data):
@@ -231,8 +223,6 @@ def analyze_document(self, document_id: str):
                             id=card_id,
                             document_id=document_id,
                             interview_theme_id=theme.id,
-                            section_id=first_source_section_id,
-                            section_number=theme.theme_number,
                             focus_text=card_data.get("focus_text", ""),
                             question_text=(card_data.get("question_text", "") or "")[:200]
                             or "Untitled",
@@ -357,95 +347,8 @@ def analyze_document(self, document_id: str):
         db.close()
 
 
-def build_section_analysis_prompt(
-    section_title: str, section_text: str, document_title: str
-) -> str:
-    """
-    Build a prompt for OpenAI to analyze a document section.
-
-    Args:
-        section_title: Title of the section
-        section_text: Text content of the section
-        document_title: Title of the document
-
-    Returns:
-        Formatted prompt string
-    """
-    return f"""You are analyzing a requirements document section for a requirements gathering interview.
-
-Document: {document_title}
-Section: {section_title}
-
-Section Content:
-{section_text}
-
-Your task is to:
-1. Summarize the key requirements in this section
-2. Generate interview questions to clarify, validate, and explore these requirements
-3. For each question, provide expected answer elements that would make the answer sufficient
-
-Generate questions in these categories:
-- Clarification: Questions to understand ambiguous or unclear requirements
-- Validation: Questions to verify understanding and confirm requirements
-- Exploration: Questions to uncover edge cases, constraints, and hidden requirements
-
-For each question, include:
-- The question text (open-ended, encouraging detailed answers)
-- The question type (clarification, validation, or exploration)
-- Importance (must: critical requirements, should: important but not critical)
-- Expected answer elements (key points that should be covered in a sufficient answer)
-- A suggested followup question if the initial answer is insufficient
-
-Output format: JSON
-"""
-
-
-def analyze_section_with_retry(section_id: str, max_retries: int = 3) -> dict:
-    """
-    Analyze a single section with retry logic.
-
-    Args:
-        section_id: ID of the section to analyze
-        max_retries: Maximum number of retry attempts
-
-    Returns:
-        Analysis result dictionary
-    """
-    db = SessionLocal()
-
-    try:
-        section = section_service.get_section(db, section_id)
-        if not section:
-            return {"status": "error", "message": "Section not found"}
-
-        for attempt in range(max_retries):
-            try:
-                analysis_result = openai_service.analyze_document_section(
-                    section_text=section.extracted_text,
-                    section_title=section.title,
-                    document_title=section.document.title if section.document else "Unknown",
-                    section_number=section.section_number,
-                )
-                return {"status": "success", "result": analysis_result}
-
-            except Exception as e:
-                logger.warning(f"Section analysis attempt {attempt + 1} failed: {e}")
-                if attempt == max_retries - 1:
-                    raise
-
-    finally:
-        db.close()
-
-
-def _extract_sections_from_file(db, document: Document) -> list:
-    """
-    Extract sections from a document file (supports .md and .txt).
-    Downloads file from S3, parses it into sections by headings, and saves to DB.
-    """
-    import re
-    import uuid
-    from io import BytesIO
-
+def _extract_guide_chunks_from_file(document: Document) -> list[GuideChunk]:
+    """Download guide text and parse it into in-memory chunks."""
     try:
         object_key = (
             document.source_file_url.split("/insightguide-uploads/")[-1]
@@ -469,35 +372,23 @@ def _extract_sections_from_file(db, document: Document) -> list:
         logger.warning(f"Document {document.id} file is empty")
         return []
 
-    sections_data = _parse_markdown_sections(text)
+    chunks_data = _parse_markdown_guide_chunks(text)
 
-    if not sections_data:
-        sections_data = [{"title": document.title or "Content", "text": text.strip()}]
+    if not chunks_data:
+        chunks_data = [{"title": document.title or "Guide Content", "text": text.strip()}]
 
-    created_sections = []
-    for idx, section_data in enumerate(sections_data, start=1):
-        section = Section(
-            id=f"sec_{uuid.uuid4().hex[:12]}",
-            document_id=document.id,
-            section_number=idx,
-            title=section_data["title"],
-            extracted_text=section_data["text"],
-            created_at=datetime.utcnow(),
-        )
-        db.add(section)
-        created_sections.append(section)
-
-    db.commit()
-    logger.info(f"Created {len(created_sections)} sections for document {document.id}")
-    return created_sections
+    chunks = [
+        GuideChunk(chunk_number=idx, title=chunk["title"], text=chunk["text"])
+        for idx, chunk in enumerate(chunks_data, start=1)
+    ]
+    logger.info(f"Parsed {len(chunks)} guide chunks for document {document.id}")
+    return chunks
 
 
-def _parse_markdown_sections(text: str) -> list:
-    """Parse markdown text into sections based on headings."""
-    import re
-
+def _parse_markdown_guide_chunks(text: str) -> list:
+    """Parse markdown text into guide chunks based on headings."""
     lines = text.split("\n")
-    sections = []
+    chunks = []
     current_title = None
     current_lines = []
 
@@ -507,7 +398,7 @@ def _parse_markdown_sections(text: str) -> list:
             if current_title and current_lines:
                 content = "\n".join(current_lines).strip()
                 if content:
-                    sections.append({"title": current_title, "text": content})
+                    chunks.append({"title": current_title, "text": content})
             current_title = heading_match.group(2).strip()
             current_lines = []
         else:
@@ -516,11 +407,23 @@ def _parse_markdown_sections(text: str) -> list:
     if current_title and current_lines:
         content = "\n".join(current_lines).strip()
         if content:
-            sections.append({"title": current_title, "text": content})
+            chunks.append({"title": current_title, "text": content})
 
-    if not sections and current_lines:
+    if not chunks and current_lines:
         content = "\n".join(current_lines).strip()
         if content:
-            sections.append({"title": "Document Content", "text": content})
+            chunks.append({"title": "Guide Content", "text": content})
 
-    return sections
+    return chunks
+
+
+def _select_guide_text_for_theme(theme_data: dict, chunks: list[GuideChunk], full_text: str) -> str:
+    """Select source guide text for a generated theme without persisting source chunks."""
+    chunk_numbers = theme_data.get("source_chunk_numbers", [])
+    chunk_map = {chunk.chunk_number: chunk for chunk in chunks}
+    selected = [
+        f"### {chunk.title}\n{chunk.text}"
+        for number in chunk_numbers
+        if (chunk := chunk_map.get(number))
+    ]
+    return "\n\n".join(selected) if selected else full_text[:4000]

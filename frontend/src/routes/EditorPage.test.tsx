@@ -202,41 +202,6 @@ describe('EditorPage', () => {
     expect(documentsAPI.getDocument).toHaveBeenCalledWith('doc-1')
   })
 
-  it('labels migrated rounds that still share one legacy outline', async () => {
-    const { documentsAPI } = await import('@/api/documents')
-    const { interviewRoundsAPI } = await import('@/api/interviewRounds')
-    const sharedRounds = [1, 2].map((roundNumber) => ({
-      id: `round-${roundNumber}`,
-      seriesId: 'series-1',
-      roundNumber,
-      generationMode: 'follow_up',
-      sourceSessionIds: [],
-      focusTopics: [],
-      excludeCompletedQuestions: true,
-      guideDocumentId: 'doc-shared',
-      guideVersion: 1,
-      cardCount: 5,
-      status: 'completed',
-      sessionIds: [`session-${roundNumber}`],
-      createdAt: '2026-07-10T08:00:00Z',
-      updatedAt: '2026-07-10T09:00:00Z',
-    }))
-    vi.mocked(documentsAPI.getDocument).mockResolvedValue({
-      id: 'doc-shared',
-      project_id: 'proj-1',
-      interview_round_id: 'round-2',
-      guide_version: 1,
-      is_frozen: true,
-    } as Document)
-    vi.mocked(interviewRoundsAPI.getRound).mockResolvedValue(sharedRounds[1])
-    vi.mocked(interviewRoundsAPI.listRounds).mockResolvedValue(sharedRounds)
-
-    renderEditorPage('doc-shared')
-
-    expect(await screen.findByText(/尚未分開保存每輪版本/)).toBeInTheDocument()
-    expect(screen.queryByText('舊版共用')).not.toBeInTheDocument()
-  })
-
   it('creates a new interview directly from the round tabs', async () => {
     const { documentsAPI } = await import('@/api/documents')
     const { interviewRoundsAPI } = await import('@/api/interviewRounds')

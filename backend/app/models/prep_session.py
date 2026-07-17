@@ -9,7 +9,7 @@ from app.db.session import Base
 
 
 class PrepSession(Base):
-    """PrepSession model - represents a preparation session for a requirements document."""
+    """PrepSession model - represents guide preparation for an interview round."""
 
     __tablename__ = "prep_sessions"
 

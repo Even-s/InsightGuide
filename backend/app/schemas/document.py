@@ -50,8 +50,8 @@ class DocumentAnalysisResponse(BaseModel):
 
     document_id: str
     status: str
-    sections: List[dict] = Field(default_factory=list)
-    topic_cards_count: int = 0
+    themes: List[dict] = Field(default_factory=list)
+    question_cards_count: int = 0
     created_at: datetime
     updated_at: datetime
     cost_usd: float = 0.0

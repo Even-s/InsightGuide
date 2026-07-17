@@ -13,9 +13,7 @@ _QUESTION_ONLY_STATUSES = frozenset(
 )
 
 
-def reduce_card_state(
-    current_status: str, judgment: dict, is_partial: bool = False
-) -> tuple[str, float, float]:
+def reduce_card_state(current_status: str, judgment: dict) -> tuple[str, float, float]:
     """Deterministic state reducer using activation/completion separation.
 
     Returns (new_status, activation_score, completion_score).
@@ -32,8 +30,6 @@ def reduce_card_state(
     Args:
         current_status: Current card state status
         judgment: AI judgment dict with confidence, is_covered, relation, response_status, etc.
-        is_partial: Whether this is a partial transcript evaluation
-
     Returns:
         Tuple of (new_status, activation_score, completion_score)
     """
@@ -70,11 +66,6 @@ def reduce_card_state(
         target = "sufficient"
     else:
         target = "probably_sufficient"
-
-    # Constraints
-    if is_partial and target == "sufficient":
-        target = "probably_sufficient"
-        completion_score = min(completion_score, 0.80)
 
     if not has_evidence and target == "sufficient":
         target = "probably_sufficient"

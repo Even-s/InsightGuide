@@ -1,4 +1,4 @@
-"""OpenAI API integration service for document analysis and topic card generation."""
+"""OpenAI API integration service for guide analysis and question card generation."""
 
 import json
 import logging
@@ -149,7 +149,7 @@ class OpenAIService:
 
     def generate_card_metadata(self, prompt: str) -> Dict[str, Any]:
         """
-        Generate topic card metadata using the configured slide analysis model.
+        Generate question card metadata using the configured analysis model.
 
         Args:
             prompt: The prompt describing what metadata to generate
@@ -163,7 +163,7 @@ class OpenAIService:
                 "messages": [
                     {
                         "role": "system",
-                        "content": "You are an expert at analyzing interview content and generating structured metadata for topic cards. Always respond with valid JSON.",
+                        "content": "You are an expert at analyzing interview content and generating structured metadata for question cards. Always respond with valid JSON.",
                     },
                     {"role": "user", "content": prompt},
                 ],
@@ -194,93 +194,11 @@ class OpenAIService:
         """Return True for models that reject custom temperature values."""
         return model.startswith("gpt-5")
 
-    def analyze_document_section(
-        self,
-        section_text: str,
-        section_title: Optional[str] = None,
-        document_title: Optional[str] = None,
-        section_number: int = 1,
-    ) -> Dict[str, Any]:
-        """
-        Analyze a document section and generate interview questions.
-
-        Args:
-            section_text: Text content of the section
-            section_title: Title of the section
-            document_title: Title of the document
-            section_number: Section number in the document
-
-        Returns:
-            Dict containing:
-                - summary: AI-generated summary of the section
-                - questions: List of question cards with metadata
-                - usage: Token usage information
-        """
-        logger.info(f"Analyzing document section {section_number}")
-
-        # Build the analysis prompt
-        prompt = self._build_document_analysis_prompt(
-            section_text=section_text,
-            section_title=section_title,
-            document_title=document_title,
-            section_number=section_number,
-        )
-
-        try:
-            # Call OpenAI API with structured output
-            request_params = {
-                "model": self.analysis_model,
-                "messages": [
-                    {"role": "system", "content": self._get_document_analysis_system_prompt()},
-                    {"role": "user", "content": prompt},
-                ],
-                "response_format": {"type": "json_object"},
-            }
-
-            # Only add temperature for non-GPT-5 models
-            if not self._uses_default_temperature_only(self.analysis_model):
-                request_params["temperature"] = 0.7
-
-            response = self.client.chat.completions.create(**request_params)
-
-            # Extract content and parse JSON
-            content = response.choices[0].message.content
-            if not content:
-                raise ValueError("Empty response from OpenAI")
-
-            import json
-
-            result = json.loads(content)
-
-            # Calculate cost and usage
-            usage = response.usage
-            cost_usd, _ = billing_service.calculate_token_cost(
-                model=self.analysis_model,
-                input_tokens=usage.prompt_tokens,
-                cached_input_tokens=0,
-                output_tokens=usage.completion_tokens,
-            )
-
-            return {
-                "summary": result.get("summary", ""),
-                "questions": result.get("questions", []),
-                "usage": {
-                    "prompt_tokens": usage.prompt_tokens,
-                    "completion_tokens": usage.completion_tokens,
-                    "total_tokens": usage.total_tokens,
-                    "cost_usd": cost_usd,
-                },
-            }
-
-        except Exception as e:
-            logger.error(f"Failed to analyze document section: {e}")
-            raise
-
     def generate_interview_themes(
         self,
         document_title: str,
         full_text: str,
-        sections: list,
+        guide_chunks: list,
         document_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
@@ -290,8 +208,8 @@ class OpenAIService:
         """
         logger.info(f"Generating interview themes for: {document_title}")
 
-        section_list = "\n".join(
-            f"- Section {s.section_number}: {s.title or '(untitled)'}" for s in sections
+        chunk_list = "\n".join(
+            f"- Chunk {chunk.chunk_number}: {chunk.title or '(untitled)'}" for chunk in guide_chunks
         )
 
         # Default fallback prompt
@@ -323,7 +241,7 @@ class OpenAIService:
       "brd_mapping": ["業務流程", "角色權責"],
       "priority": 1,
       "estimated_minutes": 8,
-      "source_section_numbers": [1, 2]
+      "source_chunk_numbers": [1, 2]
     }
   ],
   "priority_order": [0, 2, 3, 1],
@@ -334,7 +252,7 @@ class OpenAIService:
 - theme_number 從 0 開始
 - priority 越小越優先（1 = 最重要）
 - priority_order 是 theme_number 的排列，表示建議的訪談順序
-- source_section_numbers 指向原始文件的段落編號
+- source_chunk_numbers 指向原始 guide chunk 編號
 - rationale 必須說明「為什麼要問」，不是「這段在講什麼」
 - brd_mapping 應使用常見 BRD 章節名稱
 """
@@ -343,8 +261,8 @@ class OpenAIService:
 
         user_prompt = f"""文件標題：{document_title}
 
-段落列表：
-{section_list}
+Guide chunk 列表：
+{chunk_list}
 
 完整文件內容：
 {full_text[:12000]}
@@ -364,7 +282,7 @@ class OpenAIService:
                 response_format={"type": "json_object"},
             )
 
-            billing_service.record_deck_chat_completion(
+            billing_service.record_document_chat_completion(
                 document_id=document_id,
                 operation="generate_interview_themes",
                 model=model,
@@ -388,7 +306,7 @@ class OpenAIService:
         theme_title: str,
         theme_rationale: str,
         theme_brd_mapping: list,
-        source_sections_text: str,
+        source_guide_text: str,
         document_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
@@ -469,8 +387,8 @@ class OpenAIService:
 提問依據：{theme_rationale}
 對應 BRD 章節：{', '.join(theme_brd_mapping)}
 
-來源段落內容：
-{source_sections_text[:8000]}
+來源 guide 內容：
+{source_guide_text[:8000]}
 
 請為這個訪談單元產生提問重點卡。以 JSON 格式回傳。
 """
@@ -487,7 +405,7 @@ class OpenAIService:
                 response_format={"type": "json_object"},
             )
 
-            billing_service.record_deck_chat_completion(
+            billing_service.record_document_chat_completion(
                 document_id=document_id,
                 operation="generate_theme_question_cards",
                 model=model,
@@ -504,72 +422,6 @@ class OpenAIService:
         except Exception as e:
             logger.error(f"Failed to generate theme question cards: {e}")
             raise
-
-    def _get_document_analysis_system_prompt(self) -> str:
-        """Legacy: Get system prompt for per-section analysis (fallback only)."""
-        return """你是一位資深商業分析師，擅長從需求文件中找出資訊缺口並設計訪談問題。
-
-分析需求文件段落，產出訪談問題。每個問題代表一個 BRD 資訊缺口。
-
-輸出格式（JSON）：
-{
-  "summary": "段落重點摘要",
-  "questions": [
-    {
-      "question_text": "建議提問",
-      "question_type": "clarification|validation|exploration|edge_case|constraint|priority",
-      "importance": "must|should",
-      "expected_answer_elements": ["期待回答要素1", "期待回答要素2"],
-      "suggested_followup": "追問方向",
-      "coverage_rule": {
-        "semantic_anchors": ["語義錨點"],
-        "expected_keywords": ["關鍵詞"],
-        "must_mention_elements": [
-          {"text": "必須回答的要素", "required": true, "aliases": [], "subpoints": []}
-        ],
-        "thresholds": {
-          "probably_sufficient": 0.65,
-          "sufficient": 0.80
-        }
-      }
-    }
-  ]
-}
-
-規則：
-- 產生 3-5 個問題
-- 問題要能幫助撰寫完整的 BRD
-- 按對話順序排列（先背景，再細節，最後確認）
-"""
-
-    def _build_document_analysis_prompt(
-        self,
-        section_text: str,
-        section_title: Optional[str] = None,
-        document_title: Optional[str] = None,
-        section_number: int = 1,
-    ) -> str:
-        """Build prompt for document section analysis."""
-        title_info = f"Document: {document_title}\n" if document_title else ""
-        section_info = (
-            f"Section {section_number}: {section_title}\n\n"
-            if section_title
-            else f"Section {section_number}\n\n"
-        )
-
-        return f"""{title_info}{section_info}Content:
-{section_text}
-
-Please analyze this requirements section and generate interview questions to:
-1. Clarify any ambiguous or unclear requirements
-2. Validate understanding of the stated requirements
-3. Explore edge cases, constraints, and hidden requirements
-4. Determine priorities and importance
-
-Generate 2-5 high-quality questions based on the content's complexity.
-Focus on questions that will help write a comprehensive BRD (Business Requirements Document).
-
-Return your analysis in JSON format as specified in the system prompt."""
 
 
 openai_service = OpenAIService()

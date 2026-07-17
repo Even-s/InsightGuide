@@ -1,6 +1,5 @@
 """Interview session management service."""
 
-import copy
 import logging
 import uuid
 from datetime import datetime, timedelta
@@ -46,15 +45,10 @@ class InterviewService:
         later transcript segments.  Return whether any pointer was cleared so
         callers can persist the session in their existing transaction.
         """
-        matches_active = session.active_card_id == card_id
-        matches_hint = session.active_card_hint_id == card_id
-        if not matches_active and not matches_hint:
+        if session.active_card_id != card_id:
             return False
 
-        if matches_active:
-            session.active_card_id = None
-        if matches_hint:
-            session.active_card_hint_id = None
+        session.active_card_id = None
         session.active_card_source = "completed"
         session.active_card_confirmed_at = None
         session.pending_answer_buffer = None
@@ -64,25 +58,28 @@ class InterviewService:
     def _build_card_state(
         session_id: str,
         card_id: str,
-        source_state: Optional[InterviewCardState] = None,
     ) -> InterviewCardState:
-        """Create a card state, carrying durable progress for a continued visit."""
-        carried_status = source_state.status if source_state else "pending"
-        if carried_status == "listening":
-            carried_status = "pending"
+        """Create a fresh per-session card state.
+
+        Continued interviews no longer duplicate prior session progress or
+        evidence. Cumulative progress lives on InterviewRoundAggregate; a new
+        session records only the delta from that visit. Role applicability is
+        recalculated for each session by RoleFilterService instead of being
+        copied from the source session.
+        """
         return InterviewCardState(
             id=f"cardstate_{uuid.uuid4().hex[:12]}",
             session_id=session_id,
             question_card_id=card_id,
-            status=carried_status,
-            confidence=source_state.confidence if source_state else None,
-            activation_score=source_state.activation_score if source_state else 0,
-            completion_score=source_state.completion_score if source_state else 0,
-            completion_source=source_state.completion_source if source_state else None,
-            manual_note=source_state.manual_note if source_state else None,
-            answered_at=source_state.answered_at if source_state else None,
-            evidence_transcript=source_state.evidence_transcript if source_state else None,
-            evidence=copy.deepcopy(source_state.evidence) if source_state else None,
+            status="pending",
+            confidence=None,
+            activation_score=0,
+            completion_score=0,
+            completion_source=None,
+            manual_note=None,
+            answered_at=None,
+            evidence_transcript=None,
+            evidence=None,
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),
         )
@@ -158,7 +155,6 @@ class InterviewService:
         ).delete(synchronize_session=False)
 
         session.active_card_id = None
-        session.active_card_hint_id = None
         session.active_card_source = None
         session.active_card_confirmed_at = None
         session.pending_answer_buffer = None
@@ -365,7 +361,7 @@ class InterviewService:
         )
 
         db.add(session)
-        # Persist the parent row before copying continuation card/evidence rows.
+        # Persist the parent row before creating per-session card rows.
         # These models are linked by scalar foreign-key IDs rather than ORM
         # relationships, so SQLAlchemy cannot otherwise guarantee insert order.
         db.flush([session])
@@ -378,47 +374,9 @@ class InterviewService:
             db.query(QuestionCard).filter(QuestionCard.document_id == session_data.documentId).all()
         )
 
-        source_card_states = {
-            state.question_card_id: state
-            for state in (
-                db.query(InterviewCardState)
-                .filter(InterviewCardState.session_id == continuation_source.id)
-                .all()
-                if continuation_source
-                else []
-            )
-        }
-
         for card in question_cards:
-            source_state = source_card_states.get(card.id)
-            card_state = self._build_card_state(session_id, card.id, source_state)
+            card_state = self._build_card_state(session_id, card.id)
             db.add(card_state)
-
-        if continuation_source:
-            source_criterion_evidence = (
-                db.query(CardCriterionEvidence)
-                .filter(CardCriterionEvidence.session_id == continuation_source.id)
-                .all()
-            )
-            for evidence in source_criterion_evidence:
-                db.add(
-                    CardCriterionEvidence(
-                        id=f"cev_{uuid.uuid4().hex[:12]}",
-                        session_id=session_id,
-                        card_id=evidence.card_id,
-                        criterion_id=evidence.criterion_id,
-                        utterance_id=None,
-                        evaluation_turn_text=evidence.evaluation_turn_text,
-                        status=evidence.status,
-                        evidence_quote=evidence.evidence_quote,
-                        normalized_value=evidence.normalized_value,
-                        evaluator_confidence=evidence.evaluator_confidence,
-                        reason=evidence.reason,
-                        model=evidence.model,
-                        evaluation_seq=evidence.evaluation_seq,
-                        created_at=datetime.utcnow(),
-                    )
-                )
 
         db.commit()
         db.refresh(session)
@@ -430,8 +388,9 @@ class InterviewService:
 
             interview_round_aggregate_service.invalidate(db, interview_round_id)
 
-        # Auto-apply role filter if stakeholder is set
-        if stakeholder_profile_id and not continuation_source:
+        # Auto-apply role filter if stakeholder is set. Continuations also
+        # recalculate role applicability instead of copying source session state.
+        if stakeholder_profile_id:
             try:
                 from app.services.role_filter_service import role_filter_service
 
@@ -468,10 +427,12 @@ class InterviewService:
     ) -> InterviewSession:
         """Update interview session."""
         session = self.get_session(db, session_id)
-        old_section_id = session.current_section_id
+        old_theme_id = session.current_theme_id
 
         logger.info(
-            f"update_session payload: status={update_data.status}, currentSectionId={update_data.currentSectionId}"
+            "update_session payload: status=%s, currentThemeId=%s",
+            update_data.status,
+            update_data.currentThemeId,
         )
 
         if update_data.status:
@@ -514,39 +475,36 @@ class InterviewService:
                 if session.interview_round:
                     session.interview_round.status = "completed"
 
-        if update_data.currentSectionId is not None:
-            new_id = update_data.currentSectionId
-            if new_id.startswith("theme_"):
-                session.current_theme_id = new_id
-            else:
-                session.current_section_id = new_id
+        if update_data.currentThemeId is not None:
+            session.current_theme_id = update_data.currentThemeId
 
         db.commit()
         db.refresh(session)
 
         if (
-            update_data.currentSectionId is not None
-            and old_section_id
-            and old_section_id != update_data.currentSectionId
+            update_data.currentThemeId is not None
+            and old_theme_id
+            and old_theme_id != update_data.currentThemeId
         ):
-            self._mark_missed_must_cards_at_risk(db, session_id, old_section_id)
+            self._mark_missed_must_cards_at_risk(db, session_id, old_theme_id)
 
         logger.info(f"Updated session {session_id}: status={session.status}")
 
         return session
 
-    def _mark_missed_must_cards_at_risk(
-        self, db: Session, session_id: str, section_id: str
-    ) -> None:
+    def _mark_missed_must_cards_at_risk(self, db: Session, session_id: str, theme_id: str) -> None:
         """
-        Mark "must" importance question cards as "at_risk" when leaving a section.
+        Mark "must" importance question cards as "at_risk" when leaving a theme.
 
-        This helps interviewers track which critical questions were skipped.
+        This helps facilitators track which critical questions were skipped.
         """
-        # Get all question cards for this section
+        # Get all question cards for this interview theme
         question_cards = (
             db.query(QuestionCard)
-            .filter(QuestionCard.section_id == section_id, QuestionCard.importance == "must")
+            .filter(
+                QuestionCard.interview_theme_id == theme_id,
+                QuestionCard.importance == "must",
+            )
             .all()
         )
 
@@ -574,7 +532,7 @@ class InterviewService:
 
         if updated_count > 0:
             db.commit()
-            logger.info(f"Marked {updated_count} must-ask cards as at_risk in section {section_id}")
+            logger.info("Marked %s must-ask cards as at_risk in theme %s", updated_count, theme_id)
 
     def update_card_state(
         self,
@@ -631,6 +589,29 @@ class InterviewService:
 
         return card_states
 
+    def get_session_cards(self, db: Session, session_id: str) -> List[InterviewCardState]:
+        """Get question cards with their runtime state for a session."""
+        from sqlalchemy.orm import joinedload
+
+        self.get_session(db, session_id)
+
+        return (
+            db.query(InterviewCardState)
+            .options(
+                joinedload(InterviewCardState.question_card).joinedload(
+                    QuestionCard.interview_theme
+                )
+            )
+            .filter(InterviewCardState.session_id == session_id)
+            .join(QuestionCard, InterviewCardState.question_card_id == QuestionCard.id)
+            .order_by(
+                QuestionCard.interview_theme_id,
+                QuestionCard.order_index,
+                QuestionCard.id,
+            )
+            .all()
+        )
+
     def create_utterance(
         self, db: Session, session_id: str, utterance_data: UtteranceCreate
     ) -> LiveUtterance:
@@ -639,7 +620,7 @@ class InterviewService:
         Realtime utterances are the canonical transcript used during and after
         the interview.
         """
-        session = self.get_session(db, session_id)
+        self.get_session(db, session_id)
 
         utterance_id = f"utt_{uuid.uuid4().hex[:12]}"
 
@@ -652,12 +633,12 @@ class InterviewService:
             id=utterance_id,
             session_id=session_id,
             realtime_event_id=utterance_data.realtimeItemId,
-            speaker="realtime",
+            theme_id=utterance_data.themeId,
+            asked_card_ids=utterance_data.askedCardIds or [],
             transcript=utterance_data.transcript,
             started_at=utterance_data.startedAt,
             ended_at=utterance_data.endedAt,
             sequence_index=existing_count,
-            is_partial=False,
             created_at=datetime.utcnow(),
         )
 
@@ -665,9 +646,7 @@ class InterviewService:
         db.commit()
         db.refresh(utterance)
 
-        logger.info(
-            f"Created live utterance {utterance_id} in session {session_id} (speaker: {utterance.speaker})"
-        )
+        logger.info("Created live utterance %s in session %s", utterance_id, session_id)
 
         return utterance
 
@@ -675,7 +654,6 @@ class InterviewService:
         self,
         db: Session,
         session_id: str,
-        section_id: Optional[str] = None,
         limit: int = 100,
     ) -> list:
         """Get utterances for a session.
@@ -684,10 +662,7 @@ class InterviewService:
         """
         self.get_session(db, session_id)
 
-        query = db.query(LiveUtterance).filter(
-            LiveUtterance.session_id == session_id,
-            LiveUtterance.is_partial == False,
-        )
+        query = db.query(LiveUtterance).filter(LiveUtterance.session_id == session_id)
         return query.order_by(asc(LiveUtterance.sequence_index)).limit(limit).all()
 
     def list_sessions(
@@ -751,7 +726,7 @@ class InterviewService:
                 interviewRoundId=session.interview_round_id,
                 continuedFromSessionId=session.continued_from_session_id,
                 status=session.status,
-                currentSectionId=session.current_section_id,
+                currentThemeId=session.current_theme_id,
                 startedAt=session.started_at,
                 endedAt=session.ended_at,
                 pausedAt=session.paused_at,

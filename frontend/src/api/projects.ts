@@ -319,6 +319,7 @@ export async function listStakeholders(projectId: string): Promise<StakeholderPr
 }
 
 export async function updateStakeholder(profileId: string, data: {
+  slot_id?: string | null
   name?: string
   stakeholder_type?: string
   expertise_tags?: string[]
@@ -386,10 +387,10 @@ export interface InsightMemo {
     expertise: string[]
     boundaries: string[]
   }
-  qaSummaries: Array<{
+  questionSummaries: Array<{
     question: string
-    answer_summary: string
-    answer_status: string
+    summary: string
+    status: string
     confidence?: number
   }>
   painPoints: Array<{
@@ -457,9 +458,11 @@ export async function listProjectInsightMemos(projectId: string): Promise<{ memo
 
 // --- Evidence Matrix API ---
 
-export interface EvidenceMatrixEntry {
+export interface DerivedEvidenceRequirement {
   id: string
   matrixId: string
+  source?: 'round_aggregate'
+  editable?: boolean
   requirementCandidate: string
   category?: string
   sourceRoles: string[]
@@ -486,11 +489,13 @@ export interface EvidenceMatrixResponse {
     id: string
     projectId: string
     status: string
+    source?: 'round_aggregate'
+    editable?: boolean
     memoCount: number
     lastUpdatedAt?: string
     markdownContent?: string
   } | null
-  entries: EvidenceMatrixEntry[]
+  entries: DerivedEvidenceRequirement[]
   summary: {
     total_candidates: number
     validated: number
@@ -515,14 +520,6 @@ export async function refreshEvidenceMatrix(projectId: string): Promise<Evidence
   return res.data
 }
 
-export async function updateEvidenceMatrixEntry(entryId: string, data: {
-  validation_status?: string
-  category?: string
-}): Promise<EvidenceMatrixEntry> {
-  const res = await apiClient.put(`/api/evidence-matrix-entries/${entryId}`, data)
-  return res.data
-}
-
 export async function getInterviewSuggestions(projectId: string): Promise<{
   suggestions: Array<{ target_role: string; reason: string; urgency: string }>
   summary: EvidenceMatrixResponse['summary']
@@ -540,14 +537,14 @@ export interface BRDReadinessReport {
   readinessScore?: number
   generationMode?: string
   recommendation?: string
-  readySections: Array<{
-    section: string
+  readyChapters: Array<{
+    chapter: string
     evidence_count: number
     source_roles: string[]
     confidence: string
   }>
-  insufficientSections: Array<{
-    section: string
+  insufficientChapters: Array<{
+    chapter: string
     reason: string
     missing_roles: string[]
     priority: string

@@ -10,7 +10,7 @@ class EvaluateAnswersInput(BaseModel):
     """Input for answer sufficiency evaluation."""
 
     sessionId: str
-    sectionId: str
+    themeId: str
     utteranceId: str
     transcript: str
     questionCardIds: List[str]
@@ -32,7 +32,7 @@ class EvaluateAnswersOutput(BaseModel):
     """Output from answer sufficiency evaluation."""
 
     sessionId: str
-    sectionId: str
+    themeId: str
     utteranceId: str
     transcript: str
     matches: List[QuestionCardMatch]
@@ -58,7 +58,6 @@ class Utterance(BaseModel):
 
     id: str
     transcript: str
-    speaker: Literal["interviewer", "interviewee"] = "interviewee"
     startedAt: Optional[datetime] = None
     endedAt: Optional[datetime] = None
 
@@ -67,7 +66,7 @@ class AISemanticEvaluationInput(BaseModel):
     """Input for AI semantic evaluation."""
 
     sessionId: str
-    sectionId: str
+    themeId: str
     utterance: Utterance
     candidateCards: List[CandidateQuestionCard]
 
@@ -88,6 +87,6 @@ class AISemanticEvaluationOutput(BaseModel):
     """Output from AI semantic evaluation."""
 
     sessionId: str
-    sectionId: str
+    themeId: str
     utteranceId: str
     decisions: List[SemanticDecision]

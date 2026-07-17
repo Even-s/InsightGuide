@@ -112,25 +112,25 @@ async def delete_interview_session(session_id: str, db: Session = Depends(get_db
 async def update_interview_session(
     session_id: str, update_data: InterviewSessionUpdate, db: Session = Depends(get_db)
 ):
-    """Update interview session status or current section."""
+    """Update interview session status or current theme."""
     logger.info(f"Updating interview session {session_id}")
     session = interview_service.update_session(db, session_id, update_data)
     return convert_session_to_schema(session, db)
 
 
-@router.patch("/{session_id}/current-section", response_model=InterviewSessionSchema)
-async def update_current_section(
-    session_id: str, section_id: str = Body(..., embed=True), db: Session = Depends(get_db)
+@router.patch("/{session_id}/current-theme", response_model=InterviewSessionSchema)
+async def update_current_theme(
+    session_id: str, theme_id: str = Body(..., embed=True), db: Session = Depends(get_db)
 ):
     """
-    Update current section in interview session.
+    Update current interview theme in interview session.
 
-    This triggers section transition logic and may update card states
+    This triggers theme transition logic and may update card states
     (e.g., mark pending "must" cards as at_risk).
     """
-    logger.info(f"Updating current section for session {session_id} to {section_id}")
+    logger.info(f"Updating current theme for session {session_id} to {theme_id}")
 
-    update_data = InterviewSessionUpdate(currentSectionId=section_id)
+    update_data = InterviewSessionUpdate(currentThemeId=theme_id)
     session = interview_service.update_session(db, session_id, update_data)
 
     return convert_session_to_schema(session, db)

@@ -34,7 +34,7 @@ export interface Document {
 export interface DocumentAnalysis {
   documentId: string
   status: DocumentStatus
-  sections: SectionSummary[]
+  themes: ThemeSummary[]
   questionCardsCount: number
   createdAt: string
   updatedAt: string
@@ -42,12 +42,14 @@ export interface DocumentAnalysis {
   aiUsage: Record<string, unknown>
 }
 
-export interface SectionSummary {
+export interface ThemeSummary {
   id: string
   documentId: string
-  sectionNumber: number
+  themeNumber: number
   title?: string | null
-  extractedText?: string | null
-  aiSummary?: string | null
+  rationale?: string | null
+  brdMapping?: string[]
+  priority?: number
+  estimatedMinutes?: number | null
   questionCardsCount?: number
 }

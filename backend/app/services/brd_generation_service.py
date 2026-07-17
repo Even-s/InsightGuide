@@ -1,323 +1,26 @@
-"""BRD evidence-based generation service.
+"""Project-level BRD evidence-based generation service.
 
-Used by: /api/interview-sessions/{id}/outputs/generate (InterviewReportPage)
-         /api/projects/{id}/generate-brd (project-level BRD)
-Purpose: Generates BRD from card coverage evidence and the Realtime transcript.
-Produces markdown reports with theme-organized sections and open issues.
-
-See also: brd_generator_service.py — structured requirement extraction
-used by BRDGenerationPage for editable individual requirements.
-
-After an interview session ends, this service generates:
-1. A BRD document based on structured evidence from card states
-2. A full interview transcript organized by theme
-
-Realtime transcript segments are the canonical source for reports and analysis.
+Used by: project-level BRD workflows.
+Purpose: Generates BRD markdown from ready RoundAggregate-backed evidence.
 """
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy.orm import Session
 
-TZ_TAIPEI = timezone(timedelta(hours=8))
-
-import json
-import uuid
-
 logger = logging.getLogger(__name__)
 
-from app.models.brd import BRDDraft, BRDStatus
 from app.models.document import Document
-from app.models.interview_session import InterviewCardState, InterviewSession
-from app.models.interview_theme import InterviewTheme
-from app.models.live_utterance import LiveUtterance
-from app.models.question_card import QuestionCard
 
 
 class BRDGenerationService:
 
-    def generate_outputs(self, db: Session, session_id: str) -> Dict[str, Any]:
-        """Generate BRD and transcript for a completed interview session.
-
-        If a cached BRDDraft exists for this session, return it directly.
-        Otherwise generate, persist to BRDDraft, then return.
-        """
-        session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
-        if not session:
-            raise ValueError(f"Session {session_id} not found")
-
-        # Check for cached BRD
-        existing_brd = (
-            db.query(BRDDraft)
-            .filter(
-                BRDDraft.interview_session_id == session_id,
-                BRDDraft.status == BRDStatus.COMPLETED,
-            )
-            .first()
-        )
-
-        if existing_brd and existing_brd.markdown_content:
-            return json.loads(existing_brd.markdown_content)
-
-        document = db.query(Document).filter(Document.id == session.document_id).first()
-
-        # Load themes with cards and their states
-        themes = (
-            db.query(InterviewTheme)
-            .filter(
-                InterviewTheme.document_id == session.document_id,
-                InterviewTheme.is_enabled == True,
-            )
-            .order_by(InterviewTheme.order_index)
-            .all()
-        )
-
-        # Card states are updated directly from Realtime transcript segments.
-        card_states = (
-            db.query(InterviewCardState).filter(InterviewCardState.session_id == session_id).all()
-        )
-        state_by_card_id = {cs.question_card_id: cs for cs in card_states}
-
-        utterances = (
-            db.query(LiveUtterance)
-            .filter(
-                LiveUtterance.session_id == session_id,
-                LiveUtterance.is_partial == False,
-            )
-            .order_by(LiveUtterance.sequence_index)
-            .all()
-        )
-
-        logger.info(f"Using {len(utterances)} Realtime utterances for BRD generation")
-
-        # Build structured data
-        brd_sections = self._build_brd_sections(themes, state_by_card_id, db)
-        open_issues = self._build_open_issues(themes, state_by_card_id, db)
-        transcript_md = self._build_transcript(utterances, themes)
-
-        # Use GPT to rewrite raw evidence into formal BRD paragraphs
-        brd_sections = self._rewrite_sections_with_ai(
-            document, brd_sections, db=db, session_id=session_id
-        )
-
-        brd_md = self._render_brd_markdown(document, brd_sections, open_issues)
-
-        result = {
-            "sessionId": session_id,
-            "brd": {
-                "markdown": brd_md,
-                "sections": brd_sections,
-                "openIssuesCount": len(open_issues),
-            },
-            "transcript": {
-                "markdown": transcript_md,
-                "utteranceCount": len(utterances),
-            },
-        }
-
-        # Persist to BRDDraft
-        if existing_brd:
-            existing_brd.markdown_content = json.dumps(result, ensure_ascii=False)
-            existing_brd.status = BRDStatus.COMPLETED
-            existing_brd.generated_at = datetime.utcnow()
-        else:
-            brd_draft = BRDDraft(
-                id=f"brd_{uuid.uuid4().hex[:12]}",
-                interview_session_id=session_id,
-                user_id=session.user_id,
-                status=BRDStatus.COMPLETED,
-                title=document.title if document else "BRD",
-                markdown_content=json.dumps(result, ensure_ascii=False),
-                generated_at=datetime.utcnow(),
-            )
-            db.add(brd_draft)
-        db.commit()
-
-        return result
-
-    def _build_brd_sections(
-        self,
-        themes: List[InterviewTheme],
-        state_by_card_id: Dict,
-        db: Session,
-    ) -> List[Dict[str, Any]]:
-        """Build BRD content sections from theme/card evidence."""
-        brd_chapter_map: Dict[str, List[Dict]] = {}
-
-        for theme in themes:
-            cards = (
-                db.query(QuestionCard)
-                .filter(QuestionCard.interview_theme_id == theme.id)
-                .order_by(QuestionCard.order_index)
-                .all()
-            )
-
-            for card in cards:
-                state = state_by_card_id.get(card.id)
-
-                if state:
-                    status = state.status
-                    confidence = float(state.confidence) if state.confidence else None
-                    evidence_text = state.evidence_transcript or ""
-                else:
-                    # No evaluation found, skip this card
-                    continue
-
-                for chapter in card.brd_mapping or theme.brd_mapping or []:
-                    brd_chapter_map.setdefault(chapter, [])
-
-                    if status in (
-                        "sufficient",
-                        "probably_sufficient",
-                        "covered",
-                        "probably_covered",
-                        "manually_checked",
-                    ):
-                        brd_chapter_map[chapter].append(
-                            {
-                                "focusText": card.focus_text or card.question_text,
-                                "status": status,
-                                "evidence": evidence_text,
-                                "confidence": confidence,
-                                "themeTitle": theme.title,
-                            }
-                        )
-                    elif status in ("pending", "at_risk") and card.importance == "must":
-                        brd_chapter_map[chapter].append(
-                            {
-                                "focusText": card.focus_text or card.question_text,
-                                "status": "missing",
-                                "evidence": "",
-                                "confidence": None,
-                                "themeTitle": theme.title,
-                            }
-                        )
-
-        sections = []
-        for chapter, items in brd_chapter_map.items():
-            confirmed = [i for i in items if i["status"] != "missing"]
-            missing = [i for i in items if i["status"] == "missing"]
-            sections.append(
-                {
-                    "chapter": chapter,
-                    "confirmedItems": confirmed,
-                    "missingItems": missing,
-                    "isComplete": len(missing) == 0 and len(confirmed) > 0,
-                }
-            )
-
-        return sections
-
-    def _build_open_issues(
-        self, themes: List[InterviewTheme], state_by_card_id: Dict, db: Session
-    ) -> List[Dict[str, Any]]:
-        """Build list of unresolved must-ask items.
-
-        Cards marked not_applicable_for_role or needs_different_stakeholder
-        are NOT counted as open issues — they need a different interviewee.
-        """
-        issues = []
-        role_deferred = []
-        for theme in themes:
-            cards = (
-                db.query(QuestionCard)
-                .filter(
-                    QuestionCard.interview_theme_id == theme.id,
-                    QuestionCard.importance == "must",
-                )
-                .all()
-            )
-
-            for card in cards:
-                state = state_by_card_id.get(card.id)
-                if state and state.status in (
-                    "not_applicable_for_role",
-                    "needs_different_stakeholder",
-                ):
-                    role_deferred.append(
-                        {
-                            "themeTitle": theme.title,
-                            "focusText": card.focus_text or card.question_text,
-                            "targetRoles": card.target_roles or [],
-                            "brdMapping": card.brd_mapping or theme.brd_mapping or [],
-                        }
-                    )
-                    continue
-                if not state or state.status in ("pending", "at_risk", "skipped"):
-                    issues.append(
-                        {
-                            "themeTitle": theme.title,
-                            "focusText": card.focus_text or card.question_text,
-                            "suggestedFollowup": card.suggested_followup,
-                            "brdMapping": card.brd_mapping or theme.brd_mapping or [],
-                        }
-                    )
-
-        return issues
-
-    def _build_transcript(self, utterances, themes: List[InterviewTheme]) -> str:
-        """Build a speaker-neutral transcript from chronological segments."""
-        if not utterances:
-            return "# 訪談逐字稿\n\n（本次訪談無轉錄內容）\n"
-
-        theme_map = {t.id: t.title for t in themes}
-        now = datetime.now(TZ_TAIPEI).strftime("%Y-%m-%d")
-        total_duration = ""
-        if utterances[0].created_at and utterances[-1].created_at:
-            delta = utterances[-1].created_at - utterances[0].created_at
-            minutes = int(delta.total_seconds() // 60)
-            total_duration = f"{minutes} 分鐘"
-
-        lines = []
-        lines.append("# 訪談逐字稿")
-        lines.append("")
-        lines.append(f"| 項目 | 內容 |")
-        lines.append(f"|------|------|")
-        lines.append(f"| 訪談日期 | {now} |")
-        lines.append(f"| 總發言數 | {len(utterances)} 句 |")
-        if total_duration:
-            lines.append(f"| 訪談時長 | {total_duration} |")
-
-        theme_ids = set()
-        for u in utterances:
-            if getattr(u, "theme_id", None):
-                theme_ids.add(u.theme_id)
-        lines.append(f"| 訪談單元數 | {len(theme_ids)} |")
-        lines.append("")
-        lines.append("---")
-        lines.append("")
-
-        current_theme_title = None
-        for utt in utterances:
-            theme_id = getattr(utt, "theme_id", None)
-            theme_title = theme_map.get(theme_id, "未分類")
-
-            if theme_title != current_theme_title:
-                current_theme_title = theme_title
-                lines.append(f"## {current_theme_title}")
-                lines.append("")
-
-            time_str = (
-                utt.created_at.replace(tzinfo=timezone.utc)
-                .astimezone(TZ_TAIPEI)
-                .strftime("%H:%M:%S")
-                if utt.created_at
-                else ""
-            )
-            if time_str:
-                lines.append(f"`{time_str}`")
-                lines.append("")
-            lines.append(f"> {utt.transcript}")
-            lines.append("")
-
-        return "\n".join(lines)
-
-    def _rewrite_sections_with_ai(
+    def _rewrite_chapters_with_ai(
         self,
         document: Optional[Document],
-        sections: List[Dict[str, Any]],
+        chapters: List[Dict[str, Any]],
         db: Optional[Session] = None,
         session_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
@@ -342,11 +45,11 @@ class BRDGenerationService:
             "- 直接輸出改寫後的內容，不要加前言或說明"
         )
 
-        for section in sections:
-            if not section["confirmedItems"]:
+        for chapter in chapters:
+            if not chapter["confirmedItems"]:
                 continue
 
-            for item in section["confirmedItems"]:
+            for item in chapter["confirmedItems"]:
                 evidence = item.get("evidence", "")
                 if not evidence or len(evidence.strip()) < 10:
                     continue
@@ -354,7 +57,7 @@ class BRDGenerationService:
                 try:
                     user_prompt = (
                         f"文件：{title}\n"
-                        f"BRD 章節：{section['chapter']}\n"
+                        f"BRD 章節：{chapter['chapter']}\n"
                         f"提問重點：{item['focusText']}\n\n"
                         f"訪談原始回答：\n{evidence[:3000]}\n\n"
                         f"請改寫成正式 BRD 段落。"
@@ -376,105 +79,32 @@ class BRDGenerationService:
                     if isinstance(rewritten, str) and rewritten.strip():
                         item["evidence"] = rewritten.strip()
                 except Exception as e:
-                    logger.warning(f"Failed to rewrite BRD section: {e}")
+                    logger.warning(f"Failed to rewrite BRD chapter: {e}")
 
-        return sections
-
-    def _render_brd_markdown(
-        self, document: Optional[Document], sections: List[Dict], open_issues: List[Dict]
-    ) -> str:
-        """Render the BRD as a clean, professional markdown document."""
-        title = document.title if document else "需求文件"
-        now = datetime.now(TZ_TAIPEI).strftime("%Y-%m-%d")
-
-        lines = []
-
-        # Title block
-        lines.append(f"# {title}")
-        lines.append("")
-        lines.append(f"**Business Requirements Document** ｜ 草稿 ｜ {now}")
-        lines.append("")
-        lines.append("---")
-        lines.append("")
-
-        # Main content — each BRD chapter
-        for section in sections:
-            chapter = section["chapter"]
-            lines.append(f"## {chapter}")
-            lines.append("")
-
-            if section["confirmedItems"]:
-                for item in section["confirmedItems"]:
-                    lines.append(f"### {item['focusText']}")
-                    lines.append("")
-                    if item["evidence"]:
-                        lines.append(item["evidence"])
-                    lines.append("")
-            else:
-                # No confirmed content — leave blank space for future fill
-                lines.append("")
-
-            lines.append("")
-
-        # Open Issues — compact table at the end
-        if open_issues:
-            lines.append("---")
-            lines.append("")
-            lines.append("## 待確認事項")
-            lines.append("")
-            lines.append("| # | 章節 | 待確認項目 | 建議追問 |")
-            lines.append("|:---:|------|------|------|")
-            for idx, issue in enumerate(open_issues, 1):
-                brd = ", ".join(issue["brdMapping"][:2]) or "—"
-                followup = (issue["suggestedFollowup"] or "—")[:50]
-                lines.append(f"| {idx} | {brd} | {issue['focusText']} | {followup} |")
-            lines.append("")
-
-        return "\n".join(lines)
+        return chapters
 
     def generate_project_brd(self, db: Session, project_id: str) -> Dict[str, Any]:
         """Generate BRD from project-level evidence (multi-interview).
 
-        Uses Evidence Matrix validated entries + all Insight Memos
-        instead of a single session's card states.
+        Uses requirement entries derived directly from ready RoundAggregate rows,
+        instead of reading persisted Evidence Matrix snapshots, historical
+        session memos or a single session's card states.
         """
         from app.models.project import Project
-        from app.models.requirement_evidence_matrix import (
-            EvidenceMatrixEntry,
-            RequirementEvidenceMatrix,
-        )
         from app.models.stakeholder_profile import StakeholderProfile
+        from app.services.evidence_matrix_service import evidence_matrix_service
 
         project = db.query(Project).filter(Project.id == project_id).first()
         if not project:
             raise ValueError(f"Project {project_id} not found")
 
-        # Load evidence matrix entries
-        matrix = (
-            db.query(RequirementEvidenceMatrix)
-            .filter(RequirementEvidenceMatrix.project_id == project_id)
-            .first()
-        )
-        if not matrix or matrix.status != "ready":
+        entries, memos = evidence_matrix_service.build_entries_from_round_aggregates(db, project_id)
+        entries = [entry for entry in entries if entry.get("validation_status") != "rejected"]
+        entries.sort(key=lambda entry: entry.get("mention_count", 0), reverse=True)
+        if not memos:
             raise ValueError(
-                "Evidence matrix is stale. Refresh project readiness before generating BRD."
+                "No ready RoundAggregate evidence found. Generate or rebuild round aggregates before generating BRD."
             )
-
-        entries = []
-        if matrix:
-            entries = (
-                db.query(EvidenceMatrixEntry)
-                .filter(
-                    EvidenceMatrixEntry.matrix_id == matrix.id,
-                    EvidenceMatrixEntry.validation_status != "rejected",
-                )
-                .order_by(EvidenceMatrixEntry.mention_count.desc())
-                .all()
-            )
-
-        from app.services.interview_round_aggregate_service import interview_round_aggregate_service
-
-        memos = interview_round_aggregate_service.latest_memos_for_project(db, project_id)
 
         # Load stakeholders
         profiles = (
@@ -486,43 +116,45 @@ class BRDGenerationService:
             .all()
         )
 
-        # Build BRD sections from evidence
-        brd_sections = self._build_project_brd_sections(entries, memos, project)
-        stakeholders_section = self._build_stakeholders_section(profiles)
+        # Build BRD chapters from evidence
+        brd_chapters = self._build_project_brd_chapters(entries, memos, project)
+        stakeholders_chapter = self._build_stakeholders_chapter(profiles)
         open_issues = self._build_project_open_issues(entries)
 
         # AI rewrite
-        brd_sections = self._rewrite_sections_with_ai(None, brd_sections)
+        brd_chapters = self._rewrite_chapters_with_ai(None, brd_chapters)
 
         # Render markdown
         brd_md = self._render_project_brd_markdown(
-            project, brd_sections, stakeholders_section, open_issues
+            project, brd_chapters, stakeholders_chapter, open_issues
         )
 
         return {
             "projectId": project_id,
             "brd": {
                 "markdown": brd_md,
-                "sections": brd_sections,
+                "chapters": brd_chapters,
                 "openIssuesCount": len(open_issues),
             },
             "evidence": {
                 "totalEntries": len(entries),
-                "validatedEntries": len([e for e in entries if e.validation_status == "validated"]),
+                "validatedEntries": len(
+                    [e for e in entries if e.get("validation_status") == "validated"]
+                ),
                 "memoCount": len(memos),
                 "stakeholderCount": len(profiles),
             },
         }
 
-    def _build_project_brd_sections(
+    def _build_project_brd_chapters(
         self, entries: List, memos: List, project
     ) -> List[Dict[str, Any]]:
-        """Build BRD content sections from evidence matrix entries and memos."""
+        """Build BRD content chapters from RoundAggregate-derived entries and memos."""
         chapter_map: Dict[str, List[Dict]] = {}
 
-        # From evidence matrix entries (validated + needs_more_evidence)
+        # From RoundAggregate-derived entries (validated + needs_more_evidence)
         for entry in entries:
-            category = entry.category or "general"
+            category = entry.get("category") or "general"
             chapter = {
                 "functional": "功能性需求",
                 "non_functional": "非功能性需求",
@@ -536,19 +168,19 @@ class BRDGenerationService:
             chapter_map.setdefault(chapter, [])
 
             evidence_text = ""
-            for ev in (entry.supporting_evidence or [])[:3]:
+            for ev in (entry.get("supporting_evidence") or [])[:3]:
                 if ev.get("evidence_quote"):
                     evidence_text += f"[{ev.get('stakeholder_name', '')}] {ev['evidence_quote']}\n"
 
             chapter_map[chapter].append(
                 {
-                    "focusText": entry.requirement_candidate,
-                    "status": entry.validation_status,
+                    "focusText": entry.get("requirement_candidate", ""),
+                    "status": entry.get("validation_status"),
                     "evidence": evidence_text.strip(),
                     "confidence": None,
                     "themeTitle": "",
-                    "sourceRoles": entry.source_roles or [],
-                    "mentionCount": entry.mention_count,
+                    "sourceRoles": entry.get("source_roles") or [],
+                    "mentionCount": entry.get("mention_count", 0),
                 }
             )
 
@@ -594,11 +226,11 @@ class BRDGenerationService:
                     }
                 )
 
-        sections = []
+        chapters = []
         for chapter, items in chapter_map.items():
             confirmed = [i for i in items if i["status"] not in ("missing", "rejected")]
             missing = [i for i in items if i["status"] == "missing"]
-            sections.append(
+            chapters.append(
                 {
                     "chapter": chapter,
                     "confirmedItems": confirmed,
@@ -607,10 +239,10 @@ class BRDGenerationService:
                 }
             )
 
-        return sections
+        return chapters
 
-    def _build_stakeholders_section(self, profiles: List) -> str:
-        """Build stakeholders markdown section."""
+    def _build_stakeholders_chapter(self, profiles: List) -> str:
+        """Build stakeholders markdown chapter."""
         if not profiles:
             return ""
         lines = ["## 利害關係人", ""]
@@ -632,22 +264,22 @@ class BRDGenerationService:
         return "\n".join(lines)
 
     def _build_project_open_issues(self, entries: List) -> List[Dict[str, Any]]:
-        """Build open issues from evidence matrix entries that need more evidence."""
+        """Build open issues from RoundAggregate-derived entries that need more evidence."""
         issues = []
         for entry in entries:
-            if entry.validation_status in ("needs_more_evidence", "conflicted"):
+            if entry.get("validation_status") in ("needs_more_evidence", "conflicted"):
                 issues.append(
                     {
-                        "focusText": entry.requirement_candidate,
-                        "status": entry.validation_status,
-                        "missingRoles": entry.missing_validation_from or [],
-                        "conflicts": entry.conflicts or [],
+                        "focusText": entry.get("requirement_candidate", ""),
+                        "status": entry.get("validation_status"),
+                        "missingRoles": entry.get("missing_validation_from") or [],
+                        "conflicts": entry.get("conflicts") or [],
                     }
                 )
         return issues
 
     def _render_project_brd_markdown(
-        self, project, sections: List[Dict], stakeholders_section: str, open_issues: List[Dict]
+        self, project, chapters: List[Dict], stakeholders_chapter: str, open_issues: List[Dict]
     ) -> str:
         """Render project-level BRD as markdown."""
         from datetime import timedelta, timezone
@@ -677,18 +309,18 @@ class BRDGenerationService:
         lines.append("")
 
         # Stakeholders
-        if stakeholders_section:
-            lines.append(stakeholders_section)
+        if stakeholders_chapter:
+            lines.append(stakeholders_chapter)
             lines.append("---")
             lines.append("")
 
         # Main content
-        for section in sections:
-            chapter = section["chapter"]
-            lines.append(f"## {chapter}")
+        for chapter in chapters:
+            chapter_title = chapter["chapter"]
+            lines.append(f"## {chapter_title}")
             lines.append("")
-            if section["confirmedItems"]:
-                for item in section["confirmedItems"]:
+            if chapter["confirmedItems"]:
+                for item in chapter["confirmedItems"]:
                     lines.append(f"### {item['focusText']}")
                     lines.append("")
                     if item.get("sourceRoles"):

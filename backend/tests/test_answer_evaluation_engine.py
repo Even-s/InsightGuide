@@ -36,7 +36,7 @@ class TestAnswerEvaluationEngine:
         return QuestionCard(
             id="card-123",
             document_id="doc-456",
-            section_id="section-789",
+            interview_theme_id="theme-789",
             question_text="What are the main business objectives?",
             question_type="objectives",
             expected_answer_elements=["Increase revenue", "Improve efficiency", "Expand market"],
@@ -87,7 +87,7 @@ class TestAnswerEvaluationEngine:
         card = QuestionCard(
             id="card-1",
             document_id="doc-1",
-            section_id="section-1",
+            interview_theme_id="theme-1",
             question_text="Test question",
             coverage_rule={"semanticAnchors": ["anchor1", "anchor2"], "mustMentionElements": []},
         )
@@ -103,7 +103,7 @@ class TestAnswerEvaluationEngine:
         card = QuestionCard(
             id="card-1",
             document_id="doc-1",
-            section_id="section-1",
+            interview_theme_id="theme-1",
             question_text="Test question",
             coverage_rule={},
         )
@@ -130,7 +130,7 @@ class TestAnswerEvaluationEngine:
         }
 
         covered, missing = answer_evaluation_engine._normalize_completion_element_ids(
-            sample_question_card, completion, completion_percentage=90.0, is_sufficient=True
+            sample_question_card, completion
         )
 
         # Only explicitly covered elements count — no auto-fill
@@ -148,26 +148,28 @@ class TestAnswerEvaluationEngine:
         }
 
         covered, missing = answer_evaluation_engine._normalize_completion_element_ids(
-            sample_question_card, completion, completion_percentage=33.0, is_sufficient=False
+            sample_question_card, completion
         )
 
         assert len(covered) == 1
         assert len(missing) == 2
         assert "element_0" in covered
 
-    def test_process_utterance_interviewer_skipped(self, mock_db):
-        """Test that interviewer utterances are skipped."""
-        updates = answer_evaluation_engine.process_utterance(
-            db=mock_db,
-            session_id="session-123",
-            utterance_id="utt-123",
-            utterance_text="Can you tell me about the objectives?",
-            section_id="section-789",
-            speaker="interviewer",
-        )
+    def test_process_utterance_question_routes_without_role_filter(self, mock_db):
+        """Role-neutral question-like utterances route to card suggestions."""
+        with patch.object(answer_evaluation_engine, "_route_question_to_card") as mock_route:
+            mock_route.return_value = [{"card_id": "card-123"}]
 
-        assert len(updates) == 0
-        mock_db.commit.assert_not_called()
+            updates = answer_evaluation_engine.process_utterance(
+                db=mock_db,
+                session_id="session-123",
+                utterance_id="utt-123",
+                utterance_text="Can you tell me about the objectives?",
+                theme_id="theme-789",
+            )
+
+        assert updates == [{"card_id": "card-123"}]
+        mock_route.assert_called_once()
 
     @patch("app.services.answer_evaluation_engine.answer_evaluation_engine._load_candidate_cards")
     def test_process_utterance_no_candidates(self, mock_load, mock_db):
@@ -179,13 +181,12 @@ class TestAnswerEvaluationEngine:
             session_id="session-123",
             utterance_id="utt-123",
             utterance_text="Test utterance",
-            section_id="section-789",
-            speaker="interviewee",
+            theme_id="theme-789",
         )
 
         assert len(updates) == 0
 
-    def test_process_utterance_asked_card_id_bypasses_question_classifier(self, mock_db):
+    def test_process_utterance_asked_card_ids_bypass_question_classifier(self, mock_db):
         """An explicit frontend match must route even with answer-like wording."""
         with patch.object(answer_evaluation_engine, "_route_question_to_card") as mock_route:
             mock_route.return_value = [{"card_id": "card-123"}]
@@ -195,9 +196,8 @@ class TestAnswerEvaluationEngine:
                 session_id="session-123",
                 utterance_id="utt-123",
                 utterance_text="基本上我們覺得櫃檯通常會查哪些資料來確認",
-                section_id="section-789",
-                speaker="interviewee",
-                asked_card_id="card-123",
+                theme_id="theme-789",
+                asked_card_ids=["card-123"],
             )
 
         assert updates == [{"card_id": "card-123"}]
@@ -206,8 +206,7 @@ class TestAnswerEvaluationEngine:
             "session-123",
             "utt-123",
             "基本上我們覺得櫃檯通常會查哪些資料來確認",
-            "section-789",
-            "card-123",
+            "theme-789",
             ["card-123"],
         )
 
@@ -232,14 +231,13 @@ class TestAnswerEvaluationEngine:
             "session-123",
             "utt-123",
             "What are the main business objectives?",
-            "section-789",
-            "card-123",
+            "theme-789",
+            ["card-123"],
         )
 
         assert updates[0]["question_suggested"] is True
         assert updates[0]["old_status"] == "listening"
         assert updates[0]["new_status"] == "listening"
-        assert sample_interview_session.active_card_hint_id is None
         mock_db.commit.assert_not_called()
 
     @patch("app.services.answer_evaluation_engine.answer_evaluation_engine._load_candidate_cards")
@@ -252,8 +250,7 @@ class TestAnswerEvaluationEngine:
             session_id="session-123",
             utterance_id="utt-123",
             utterance_text="Test utterance",
-            section_id="section-789",
-            speaker="interviewee",
+            theme_id="theme-789",
         )
 
         assert len(updates) == 0
@@ -281,7 +278,7 @@ class TestAnswerEvaluationEngine:
 
         # Execute
         candidates = answer_evaluation_engine._load_candidate_cards(
-            mock_db, sample_interview_session.id, "section-789"
+            mock_db, sample_interview_session.id, "theme-789"
         )
 
         # Verify
@@ -294,7 +291,7 @@ class TestAnswerEvaluationEngine:
         mock_db.query().filter().first.return_value = None
 
         candidates = answer_evaluation_engine._load_candidate_cards(
-            mock_db, "nonexistent-session", "section-789"
+            mock_db, "nonexistent-session", "theme-789"
         )
 
         assert candidates == []
@@ -386,7 +383,7 @@ class TestAnswerEvaluationEngine:
 
         judgment = {"sufficiency_score": 0.3, "is_sufficient": False, "completion_percentage": 30}
 
-        update = answer_evaluation_engine._update_card_state(
+        answer_evaluation_engine._update_card_state(
             db=mock_db,
             card_state=sample_card_state,
             card=sample_question_card,
@@ -465,79 +462,6 @@ class TestAnswerEvaluationEngine:
         assert update["new_status"] == "probably_sufficient"
         assert sample_card_state.status == "probably_sufficient"
         assert sample_card_state.completion_score <= 0.85
-
-    def test_process_partial_transcript(self, mock_db):
-        """Test processing partial transcript (streaming)."""
-        candidate = {"card": Mock(id="card-123"), "state": Mock(id="state-123")}
-        with (
-            patch.object(answer_evaluation_engine, "_load_candidate_cards") as mock_load,
-            patch.object(answer_evaluation_engine, "_batch_judge_answer_sufficiency") as mock_judge,
-            patch.object(answer_evaluation_engine, "_update_card_state") as mock_update,
-        ):
-            mock_load.return_value = [candidate]
-            mock_judge.return_value = [{"confidence": 0.5, "is_covered": False}]
-            mock_update.return_value = {"card_id": "card-123", "new_status": "listening"}
-
-            updates = answer_evaluation_engine.process_partial_transcript(
-                db=mock_db,
-                session_id="session-123",
-                transcript_text="This is a partial transcript from streaming",
-                section_id="section-789",
-                speaker="interviewee",
-                active_card_id="card-123",
-            )
-
-            assert len(updates) == 1
-            mock_load.assert_called_once_with(
-                mock_db,
-                "session-123",
-                "section-789",
-                active_card_id="card-123",
-                statuses=["listening"],
-            )
-            mock_judge.assert_called_once()
-            mock_update.assert_called_once()
-            mock_db.commit.assert_called_once()
-
-    def test_process_partial_transcript_too_short(self, mock_db):
-        """Test that very short partial transcripts are ignored."""
-        updates = answer_evaluation_engine.process_partial_transcript(
-            db=mock_db,
-            session_id="session-123",
-            transcript_text="short",
-            section_id="section-789",
-            speaker="interviewee",
-        )
-
-        assert len(updates) == 0
-
-    def test_process_partial_transcript_interviewer_ignored(self, mock_db):
-        """Test that partial transcripts from interviewer are ignored."""
-        updates = answer_evaluation_engine.process_partial_transcript(
-            db=mock_db,
-            session_id="session-123",
-            transcript_text="Can you elaborate on that?",
-            section_id="section-789",
-            speaker="interviewer",
-        )
-
-        assert len(updates) == 0
-
-    def test_process_partial_transcript_error_handling(self, mock_db):
-        """Test error handling in partial transcript processing."""
-        with patch.object(answer_evaluation_engine, "_load_candidate_cards") as mock_load:
-            mock_load.side_effect = Exception("Processing error")
-
-            updates = answer_evaluation_engine.process_partial_transcript(
-                db=mock_db,
-                session_id="session-123",
-                transcript_text="This will cause an error",
-                section_id="section-789",
-                speaker="interviewee",
-            )
-
-            assert len(updates) == 0
-
 
 class TestQuestionGuardAndReduceState:
     """Tests for question-like utterance detection and state reduction with response_status."""
@@ -620,10 +544,10 @@ class TestQuestionGuardAndReduceState:
         assert state == "listening"
         assert _comp == 0.0
 
-    def test_mislabeled_interviewer_question_does_not_advance(self):
-        """A mislabeled interviewer question must not move a card to probably_sufficient.
+    def test_question_like_text_in_answer_path_does_not_advance(self):
+        """Question-like text in the answer path must not move a card to probably_sufficient.
 
-        Simulates: speaker=interviewee but text is actually a question.
+        Simulates answer-like routing receiving text that is actually a question.
         The _is_question_like guard + _reduce_state response_status gate must prevent this.
         """
         text = "你有哪些情境是需要馬上有人幫忙的呢？"
@@ -806,9 +730,7 @@ class TestExclusiveActiveCardMode:
         mock_session = Mock(spec=InterviewSession)
         mock_session.active_card_id = "qcard_active"
         mock_session.active_card_source = "user_confirmed"
-        mock_session.active_card_hint_id = "qcard_active"
         mock_session.pending_answer_buffer = None
-        mock_session.current_section_id = "theme_1"
         mock_session.current_theme_id = "theme_1"
 
         mock_db.query.return_value.filter.return_value.first.return_value = mock_session
@@ -839,7 +761,7 @@ class TestExclusiveActiveCardMode:
             }
 
             updates = answer_evaluation_engine._evaluate_answer(
-                mock_db, "session_1", "utt_1", "回答內容", "theme_1", "interviewee"
+                mock_db, "session_1", "utt_1", "回答內容", "theme_1"
             )
 
             mock_load.assert_called_once_with(
@@ -858,9 +780,7 @@ class TestExclusiveActiveCardMode:
         mock_session = Mock(spec=InterviewSession)
         mock_session.active_card_id = "qcard_active"
         mock_session.active_card_source = "human_confirmed_ai_suggestion"
-        mock_session.active_card_hint_id = "qcard_active"
         mock_session.pending_answer_buffer = None
-        mock_session.current_section_id = "theme_1"
         mock_session.current_theme_id = "theme_1"
 
         mock_db.query.return_value.filter.return_value.first.return_value = mock_session
@@ -890,7 +810,7 @@ class TestExclusiveActiveCardMode:
             }
 
             updates = answer_evaluation_engine._evaluate_answer(
-                mock_db, "session_1", "utt_1", "回答內容", "theme_1", "interviewee"
+                mock_db, "session_1", "utt_1", "回答內容", "theme_1"
             )
 
         mock_load.assert_called_once_with(
@@ -908,7 +828,6 @@ class TestExclusiveActiveCardMode:
         mock_session = Mock(spec=InterviewSession)
         mock_session.active_card_id = "qcard_active"
         mock_session.active_card_source = "user_confirmed"
-        mock_session.active_card_hint_id = "qcard_active"
         mock_session.active_card_confirmed_at = datetime.utcnow()
         mock_session.pending_answer_buffer = None
         mock_db.query.return_value.filter.return_value.first.return_value = mock_session
@@ -938,11 +857,10 @@ class TestExclusiveActiveCardMode:
             }
 
             answer_evaluation_engine._evaluate_answer(
-                mock_db, "session_1", "utt_1", "完整回答", "theme_1", "interviewee"
+                mock_db, "session_1", "utt_1", "完整回答", "theme_1"
             )
 
         assert mock_session.active_card_id is None
-        assert mock_session.active_card_hint_id is None
         assert mock_session.active_card_source == "completed"
         assert mock_session.active_card_confirmed_at is None
 
@@ -953,7 +871,6 @@ class TestExclusiveActiveCardMode:
         mock_session = Mock(spec=InterviewSession)
         mock_session.active_card_id = "qcard_active"
         mock_session.active_card_source = "user_confirmed"
-        mock_session.active_card_hint_id = "qcard_active"
         mock_session.pending_answer_buffer = None
 
         mock_db.query.return_value.filter.return_value.first.return_value = mock_session
@@ -963,26 +880,25 @@ class TestExclusiveActiveCardMode:
             mock_load.return_value = []
 
             updates = answer_evaluation_engine._evaluate_answer(
-                mock_db, "session_1", "utt_1", "回答內容", "theme_1", "interviewee"
+                mock_db, "session_1", "utt_1", "回答內容", "theme_1"
             )
 
             assert updates == []
 
-    def test_unconfirmed_ai_hint_is_buffered_without_attribution(self, mock_db):
-        """An AI hint alone must not attribute answer text to a card."""
+    def test_unconfirmed_answer_is_buffered_without_attribution(self, mock_db):
+        """Answer text is buffered until a human confirms the active card."""
         from app.models.interview_session import InterviewSession
 
         mock_session = Mock(spec=InterviewSession)
         mock_session.active_card_id = None
         mock_session.active_card_source = None
-        mock_session.active_card_hint_id = "qcard_hint"
         mock_session.pending_answer_buffer = None
 
         mock_db.query.return_value.filter.return_value.first.return_value = mock_session
 
         with patch.object(answer_evaluation_engine, "_load_candidate_cards") as mock_load:
             updates = answer_evaluation_engine._evaluate_answer(
-                mock_db, "session_1", "utt_1", "回答內容", "theme_1", "interviewee"
+                mock_db, "session_1", "utt_1", "回答內容", "theme_1"
             )
 
         assert updates == []
@@ -997,14 +913,13 @@ class TestExclusiveActiveCardMode:
         mock_session = Mock(spec=InterviewSession)
         mock_session.active_card_id = None
         mock_session.active_card_source = None
-        mock_session.active_card_hint_id = None
         mock_session.pending_answer_buffer = None
 
         mock_db.query.return_value.filter.return_value.first.return_value = mock_session
 
         with patch.object(answer_evaluation_engine, "_load_candidate_cards") as mock_load:
             updates = answer_evaluation_engine._evaluate_answer(
-                mock_db, "session_1", "utt_1", "回答內容", "theme_1", "interviewee"
+                mock_db, "session_1", "utt_1", "回答內容", "theme_1"
             )
 
         assert updates == []
@@ -1019,7 +934,6 @@ class TestExclusiveActiveCardMode:
         mock_session = Mock(spec=InterviewSession)
         mock_session.active_card_id = None
         mock_session.active_card_source = None
-        mock_session.active_card_hint_id = None
         mock_session.pending_answer_buffer = [
             "utt_old_1",
             "utt_old_2",
@@ -1031,7 +945,7 @@ class TestExclusiveActiveCardMode:
         mock_db.query.return_value.filter.return_value.first.return_value = mock_session
 
         updates = answer_evaluation_engine._evaluate_answer(
-            mock_db, "session_1", "utt_new", "回答內容", "theme_1", "interviewee"
+            mock_db, "session_1", "utt_new", "回答內容", "theme_1"
         )
 
         assert updates == []
@@ -1050,7 +964,6 @@ class TestExclusiveActiveCardMode:
         mock_session = Mock(spec=InterviewSession)
         mock_session.active_card_id = None
         mock_session.active_card_source = None
-        mock_session.active_card_hint_id = None
         mock_session.pending_answer_buffer = None
         mock_db.query.return_value.filter.return_value.first.return_value = mock_session
 
@@ -1080,7 +993,7 @@ class TestExclusiveActiveCardMode:
             ]
 
             updates = answer_evaluation_engine._evaluate_answer(
-                mock_db, "session_1", "utt_1", "目前我們認為", "theme_1", "interviewee"
+                mock_db, "session_1", "utt_1", "目前我們認為", "theme_1"
             )
 
             assert updates == []
@@ -1093,14 +1006,13 @@ class TestExclusiveActiveCardMode:
         mock_session = Mock(spec=InterviewSession)
         mock_session.active_card_id = None
         mock_session.active_card_source = "cleared"
-        mock_session.active_card_hint_id = None
         mock_session.pending_answer_buffer = None
 
         mock_db.query.return_value.filter.return_value.first.return_value = mock_session
 
         with patch.object(answer_evaluation_engine, "_load_candidate_cards") as mock_load:
             answer_evaluation_engine._evaluate_answer(
-                mock_db, "session_1", "utt_1", "回答", "theme_1", "interviewee"
+                mock_db, "session_1", "utt_1", "回答", "theme_1"
             )
 
         assert mock_session.pending_answer_buffer == ["utt_1"]

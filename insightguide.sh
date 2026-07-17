@@ -78,6 +78,46 @@ restart_component() {
     esac
 }
 
+stop_frontend_backend() {
+    # 一鍵關閉前後端開發服務。
+    # 只停止 Vite frontend 與 FastAPI backend；保留 Celery、Postgres、Redis、MinIO，
+    # 方便之後快速重新啟動前後端，不用重建整個本機環境。
+    bold "停止 InsightGuide 前後端"
+    info "停止前端與後端（保留 Celery、Postgres、Redis、MinIO）..."
+    stop_service frontend
+    stop_service backend
+    ok "前端與後端已停止"
+}
+
+stop_component() {
+    local component="${1:-all}"
+
+    case "$component" in
+        all|full)
+            "$ROOT_DIR/bin/stop-services.sh"
+            ;;
+        frontend-backend|frontend+backend|frontend/backend|frontend-back|frontback|front-back|fe-be|fb|web-only|web|關閉前後端|關閉前端後端)
+            stop_frontend_backend
+            ;;
+        app|apps|application)
+            bold "停止 InsightGuide 應用程序"
+            info "停止前端、Celery 與後端（保留 Docker 基礎服務）..."
+            stop_application_services
+            ok "前端、Celery 與後端已停止"
+            ;;
+        backend|frontend|celery)
+            bold "停止 $component"
+            stop_service "$component"
+            ok "$component 已停止"
+            ;;
+        *)
+            echo "Unknown service: $component" >&2
+            echo "Available stop targets: all, app, frontend-backend, web, fe-be, backend, celery, frontend" >&2
+            exit 2
+            ;;
+    esac
+}
+
 show_logs() {
     for name in backend celery frontend; do
         echo ""
@@ -126,9 +166,10 @@ interactive_menu() {
         echo "4. Status"
         echo "5. Recent logs"
         echo "6. Follow logs"
-        echo "7. Stop"
-        echo "8. Doctor"
-        echo "9. Quit"
+        echo "7. Stop frontend + backend"
+        echo "8. Stop all"
+        echo "9. Doctor"
+        echo "10. Quit"
         echo ""
         printf "Choose an action: "
         read -r choice
@@ -140,9 +181,10 @@ interactive_menu() {
             4) "$ROOT_DIR/bin/status.sh" ;;
             5) show_logs ;;
             6) tail_logs ;;
-            7) "$ROOT_DIR/bin/stop-services.sh" ;;
-            8) doctor ;;
-            9) exit 0 ;;
+            7) stop_component frontend-backend ;;
+            8) stop_component all ;;
+            9) doctor ;;
+            10) exit 0 ;;
             *) echo "Unknown action: $choice" ;;
         esac
 
@@ -162,7 +204,24 @@ Usage:
   ./insightguide.sh start                   Start all services if needed
   ./insightguide.sh launch                  Start all services and open the app
   ./insightguide.sh restart [service]       Restart all, backend, celery, or frontend
-  ./insightguide.sh stop                    Stop all services
+
+Close frontend + backend:
+  ./insightguide.sh close                   Stop frontend + backend only
+  ./insightguide.sh close-web               Stop frontend + backend only
+  ./insightguide.sh close-frontend-backend  Stop frontend + backend only
+  ./insightguide.sh stop-web                Stop frontend + backend only
+  ./insightguide.sh shutdown-web            Stop frontend + backend only
+  ./insightguide.sh stop web                Stop frontend + backend only
+  ./insightguide.sh stop fe-be              Stop frontend + backend only
+  ./insightguide.sh stop fb                 Stop frontend + backend only
+  ./insightguide.sh stop frontend backend   Stop frontend + backend only
+  ./insightguide.sh stop backend frontend   Stop frontend + backend only
+
+Close other service groups:
+  ./insightguide.sh stop [target]           Stop all, app, web, backend, celery, or frontend
+  ./insightguide.sh stop frontend-backend   Stop frontend + backend only
+  ./insightguide.sh stop app                Stop frontend + backend + Celery
+  ./insightguide.sh stop                    Stop all services, including Docker basics
   ./insightguide.sh status                  Show live service status
   ./insightguide.sh open                    Open the frontend
   ./insightguide.sh docs                    Open FastAPI docs
@@ -178,7 +237,17 @@ case "${1:-menu}" in
     start) start_app ;;
     launch) start_app; open_url ;;
     restart) restart_component "${2:-all}" ;;
-    stop) "$ROOT_DIR/bin/stop-services.sh" ;;
+    close|shutdown|stop-web|close-web|close-frontend-backend|shutdown-web|stop-frontend-backend|stop-frontback|stop-fe-be|stop-fb|關閉前後端|關閉前端後端) stop_frontend_backend ;;
+    stop)
+        if { [ "${2:-}" = "frontend" ] && [ "${3:-}" = "backend" ]; } || \
+           { [ "${2:-}" = "backend" ] && [ "${3:-}" = "frontend" ]; } || \
+           { [ "${2:-}" = "fe" ] && [ "${3:-}" = "be" ]; } || \
+           { [ "${2:-}" = "be" ] && [ "${3:-}" = "fe" ]; }; then
+            stop_frontend_backend
+        else
+            stop_component "${2:-all}"
+        fi
+        ;;
     status) "$ROOT_DIR/bin/status.sh" ;;
     open) open_url ;;
     docs) open_url "$BACKEND_URL/docs" ;;

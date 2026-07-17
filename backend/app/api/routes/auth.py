@@ -29,7 +29,7 @@ async def register(db: Session = Depends(get_db)):
 
 @router.post("/login")
 async def login(
-    form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db: Session = Depends(get_db)
+    _form_data: Annotated[OAuth2PasswordRequestForm, Depends()], db: Session = Depends(get_db)
 ):
     """Login and get access token. (Development stub - always succeeds)"""
     access_token = create_access_token(subject=DEV_USER_ID)

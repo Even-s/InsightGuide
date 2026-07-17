@@ -73,7 +73,7 @@ macOS 使用者也可以雙擊 `InsightGuide.command` 啟動，或雙擊 `StopIn
 ### 訪談後分析
 - **Insight Memo**：自動萃取痛點、需求線索、限制假設、未解問題
 - **完整逐字稿**：直接保留 Realtime 完成辨識的逐字稿，不另行錄音或區分說話者
-- **訪談報告**：覆蓋率、時間軸、語速等分析
+- **訪談紀錄**：以每輪累積洞察與各場 Realtime 逐字稿作為正式紀錄
 
 ### 專案級管理（多訪談整合）
 - **Stakeholder Plan**：AI 建議角色槽位，追蹤訪談進度
@@ -85,8 +85,8 @@ macOS 使用者也可以雙擊 `InsightGuide.command` 啟動，或雙擊 `StopIn
 - **BRD Readiness**：評估證據充足度，守門 BRD 生成
 
 ### BRD 文件生成
-- 單次訪談模式：直接從訪談產生 BRD 草稿
-- 專案模式：從 Evidence Matrix 整合多訪談證據產生完整 BRD
+- 專案模式：從 Round Aggregate / Evidence Matrix 整合多訪談證據產生完整 BRD
+- BRD Readiness 會先檢查證據是否足夠，再進入生成流程
 - 支援 PDF 匯出
 
 ---

@@ -24,18 +24,7 @@ export function formatQuestionText(text?: string | null) {
   return normalized
 }
 
-export function formatFollowupText(text?: string | null) {
-  const normalized = normalizeInterviewCopy(text)
-  if (isScopeText(normalized) || normalized.includes('不支援') || normalized.includes('排除')) {
-    return '可以再補充不支援或延後處理的需求類型嗎？'
-  }
-  if (isGoalText(normalized) || normalized.includes('MVP')) {
-    return '如果只能先做 MVP，哪些目標是這一階段一定要達成的？'
-  }
-  return normalized
-}
-
-export function normalizeInterviewCopy(text?: string | null) {
+function normalizeInterviewCopy(text?: string | null) {
   if (!text) return ''
 
   return text

@@ -567,8 +567,6 @@ class StakeholderCardGenerator:
         theme: InterviewTheme,
     ) -> List[Dict[str, Any]]:
         """Generate question cards for a specific theme."""
-        brd_scope = project.brd_scope or {}
-
         context = f"""專案：{project.title}
 受訪者：{stakeholder.name} ({stakeholder.stakeholder_type})
 主題：{theme.title}

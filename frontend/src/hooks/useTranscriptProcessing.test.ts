@@ -3,7 +3,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import type { PresenterSessionRefs } from './usePresenterSessionRefs'
 import { useTranscriptProcessing } from './useTranscriptProcessing'
 
-const mockMatchPartialTranscript = vi.fn().mockResolvedValue(undefined)
 const mockCreateUtterance = vi.fn().mockResolvedValue(undefined)
 const mockFindAskedCards = vi.fn().mockReturnValue([])
 let realtimeCallbacks: {
@@ -18,7 +17,6 @@ let realtimeCallbacks: {
 
 vi.mock('@/api/interview', () => ({
   interviewAPI: {
-    matchPartialTranscript: (...args: unknown[]) => mockMatchPartialTranscript(...args),
     createUtterance: (...args: unknown[]) => mockCreateUtterance(...args),
   },
 }))
@@ -45,16 +43,27 @@ vi.mock('@/utils/chineseConverter', () => ({
 
 vi.mock('@/components/PresenterMode/presenterUtils', () => ({
   findAskedCards: (...args: unknown[]) => mockFindAskedCards(...args),
-  getActiveCardId: () => 'card-1',
 }))
 
 function createMockRefs(): PresenterSessionRefs {
   return {
     cardStatesRef: { current: [] },
-    currentThemeRef: { current: { id: 'theme-1', themeNumber: 1, title: 'Test', cards: [] } },
-    currentSectionRef: { current: null },
+    currentThemeRef: {
+      current: {
+        id: 'theme-1',
+        themeNumber: 1,
+        title: 'Test',
+        rationale: '',
+        brdMapping: [],
+        priority: 1,
+        estimatedMinutes: null,
+        orderIndex: 0,
+        isEnabled: true,
+        cards: [],
+      },
+    },
     isPresentingRef: { current: true },
-  } as unknown as PresenterSessionRefs
+  } as PresenterSessionRefs
 }
 
 describe('useTranscriptProcessing', () => {
@@ -160,7 +169,6 @@ describe('useTranscriptProcessing', () => {
       'item-1',
       undefined,
       undefined,
-      'card-2',
       ['card-2', 'card-3'],
     )
   })
@@ -191,7 +199,6 @@ describe('useTranscriptProcessing', () => {
       '這一段也必須保留在完整逐字稿。',
       undefined,
       'item-without-theme',
-      undefined,
       undefined,
       undefined,
       undefined,

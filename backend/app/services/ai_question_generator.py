@@ -15,7 +15,7 @@ class AIQuestionGenerator:
         self,
         question_text: str,
         question_type: str = "",
-        section_context: str = "",
+        theme_context: str = "",
     ) -> Dict[str, Any]:
         """Generate role targeting metadata for a question card."""
         try:
@@ -23,7 +23,7 @@ class AIQuestionGenerator:
                 "分析以下訪談問題，判斷這題適合問哪些角色的人。\n\n"
                 f"問題：{question_text}\n"
                 f"問題類型：{question_type or '未指定'}\n"
-                f"情境：{section_context or '需求訪談'}\n\n"
+                f"情境：{theme_context or '需求訪談'}\n\n"
                 "可選角色：business, product, engineering, management, operations, "
                 "customer_support, legal, finance, design, qa\n\n"
                 "可選 question_intent：technical_constraint, business_process, user_experience, "

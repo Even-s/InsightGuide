@@ -3,7 +3,9 @@
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+from app.schemas.question_card import QuestionCardSchema
 
 
 class InterviewSessionSchema(BaseModel):
@@ -23,14 +25,12 @@ class InterviewSessionSchema(BaseModel):
         "ready",
         "interviewing",
         "paused",
-        "section_transitioning",
         "recovering",
         "ended",
         "failed",
     ]
-    currentSectionId: Optional[str] = None
+    currentThemeId: Optional[str] = None
     activeCardId: Optional[str] = None
-    activeCardHintId: Optional[str] = None
     startedAt: Optional[datetime] = None
     endedAt: Optional[datetime] = None
     pausedAt: Optional[datetime] = None
@@ -46,6 +46,8 @@ class InterviewSessionSchema(BaseModel):
 class InterviewSessionCreate(BaseModel):
     """Schema for creating an interview session."""
 
+    model_config = ConfigDict(extra="forbid")
+
     prepSessionId: str
     documentId: str
     projectId: Optional[str] = None
@@ -57,6 +59,8 @@ class InterviewSessionCreate(BaseModel):
 class InterviewSessionUpdate(BaseModel):
     """Schema for updating an interview session."""
 
+    model_config = ConfigDict(extra="forbid")
+
     status: Optional[
         Literal[
             "idle",
@@ -64,13 +68,12 @@ class InterviewSessionUpdate(BaseModel):
             "ready",
             "interviewing",
             "paused",
-            "section_transitioning",
             "recovering",
             "ended",
             "failed",
         ]
     ] = None
-    currentSectionId: Optional[str] = None
+    currentThemeId: Optional[str] = None
 
 
 class InterviewCardStateUpdate(BaseModel):
@@ -122,13 +125,44 @@ class InterviewCardStateSchema(BaseModel):
         from_attributes = True
 
 
+class SessionQuestionCardStateSchema(BaseModel):
+    """Single endpoint response for card runtime state plus question metadata."""
+
+    stateId: str
+    sessionId: str
+    questionCardId: str
+    status: Literal[
+        "pending",
+        "listening",
+        "probably_sufficient",
+        "sufficient",
+        "at_risk",
+        "skipped",
+        "manually_checked",
+        "disabled",
+        "not_applicable_for_role",
+        "needs_different_stakeholder",
+    ]
+    confidence: Optional[float] = Field(None, ge=0, le=1)
+    activationScore: float = 0.0
+    completionScore: float = 0.0
+    completionSource: Optional[str] = None
+    manualNote: Optional[str] = None
+    answeredAt: Optional[datetime] = None
+    evidenceTranscript: Optional[str] = None
+    evidence: Optional[dict] = None
+    createdAt: datetime
+    updatedAt: datetime
+    questionCard: QuestionCardSchema
+
+
 class UtteranceSchema(BaseModel):
     """Utterance schema."""
 
     id: str
     sessionId: str
-    sectionId: Optional[str] = None
-    speaker: Literal["realtime", "interviewer", "interviewee"] = "realtime"
+    themeId: Optional[str] = None
+    askedCardIds: List[str] = Field(default_factory=list)
     transcript: str
     startedAt: Optional[datetime] = None
     endedAt: Optional[datetime] = None
@@ -142,26 +176,14 @@ class UtteranceSchema(BaseModel):
 class UtteranceCreate(BaseModel):
     """Schema for creating an utterance."""
 
+    model_config = ConfigDict(extra="forbid")
+
     transcript: str
     themeId: Optional[str] = None
-    sectionId: Optional[str] = None
-    speaker: Literal["realtime", "interviewer", "interviewee"] = "realtime"
     startedAt: Optional[datetime] = None
     endedAt: Optional[datetime] = None
     realtimeItemId: Optional[str] = None
-    askedCardId: Optional[str] = None
     askedCardIds: Optional[List[str]] = None
-
-
-class PartialTranscriptMatchCreate(BaseModel):
-    """Schema for streaming partial transcript matching."""
-
-    transcript: str = Field(min_length=1, max_length=4000)
-    themeId: Optional[str] = None
-    sectionId: Optional[str] = None
-    speaker: Literal["realtime", "interviewer", "interviewee"] = "realtime"
-    realtimeItemId: Optional[str] = None
-    activeCardId: Optional[str] = None
 
 
 class InterviewSessionWithDocument(BaseModel):
@@ -182,12 +204,11 @@ class InterviewSessionWithDocument(BaseModel):
         "ready",
         "interviewing",
         "paused",
-        "section_transitioning",
         "recovering",
         "ended",
         "failed",
     ]
-    currentSectionId: Optional[str] = None
+    currentThemeId: Optional[str] = None
     startedAt: Optional[datetime] = None
     endedAt: Optional[datetime] = None
     pausedAt: Optional[datetime] = None

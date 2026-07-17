@@ -1,7 +1,7 @@
 /**
  * Admin Backend Page - System Management
  * For debugging and technical management of all sessions
- * Hierarchy: Project → Stakeholder (as deck) → Interview Sessions
+ * Hierarchy: Project → Stakeholder → Interview Sessions
  */
 
 import { useCallback, useEffect, useState } from 'react'

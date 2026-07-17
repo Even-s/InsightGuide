@@ -64,9 +64,7 @@ def convert_card_to_schema(card) -> QuestionCardSchema:
     return QuestionCardSchema(
         id=card.id,
         documentId=card.document_id,
-        interviewThemeId=card.interview_theme_id,
-        sectionId=card.section_id,
-        sectionNumber=card.section_number,
+        themeId=card.interview_theme_id,
         focusText=card.focus_text,
         questionText=card.question_text,
         questionType=card.question_type,
@@ -95,34 +93,23 @@ async def create_question_card(question_card: QuestionCardCreate, db: Session = 
     """Create a new question card (user-created)."""
     from app.models.interview_theme import InterviewTheme
 
-    section_id = question_card.resolved_section_id
-    logger.info(f"Creating question card for section {section_id}")
+    theme_id = question_card.resolved_theme_id
+    logger.info(f"Creating question card for theme {theme_id}")
 
-    # Check if sectionId is actually an interview theme ID
-    theme = db.query(InterviewTheme).filter(InterviewTheme.id == section_id).first()
-    if theme:
-        _ensure_document_editable(db, theme.document_id)
-        card = question_card_service.create_question_card(
-            db=db,
-            document_id=theme.document_id,
-            section_id=section_id,
-            section_number=0,
-            card_data=question_card,
-            created_by="user",
-            interview_theme_id=theme.id,
+    theme = db.query(InterviewTheme).filter(InterviewTheme.id == theme_id).first()
+    if not theme:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Interview theme not found"
         )
-    else:
-        from app.services.section_service import section_service
 
-        section = section_service.get_section(db, section_id)
-        _ensure_document_editable(db, section.document_id)
-        card = question_card_service.create_question_card(
-            db=db,
-            document_id=section.document_id,
-            section_id=section_id,
-            section_number=section.section_number,
-            card_data=question_card,
-        )
+    _ensure_document_editable(db, theme.document_id)
+    card = question_card_service.create_question_card(
+        db=db,
+        document_id=theme.document_id,
+        card_data=question_card,
+        created_by="user",
+        interview_theme_id=theme.id,
+    )
 
     return convert_card_to_schema(card)
 
@@ -181,17 +168,30 @@ async def get_document_question_cards(document_id: str, db: Session = Depends(ge
     return [convert_card_to_schema(card) for card in cards]
 
 
-@router.patch("/sections/{section_id}/reorder", response_model=List[QuestionCardSchema])
+@router.patch("/themes/{theme_id}/reorder", response_model=List[QuestionCardSchema])
 async def reorder_question_cards(
-    section_id: str,
+    theme_id: str,
     card_order: List[str] = Body(..., description="Ordered list of question card IDs"),
     db: Session = Depends(get_db),
 ):
-    """Reorder question cards for a section."""
-    logger.info(f"Reordering {len(card_order)} question cards for section {section_id}")
+    """Reorder question cards for an interview theme."""
+    from app.models.interview_theme import InterviewTheme
+
+    logger.info(f"Reordering {len(card_order)} question cards for theme {theme_id}")
+    theme = db.query(InterviewTheme).filter(InterviewTheme.id == theme_id).first()
+    if not theme:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Interview theme not found"
+        )
+    _ensure_document_editable(db, theme.document_id)
     for card_id in card_order:
-        _ensure_card_editable(db, card_id)
-    cards = question_card_service.reorder_question_cards(db, section_id, card_order)
+        card = _ensure_card_editable(db, card_id)
+        if card.interview_theme_id != theme_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Question card {card_id} does not belong to theme {theme_id}",
+            )
+    cards = question_card_service.reorder_question_cards(db, card_order)
     return [convert_card_to_schema(card) for card in cards]
 
 
@@ -219,7 +219,7 @@ async def generate_role_targeting(card_id: str, db: Session = Depends(get_db)):
     targeting = ai_question_generator.generate_role_targeting(
         question_text=card.question_text,
         question_type=card.question_type,
-        section_context=card.focus_text or "",
+        theme_context=card.focus_text or "",
     )
 
     card.target_roles = targeting["target_roles"]
@@ -252,7 +252,7 @@ async def generate_all_role_targeting(document_id: str, db: Session = Depends(ge
         targeting = ai_question_generator.generate_role_targeting(
             question_text=card.question_text,
             question_type=card.question_type,
-            section_context=card.focus_text or "",
+            theme_context=card.focus_text or "",
         )
         card.target_roles = targeting["target_roles"]
         card.not_recommended_roles = targeting["not_recommended_roles"]

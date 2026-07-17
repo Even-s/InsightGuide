@@ -61,16 +61,16 @@ async def create_document(
     db: Session = Depends(get_db),
 ):
     """
-    Upload a requirements document and create a new document record.
+    Upload an interview guide source document and create a new document record.
 
     This endpoint:
     1. Validates the uploaded file (accepts .pdf, .docx, .doc, .md, .txt)
     2. Uploads it to S3 storage
     3. Creates a document record in the database
     4. Enqueues a background job for processing:
-       - Extracts sections from the document
+       - Extracts guide text from the document
        - Analyzes content with AI
-       - Generates question cards
+       - Generates interview themes and question cards
     """
     logger.info(f"Creating document from file: {file.filename}, project_id={project_id}")
 
@@ -126,9 +126,9 @@ async def get_document_status(document_id: str, db: Session = Depends(get_db)):
 
     status_messages = {
         "uploaded": "File uploaded, waiting for processing",
-        "processing": "Processing file and extracting sections",
+        "processing": "Processing file and extracting guide content",
         "converted": "Processing complete, ready for AI analysis",
-        "analyzing": "AI is analyzing sections and generating question cards",
+        "analyzing": "AI is analyzing guide content and generating interview themes",
         "analyzed": "Analysis complete, document is ready for editing",
         "failed": "Processing failed, please try again",
     }
@@ -145,15 +145,13 @@ async def get_document_status(document_id: str, db: Session = Depends(get_db)):
 @router.get("/{document_id}/analysis", response_model=DocumentAnalysisResponse)
 async def get_document_analysis(document_id: str, db: Session = Depends(get_db)):
     """
-    Get document analysis results including sections and question cards.
+    Get document analysis results including interview themes and question cards.
 
     This endpoint returns the complete analysis results after
     AI processing is complete.
     """
-    from app.schemas.question_card import QuestionCardSchema
-    from app.schemas.section import SectionWithQuestionCards
+    from app.models.interview_theme import InterviewTheme
     from app.services.question_card_service import question_card_service
-    from app.services.section_service import section_service
 
     document = document_service.get_document(db, document_id)
 
@@ -163,34 +161,41 @@ async def get_document_analysis(document_id: str, db: Session = Depends(get_db))
             detail=f"Document analysis failed. Please re-upload.",
         )
 
-    # Load sections
-    sections = section_service.get_sections_by_document(db, document_id)
-
-    # Load all question cards for the document
+    themes = (
+        db.query(InterviewTheme)
+        .filter(InterviewTheme.document_id == document_id)
+        .order_by(InterviewTheme.order_index)
+        .all()
+    )
     all_question_cards = question_card_service.get_question_cards_by_document(db, document_id)
     usage = {"inputTokens": 0, "outputTokens": 0, "totalTokens": 0, "totalCostUsd": 0}
 
-    sections_data = []
-    for section in sections:
-        section_cards = [c for c in all_question_cards if c.section_id == section.id]
+    cards_by_theme = {}
+    for card in all_question_cards:
+        cards_by_theme.setdefault(card.interview_theme_id, []).append(card)
 
-        sections_data.append(
+    themes_data = []
+    for theme in themes:
+        theme_cards = cards_by_theme.get(theme.id, [])
+        themes_data.append(
             {
-                "id": section.id,
-                "document_id": section.document_id,
-                "page_number": section.section_number,
-                "title": section.title,
-                "extracted_text": section.extracted_text,
-                "ai_summary": section.ai_summary,
-                "topic_cards_count": len(section_cards),
+                "id": theme.id,
+                "documentId": theme.document_id,
+                "themeNumber": theme.theme_number,
+                "title": theme.title,
+                "rationale": theme.rationale,
+                "brdMapping": theme.brd_mapping or [],
+                "priority": theme.priority,
+                "estimatedMinutes": theme.estimated_minutes,
+                "questionCardsCount": len(theme_cards),
             }
         )
 
     return DocumentAnalysisResponse(
         document_id=document.id,
         status=document.status,
-        sections=sections_data,
-        topic_cards_count=len(all_question_cards),
+        themes=themes_data,
+        question_cards_count=len(all_question_cards),
         created_at=document.created_at,
         updated_at=document.updated_at,
         cost_usd=usage["totalCostUsd"],
@@ -248,7 +253,6 @@ async def get_interview_plan(document_id: str, db: Session = Depends(get_db)):
                 "brdMapping": theme.brd_mapping or [],
                 "priority": theme.priority,
                 "estimatedMinutes": theme.estimated_minutes,
-                "sourceSectionIds": theme.source_section_ids or [],
                 "orderIndex": theme.order_index,
                 "isRequired": theme.is_required,
                 "isEnabled": theme.is_enabled,
@@ -300,14 +304,6 @@ async def delete_document(document_id: str, db: Session = Depends(get_db)):
     return None
 
 
-@router.get("/{document_id}/sections")
-async def get_document_sections(document_id: str, db: Session = Depends(get_db)):
-    """Get all sections for a document."""
-    document = document_service.get_document(db, document_id)
-
-    return {"document_id": document.id, "sections": []}
-
-
 @router.get("/{document_id}/events")
 async def document_events_stream(document_id: str, db: Session = Depends(get_db)):
     """
@@ -315,7 +311,7 @@ async def document_events_stream(document_id: str, db: Session = Depends(get_db)
 
     Events:
     - CARD_CREATED: New question card generated
-    - ANALYSIS_COMPLETE: All sections analyzed
+    - ANALYSIS_COMPLETE: Guide analysis completed
     """
     import redis.asyncio as async_redis
 

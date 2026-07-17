@@ -150,14 +150,14 @@ function CardItem({
     if (!form.questionText.trim()) return
     const validCriteria = form.criteria.filter(c => c.description.trim())
     await onUpdate({
-      sectionId: card.sectionId,
+      themeId: card.themeId,
       questionText: form.questionText,
       suggestedFollowup: card.suggestedFollowup || '',
       importance: form.importance,
       coverageRule: { ...card.coverageRule, criteria: validCriteria },
     })
     setIsEditing(false)
-  }, [card.coverageRule, card.sectionId, card.suggestedFollowup, form.criteria, form.importance, form.questionText, onUpdate])
+  }, [card.coverageRule, card.themeId, card.suggestedFollowup, form.criteria, form.importance, form.questionText, onUpdate])
 
   function handleCancel() {
     setForm({

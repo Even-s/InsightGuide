@@ -41,7 +41,7 @@ InsightGuide is an AI-powered requirements interview assistant. It helps Busines
 │  │                     API Routes                          │    │
 │  │  documents | prep-sessions | interview-sessions | brd   │    │
 │  │  projects | evidence-matrix | insight-memos | realtime  │    │
-│  │  question-cards | sections | events | session-reports   │    │
+│  │  question-cards | events | outputs                         │    │
 │  └──────────────────────────┬──────────────────────────────┘    │
 │                             │                                   │
 │  ┌──────────────────────────▼──────────────────────────────┐    │
@@ -63,7 +63,7 @@ InsightGuide is an AI-powered requirements interview assistant. It helps Busines
 │  │  └────────────────┘  └─────────────────────────────┘    │    │
 │  │  ┌────────────────┐  ┌─────────────────────────────┐    │    │
 │  │  │ BRD Generation │  │ Billing Service             │    │    │
-│  │  │  ├─ Sections   │  │  ├─ Token cost tracking     │    │    │
+│  │  │  ├─ Chapters   │  │  ├─ Token cost tracking     │    │    │
 │  │  │  ├─ AI Rewrite │  │  └─ Audio cost tracking     │    │    │
 │  │  │  └─ Caching    │  └─────────────────────────────┘    │    │
 │  │  └────────────────┘                                      │    │
@@ -81,7 +81,7 @@ InsightGuide is an AI-powered requirements interview assistant. It helps Busines
 User
  ├── Project (1:N) — multi-interview container
  │    ├── StakeholderSlot (1:N) — AI-suggested role requirements
- │    │    └── StakeholderProfile (1:N) — actual interviewees
+ │    │    └── StakeholderProfile (1:N) — actual participants
  │    │         └── InterviewSeries (1:N) — one topic across repeated interviews
  │    │              └── InterviewRound (1:N) — an immutable guide/question version
  │    │                   ├── Document (1:1) — guide document selected for this round
@@ -93,8 +93,7 @@ User
  │    │    └── EvidenceMatrixEntry (1:N) — candidate requirements
  │    └── BRDReadinessReport (0:N) — generation readiness checks
  │
- ├── Document (1:N)
- │    ├── Section (1:N) — extracted pages/paragraphs from uploaded file
+ ├── Document (1:N) — guide document
  │    ├── InterviewTheme (1:N) — AI-generated interview units
  │    │    └── QuestionCard (1:N) — questions with coverage rules
  │    │         ├── InterviewCardState (1:N per session)
@@ -106,9 +105,7 @@ User
  │    │         ├── LiveUtterance (1:N) — canonical Realtime transcript
  │    │         ├── InterviewBrief (0:1) — pre-interview guide
  │    │         ├── AIUsageEvent (1:N)
- │    │         └── BRDDraft (0:1)
  │    └── AIUsageEvent (1:N, document-level costs)
- └── BRDDraft (1:N via interview sessions)
 ```
 
 ## Core Workflows
@@ -145,36 +142,32 @@ User starts interview
   → On completed utterance:
     Frontend → POST /api/interview-sessions/{id}/utterances
       → Background task: process_utterance_evaluation
-        → Match questions and evaluate answer sufficiency [GPT-5.4-mini]
-        → Update card state (pending → listening → probably_sufficient → sufficient)
-      → SSE event: CARD_COVERED / CARD_LISTENING / etc.
+        → Suggest matching question cards [GPT-5.4-mini]
+        → Add evidence only to human-confirmed active cards
+        → AI may move a card to probably_sufficient; only manual action marks sufficient
+      → SSE event: QUESTION_CARD_SUGGESTED / CARD_EVIDENCE_ADDED / CARD_PROBABLY_COVERED / etc.
 ```
 
 ### 3. Answer Evaluation Pipeline
 
 ```
 Realtime utterance received
-  → _load_candidate_cards: find listening cards for current theme
-  → _get_answer_context_for_cards: build context window
-  → _batch_judge_answer_sufficiency: one GPT call scores all candidates
-  → _update_card_state:
-      confidence < 0.3 → no change
-      confidence ≥ 0.85 or is_covered → sufficient
-      confidence ≥ 0.62 → probably_sufficient
-      else → status unchanged (still listening)
+  → Question-like text: suggest one or more question cards
+  → Human confirms the active card
+  → Answer-like text: evaluate evidence only for the confirmed card
+  → Criterion evidence updates are emitted to the UI
+  → AI can suggest probably_sufficient
+  → Human marks sufficient when the answer is complete
 ```
 
-### 4. BRD Generation (Post-Interview)
+### 4. BRD / Readiness Generation (Project-Level)
 
 ```
-User opens report page
-  → POST /api/interview-sessions/{id}/outputs/generate
-  → Check BRDDraft cache (if exists, return immediately)
-  → Build sections from card evidence + theme mapping
+User opens project readiness / BRD flow
+  → Read ready RoundAggregate records only
+  → Build BRD chapters from cumulative evidence + theme mapping
   → AI rewrite: raw evidence → formal BRD paragraphs [GPT]
-  → Render markdown (BRD + transcript)
-  → Persist to BRDDraft.markdown_content
-  → Return structured result
+  → Render markdown / export artifacts from aggregate-backed evidence
 ```
 
 ### 5. Post-Interview Pipeline
@@ -223,8 +216,6 @@ Project Dashboard
 | `/editor/:documentId` | EditorPage | Review/edit themes & question cards |
 | `/interview/:documentId` | PresenterPage | Live interview with transcription |
 | `/interview/session/:sessionId` | PresenterPage | Resume interview by session |
-| `/interview/:documentId/report/:sessionId` | InterviewReportPage | Post-interview analytics |
-| `/interview/:sessionId/brd` | BRDGenerationPage | Structured BRD editor |
 | `/sessions/:sessionId/insight-memo` | InsightMemoPage | Post-interview qualitative analysis |
 | `/sessions/:sessionId/log` | SessionLogPage | Event timeline |
 
@@ -238,7 +229,7 @@ Project Dashboard
 | `POST /api/interview-rounds/{roundId}/generate-guide` | Generate an independent guide document for a round |
 | `POST /api/interview-rounds/{roundId}/sessions` | Start a session from the round guide |
 
-The legacy `generate-interview-guide` endpoint remains as a compatibility adapter. It resolves a default series and an editable draft round rather than reusing or deleting a historical guide.
+New interview rounds should be created through the InterviewSeries / InterviewRound flow. Historical deck/section compatibility contracts are not part of the clean-break API.
 
 ### Key Hooks
 
@@ -297,11 +288,11 @@ The legacy `generate-interview-guide` endpoint remains as a compatibility adapte
 | `question_card_service` | Card CRUD and reordering |
 | `question_rubric_service` | Question rubric management |
 | `ai_question_generator` | Coverage rules, target roles, suggested followup |
-| `section_service` | Document section management |
-| `report_analytics_service` | Post-interview performance analytics |
-| `report_export_service` | Report export formatting |
-| `brd_pdf_export_service` | BRD to PDF conversion |
-| `brd_generator_service` | BRD content generation logic |
+| `insight_memo_service` | Realtime transcript to round memo |
+| `interview_round_aggregate_service` | RoundAggregate rebuild and derivative invalidation |
+| `evidence_matrix_service` | Evidence Matrix from ready RoundAggregates |
+| `brd_readiness_service` | Readiness report from ready RoundAggregates |
+| `brd_generation_service` | BRD content generation from RoundAggregate |
 
 ## AI Model Usage
 
@@ -321,11 +312,11 @@ The legacy `generate-interview-guide` endpoint remains as a compatibility adapte
 
 3. **WebRTC for transcription**: Audio goes directly from browser to OpenAI — backend never handles audio data, reducing latency and bandwidth.
 
-4. **Card state machine**: `pending → listening → probably_sufficient → sufficient` provides granular progress tracking with interviewer activation as a gate.
+4. **Card state machine**: `pending → listening → probably_sufficient → sufficient` provides granular progress tracking with human confirmation as the gate.
 
 5. **Coverage rules on cards**: Each question card has `semanticAnchors`, `expectedKeywords`, and `mustMentionElements` — enabling both AI and deterministic evaluation.
 
-6. **Single Realtime transcript source**: `live_utterances` is used for the live UI, historical records, Insight Memo, and report generation. The browser does not create or upload a second recording.
+6. **Single Realtime transcript source**: `live_utterances` is used for the live UI, historical records, Insight Memo, RoundAggregate, and project outputs. The browser does not create or upload a second interview recording.
 
 7. **Project-level multi-interview architecture**: Projects contain stakeholder plans, evidence matrices, and readiness gates — enabling systematic requirements research across multiple interviews.
 
@@ -356,7 +347,8 @@ InsightGuide/
 │   │   │   ├── common/          # Shared UI components
 │   │   │   ├── EditorMode/      # Question card editor
 │   │   │   ├── PresenterMode/   # Interview mode UI
-│   │   │   ├── SessionReport/   # Post-interview report
+│   │   │   ├── InsightMemoPage  # Round-level interview record
+│   │   │   ├── SessionLogPage   # Realtime transcript/session log
 │   │   │   └── sessions/        # Session management
 │   │   ├── hooks/               # Custom React hooks
 │   │   ├── routes/              # Page-level components

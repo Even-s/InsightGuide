@@ -91,23 +91,6 @@ class TestReduceState:
         )
         assert state == "probably_sufficient"
 
-    # --- Partial transcript constraints ---
-
-    def test_partial_cannot_reach_sufficient(self):
-        state, _act, _comp = reduce_card_state(
-            "pending",
-            self._judgment(confidence=0.9, is_covered=True, evidence_quote="有", missing=[]),
-            is_partial=True,
-        )
-        assert state == "probably_sufficient"
-        assert _comp <= 0.80
-
-    def test_partial_can_reach_probably_sufficient(self):
-        state, _act, _comp = reduce_card_state(
-            "pending", self._judgment(confidence=0.5), is_partial=True
-        )
-        assert state == "probably_sufficient"
-
     # --- State only moves forward ---
 
     def test_cannot_go_back_from_listening_to_pending(self):

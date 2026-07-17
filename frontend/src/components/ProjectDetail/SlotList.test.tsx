@@ -63,6 +63,7 @@ function renderSlotList(overrides: Partial<React.ComponentProps<typeof SlotList>
     onUpdateSlot: vi.fn(),
     onAddProfile: vi.fn(),
     onDeleteProfile: vi.fn(),
+    onReassignProfile: vi.fn(),
     onShowGuideSettings: vi.fn(),
     ...overrides,
   }
@@ -184,6 +185,35 @@ describe('SlotList', () => {
     expect(screen.getByText('王小明')).toBeInTheDocument()
     expect(details).toHaveAttribute('aria-hidden', 'true')
     expect(details).not.toHaveClass('slot-details-collapse--open')
+  })
+
+  it('shows unassigned participants and allows assigning them to a role', () => {
+    const onReassignProfile = vi.fn()
+    renderSlotList({
+      onReassignProfile,
+      profiles: [{
+        id: 'profile-unassigned',
+        projectId: 'proj-1',
+        name: '陳未分配',
+        roleTitle: '候補受訪者',
+        department: '門診',
+        stakeholderType: 'internal',
+        expertiseTags: [],
+        knowledgeBoundaries: [],
+        status: 'identified',
+        interviewCount: 0,
+        createdAt: '2026-07-14T00:00:00Z',
+        updatedAt: '2026-07-14T00:00:00Z',
+      }],
+    })
+
+    expect(screen.getByText('未隸屬任何角色的受訪者')).toBeInTheDocument()
+    expect(screen.getByText('陳未分配')).toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('調整陳未分配的歸屬角色'), {
+      target: { value: 'slot-user' },
+    })
+    expect(onReassignProfile).toHaveBeenCalledWith('profile-unassigned', 'slot-user')
   })
 
   it('groups reorder, skip, and delete actions in the more menu', () => {

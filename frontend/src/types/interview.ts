@@ -10,7 +10,6 @@ export type SessionStatus =
   | 'ready'
   | 'interviewing'
   | 'paused'
-  | 'section_transitioning'
   | 'recovering'
   | 'ended'
   | 'failed'
@@ -44,9 +43,8 @@ export interface InterviewSession {
   interviewRoundId?: string
   continuedFromSessionId?: string
   status: SessionStatus
-  currentSectionId?: string
+  currentThemeId?: string
   activeCardId?: string | null
-  activeCardHintId?: string | null
   startedAt?: string
   endedAt?: string
   pausedAt?: string | null
@@ -63,25 +61,17 @@ export interface InterviewSession {
   }
 }
 
-export interface DocumentSection {
-  id: string
-  documentId: string
-  pageNumber: number
-  title?: string | null
-  imageUrl?: string | null
-  extractedText?: string | null
-  speakerNotes?: string | null
-  aiSummary?: string | null
-  topicCardsCount?: number
-  createdAt?: string
-}
-
 export interface InterviewCardState {
   id: string
+  stateId?: string
   sessionId: string
-  topicCardId: string
+  questionCardId: string
   status: QuestionCard['status']
   confidence?: number | null
+  activationScore?: number
+  completionScore?: number
+  completionSource?: string | null
+  manualNote?: string | null
   coveredAt?: string | null
   evidenceTranscript?: string | null
   evidence?: Record<string, unknown> | null
@@ -95,7 +85,6 @@ export interface CardState extends InterviewCardState {
 
 export interface Utterance {
   id: string
-  sectionId: string
   transcript: string
   startedAt: string
   endedAt: string
@@ -105,12 +94,12 @@ export interface InterviewRuntimeState {
   sessionId: string
   documentId: string
   status: SessionStatus
-  currentSectionId: string
-  currentSectionPageNumber: number
-  sectionStartedAt: string | null
-  elapsedSecondsOnSection: number
-  estimatedSecondsOnSection: number
-  cardsBySectionId: Record<string, QuestionCard[]>
+  currentThemeId: string
+  currentThemeIndex: number
+  themeStartedAt: string | null
+  elapsedSecondsOnTheme: number
+  estimatedSecondsOnTheme: number
+  cardsByThemeId: Record<string, QuestionCard[]>
   realtime: {
     connectionStatus: RealtimeConnectionStatus
     lastEventAt: string | null
@@ -125,17 +114,9 @@ export interface InterviewEvent {
     | 'CARD_COVERED'
     | 'CARD_AT_RISK'
     | 'CARD_SKIPPED'
-    | 'SECTION_CHANGED'
+    | 'THEME_CHANGED'
   sessionId: string
-  sectionId: string
+  themeId: string
   data: Record<string, unknown>
   occurredAt: string
 }
-
-// Re-export old names for gradual migration
-/** @deprecated Use InterviewSession */
-export type PresentationSession = InterviewSession
-/** @deprecated Use DocumentSection */
-export type Slide = DocumentSection
-/** @deprecated Use InterviewCardState */
-export type PresentationCardState = InterviewCardState

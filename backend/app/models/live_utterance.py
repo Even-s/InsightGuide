@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base
@@ -26,17 +26,16 @@ class LiveUtterance(Base):
     )
 
     realtime_event_id = Column(String, nullable=True)
+    theme_id = Column(
+        String, ForeignKey("interview_themes.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    asked_card_ids = Column(JSON, nullable=False, default=list)
     transcript = Column(Text, nullable=False)
-
-    # Retained for API/database compatibility. New Realtime segments use one neutral source label.
-    speaker = Column(String, nullable=False, default="realtime")
 
     started_at = Column(DateTime, nullable=True)
     ended_at = Column(DateTime, nullable=True)
 
     sequence_index = Column(Integer, nullable=False)
-
-    is_partial = Column(Boolean, nullable=False, default=False)
 
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
 

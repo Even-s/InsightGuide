@@ -1,19 +1,78 @@
 """Card manual control routes."""
 
 import logging
-from typing import List
+from typing import Any, List
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.api.routes.interview_helpers import convert_card_state_to_schema
 from app.db.session import get_db
-from app.schemas.interview import InterviewCardStateSchema, InterviewCardStateUpdate
+from app.schemas.interview import (
+    InterviewCardStateSchema,
+    InterviewCardStateUpdate,
+    SessionQuestionCardStateSchema,
+)
 from app.services.interview_service import interview_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _event_type_for_card_update(new_status: str) -> str:
+    if new_status == "sufficient":
+        return "CARD_COVERED"
+    if new_status == "probably_sufficient":
+        return "CARD_PROBABLY_COVERED"
+    return "CARD_LISTENING"
+
+
+def _publish_replayed_card_update(session_id: str, update: dict[str, Any]) -> None:
+    from app.services.event_service import event_service
+
+    completion_score = update.get("completion_score", 0) or 0
+    new_status = update["new_status"]
+    event_service.publish_sync(
+        session_id,
+        {
+            "type": _event_type_for_card_update(new_status),
+            "card_id": update["card_id"],
+            "old_status": update["old_status"],
+            "new_status": new_status,
+            "activation_score": update.get("activation_score", 1.0),
+            "completion_score": completion_score,
+            "confidence": update["confidence"],
+            "evidence": update.get("evidence"),
+            "evidenceTranscript": update.get("evidence_transcript"),
+            "evaluationSeq": update.get("evaluation_seq"),
+        },
+    )
+
+    if completion_score <= 0:
+        return
+
+    judgment = update.get("judgment") or {}
+    criterion_evaluations = judgment.get("criterion_evaluations") or []
+    for criterion in criterion_evaluations:
+        criterion_id = criterion.get("criterion_id")
+        criterion_status = criterion.get("status")
+        if not criterion_id or criterion_status == "not_addressed":
+            continue
+
+        evidence_quotes = criterion.get("evidence_quotes") or []
+        event_service.publish_sync(
+            session_id,
+            {
+                "type": "CARD_EVIDENCE_ADDED",
+                "card_id": update["card_id"],
+                "criterion_id": criterion_id,
+                "status": criterion_status,
+                "evidence_quote": evidence_quotes[0] if evidence_quotes else None,
+                "completion_score": completion_score,
+                "evaluationSeq": update.get("evaluation_seq"),
+            },
+        )
 
 
 @router.get("/{session_id}/card-states", response_model=List[InterviewCardStateSchema])
@@ -22,6 +81,43 @@ async def get_session_card_states(session_id: str, db: Session = Depends(get_db)
     logger.info(f"Retrieving card states for session {session_id}")
     card_states = interview_service.get_all_card_states(db, session_id)
     return [convert_card_state_to_schema(cs) for cs in card_states]
+
+
+@router.get("/{session_id}/cards", response_model=List[SessionQuestionCardStateSchema])
+async def get_session_cards(session_id: str, db: Session = Depends(get_db)):
+    """Get merged question-card metadata and runtime card state for a session."""
+    from app.api.routes.question_cards import convert_card_to_schema
+
+    logger.info(f"Retrieving merged session cards for session {session_id}")
+    card_states = interview_service.get_session_cards(db, session_id)
+    result = []
+    for state in card_states:
+        if not state.question_card:
+            continue
+        result.append(
+            SessionQuestionCardStateSchema(
+                stateId=state.id,
+                sessionId=state.session_id,
+                questionCardId=state.question_card_id,
+                status=state.status,
+                confidence=float(state.confidence) if state.confidence is not None else None,
+                activationScore=(
+                    float(state.activation_score) if state.activation_score is not None else 0.0
+                ),
+                completionScore=(
+                    float(state.completion_score) if state.completion_score is not None else 0.0
+                ),
+                completionSource=state.completion_source,
+                manualNote=state.manual_note,
+                answeredAt=state.answered_at,
+                evidenceTranscript=state.evidence_transcript,
+                evidence=state.evidence,
+                createdAt=state.created_at,
+                updatedAt=state.updated_at,
+                questionCard=convert_card_to_schema(state.question_card),
+            )
+        )
+    return result
 
 
 @router.patch("/{session_id}/card-states/{card_state_id}", response_model=InterviewCardStateSchema)
@@ -53,12 +149,12 @@ async def route_question(session_id: str, body: dict, db: Session = Depends(get_
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    section_id = theme_id or session.current_section_id or session.current_theme_id
-    if not section_id:
-        raise HTTPException(status_code=400, detail="No theme/section context")
+    theme_id = theme_id or session.current_theme_id
+    if not theme_id:
+        raise HTTPException(status_code=400, detail="No theme context")
 
     candidates = answer_evaluation_engine.find_candidate_cards(
-        db, session_id, section_id, text, top_k=3
+        db, session_id, theme_id, text, top_k=3
     )
     return {"candidates": candidates}
 
@@ -85,7 +181,6 @@ async def set_active_card(session_id: str, body: dict, db: Session = Depends(get
 
     # Update session active card
     session.active_card_id = card_id
-    session.active_card_hint_id = card_id
     session.active_card_source = source
     session.active_card_confirmed_at = datetime.utcnow()
 
@@ -131,7 +226,7 @@ async def set_active_card(session_id: str, body: dict, db: Session = Depends(get
         from app.models.live_utterance import LiveUtterance
         from app.services.answer_evaluation_engine import answer_evaluation_engine
 
-        section_id = session.current_section_id or session.current_theme_id or ""
+        theme_id = session.current_theme_id or ""
         for utt_id in buffer:
             utt = db.query(LiveUtterance).filter(LiveUtterance.id == utt_id).first()
             if not utt:
@@ -141,35 +236,10 @@ async def set_active_card(session_id: str, body: dict, db: Session = Depends(get
                 session_id,
                 utt.id,
                 utt.transcript,
-                section_id,
-                utt.speaker or "interviewee",
+                theme_id,
             )
             for update in updates:
-                new_status = update["new_status"]
-                event_type = (
-                    "CARD_COVERED"
-                    if new_status == "sufficient"
-                    else (
-                        "CARD_PROBABLY_COVERED"
-                        if new_status == "probably_sufficient"
-                        else "CARD_LISTENING"
-                    )
-                )
-                event_service.publish_sync(
-                    session_id,
-                    {
-                        "type": event_type,
-                        "card_id": update["card_id"],
-                        "old_status": update["old_status"],
-                        "new_status": new_status,
-                        "activation_score": update.get("activation_score", 1.0),
-                        "completion_score": update.get("completion_score", 0),
-                        "confidence": update["confidence"],
-                        "evidence": update.get("evidence"),
-                        "evidenceTranscript": update.get("evidence_transcript"),
-                        "evaluationSeq": update.get("evaluation_seq"),
-                    },
-                )
+                _publish_replayed_card_update(session_id, update)
 
         event_service.publish_sync(
             session_id,
@@ -200,7 +270,6 @@ async def clear_active_card(session_id: str, db: Session = Depends(get_db)):
 
     cleared_card_id = session.active_card_id
     session.active_card_id = None
-    session.active_card_hint_id = None
     session.active_card_source = "cleared"
     session.active_card_confirmed_at = None
     session.pending_answer_buffer = None

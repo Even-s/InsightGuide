@@ -1,16 +1,12 @@
 """FastAPI application entry point for InsightGuide."""
 
-import json
-
 from fastapi import FastAPI
-from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 # InsightGuide routes
 from app.api.routes import (
     auth,
-    brd,
     documents,
     events,
     evidence_matrix,
@@ -21,30 +17,12 @@ from app.api.routes import (
     projects,
     question_cards,
     realtime,
-    sections,
-    session_reports,
 )
 from app.core.config import settings
-from app.core.json_encoder import DateTimeEncoder
 from app.core.logging import setup_logging
 
 # Setup logging
 setup_logging()
-
-# Configure Pydantic to serialize datetime with 'Z' suffix
-from pydantic import ConfigDict
-from pydantic.json import pydantic_encoder
-
-
-def custom_encoder(obj):
-    """Custom JSON encoder for datetime objects."""
-    from datetime import datetime
-
-    if isinstance(obj, datetime):
-        # Serialize UTC datetime with 'Z' suffix
-        return obj.isoformat() + "Z"
-    return pydantic_encoder(obj)
-
 
 # Create FastAPI application
 app = FastAPI(
@@ -66,7 +44,6 @@ app.add_middleware(
 
 # Include InsightGuide routers
 app.include_router(documents.router, prefix="/api/documents", tags=["documents"])
-app.include_router(sections.router, prefix="/api/sections", tags=["sections"])
 app.include_router(question_cards.router, prefix="/api/question-cards", tags=["question-cards"])
 app.include_router(
     interview_sessions.router,
@@ -80,16 +57,6 @@ app.include_router(
     prep_sessions.router,
     prefix="/api/prep-sessions",
     tags=["prep-sessions"],
-)
-app.include_router(
-    session_reports.router,
-    prefix="/api/interview-sessions",
-    tags=["session-reports"],
-)
-app.include_router(
-    brd.router,
-    prefix="/api/brd",
-    tags=["brd"],
 )
 app.include_router(projects.router, prefix="/api/projects", tags=["projects"])
 app.include_router(insight_memos.router, prefix="/api", tags=["insight-memos"])

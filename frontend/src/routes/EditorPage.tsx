@@ -160,20 +160,20 @@ export default function EditorPage() {
           }
         } catch { /* continue without project context */ }
 
-        const deckStatus = await documentsAPI.getDocumentStatus(documentId!)
+        const documentStatus = await documentsAPI.getDocumentStatus(documentId!)
         if (!isMounted) return
 
-        if (deckStatus.status === 'failed') {
-          setError(deckStatus.message ?? 'Analysis failed')
+        if (documentStatus.status === 'failed') {
+          setError(documentStatus.message ?? 'Analysis failed')
           setIsLoading(false)
           return
         }
 
-        if (['uploading', 'uploaded', 'processing', 'converted', 'analyzing'].includes(deckStatus.status)) {
+        if (['uploading', 'uploaded', 'processing', 'converted', 'analyzing'].includes(documentStatus.status)) {
           setIsAnalyzing(true)
         }
 
-        if (deckStatus.status === 'analyzed') {
+        if (documentStatus.status === 'analyzed') {
           await loadPlan()
         }
       } catch (err) {
@@ -239,22 +239,8 @@ export default function EditorPage() {
   const selectedTheme = plan?.themes.find((t) => t.id === selectedThemeId) ?? null
   const activeRound = rounds.find(round => round.id === activeRoundId)
   const themeCards = useMemo(
-    () => cards.filter((c) => c.interviewThemeId === selectedThemeId).sort((a, b) => a.orderIndex - b.orderIndex),
+    () => cards.filter((c) => c.themeId === selectedThemeId).sort((a, b) => a.orderIndex - b.orderIndex),
     [cards, selectedThemeId],
-  )
-  const sharedLegacyDocumentIds = useMemo(() => {
-    const documentCounts = rounds.reduce<Record<string, number>>((counts, round) => {
-      if (round.guideDocumentId) counts[round.guideDocumentId] = (counts[round.guideDocumentId] ?? 0) + 1
-      return counts
-    }, {})
-    return new Set(
-      Object.entries(documentCounts)
-        .filter(([, count]) => count > 1)
-        .map(([id]) => id),
-    )
-  }, [rounds])
-  const isActiveLegacyGuide = Boolean(
-    activeRound?.guideDocumentId && sharedLegacyDocumentIds.has(activeRound.guideDocumentId),
   )
   const latestSessionByRound = useMemo(() => {
     return rounds.reduce<Record<string, InterviewSession>>((result, round) => {
@@ -359,10 +345,8 @@ export default function EditorPage() {
   async function createCard() {
     if (!selectedTheme) return
     try {
-      const existingCard = cards.find((c) => c.interviewThemeId === selectedThemeId)
-      const sectionId = existingCard?.sectionId ?? selectedThemeId
       const newCard = await questionCardsAPI.createCard({
-        sectionId,
+        themeId: selectedThemeId,
         questionText: '新問題',
         suggestedFollowup: '請輸入追問內容',
         importance: 'must',
@@ -384,12 +368,12 @@ export default function EditorPage() {
 
   async function reorderCards(reordered: QuestionCard[]) {
     try {
-      const updated = await questionCardsAPI.reorderSectionCards(
+      const updated = await questionCardsAPI.reorderThemeCards(
         selectedThemeId,
         reordered.map((c) => c.id)
       )
       setCards((prev) => {
-        const others = prev.filter((c) => c.interviewThemeId !== selectedThemeId)
+        const others = prev.filter((c) => c.themeId !== selectedThemeId)
         return [...others, ...updated]
       })
     } catch (err) {
@@ -628,7 +612,7 @@ export default function EditorPage() {
                   {roundModalError}
                 </p>
               )}
-              {(plan.interviewObjective || isFrozen || isActiveLegacyGuide) && (
+              {(plan.interviewObjective || isFrozen) && (
                 <div className="border-l-2 border-sage-300 pl-4">
                   <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                     <p className="text-xs font-semibold tracking-wide text-sage-600">本輪訪談目標</p>
@@ -637,11 +621,6 @@ export default function EditorPage() {
                   <p className="mt-1 text-sm leading-6 text-natural-500">
                     {plan.interviewObjective || '此輪未設定訪談目標。'}
                   </p>
-                  {isActiveLegacyGuide && (
-                    <p className="mt-1 text-xs leading-5 text-wood-500">
-                      此輪為舊資料，建立當時尚未分開保存每輪版本，因此會顯示共用的大綱與問題。
-                    </p>
-                  )}
                 </div>
               )}
               <div>
@@ -770,13 +749,6 @@ export default function EditorPage() {
                               className="rounded bg-sage-500 px-2 py-1 text-xs font-medium text-white hover:bg-sage-600"
                             >
                               訪談紀錄
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => window.location.assign(`/interview/${documentId}/report/${session.id}`)}
-                              className="rounded border border-cream-300 px-2 py-1 text-xs text-natural-500 hover:bg-cream-100"
-                            >
-                              查看報告
                             </button>
                           </>
                         )}

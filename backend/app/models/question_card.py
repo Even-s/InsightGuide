@@ -9,7 +9,7 @@ from app.db.session import Base
 
 
 class QuestionCard(Base):
-    """QuestionCard model - represents an interview question for a document section."""
+    """QuestionCard model - represents an interview question for a guide theme."""
 
     __tablename__ = "question_cards"
 
@@ -18,8 +18,6 @@ class QuestionCard(Base):
     interview_theme_id = Column(
         String, ForeignKey("interview_themes.id"), nullable=True, index=True
     )
-    section_id = Column(String, ForeignKey("sections.id"), nullable=True, index=True)
-    section_number = Column(Integer, nullable=True)
 
     focus_text = Column(Text, nullable=True)
     question_text = Column(Text, nullable=False)
@@ -47,18 +45,11 @@ class QuestionCard(Base):
 
     # Relationships
     document = relationship("Document", back_populates="question_cards")
-    section = relationship("Section", back_populates="question_cards")
     interview_theme = relationship(
         "InterviewTheme", back_populates="question_cards", foreign_keys=[interview_theme_id]
     )
     card_states = relationship(
         "InterviewCardState",
-        back_populates="question_card",
-        cascade="all, delete-orphan",
-        passive_deletes=True,
-    )
-    requirements = relationship(
-        "Requirement",
         back_populates="question_card",
         cascade="all, delete-orphan",
         passive_deletes=True,

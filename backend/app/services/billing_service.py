@@ -128,7 +128,7 @@ class BillingService:
     def _round_money(self, value: Decimal) -> Decimal:
         return value.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
 
-    def record_deck_chat_completion(
+    def record_document_chat_completion(
         self,
         document_id: Optional[str],
         operation: str,

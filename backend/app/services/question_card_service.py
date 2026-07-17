@@ -12,7 +12,6 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.question_card import QuestionCard
-from app.models.section import Section
 from app.schemas.question_card import CoverageRule, QuestionCardCreate, QuestionCardUpdate
 
 logger = logging.getLogger(__name__)
@@ -44,7 +43,7 @@ class QuestionCardService:
         Keep semantic anchors as matching hints, but make important elements the
         canonical visible/scoring units.
 
-        Answer elements represent the key information expected in the interviewee's response.
+        Answer elements represent the key information expected in the response.
         """
         if hasattr(coverage_rule, "model_dump"):
             coverage_rule = coverage_rule.model_dump()
@@ -116,20 +115,11 @@ class QuestionCardService:
         return card
 
     def get_question_cards_by_document(self, db: Session, document_id: str) -> List[QuestionCard]:
-        """Get all question cards for a document, ordered by section number and order index."""
+        """Get all question cards for a document, ordered by theme and order index."""
         return (
             db.query(QuestionCard)
             .filter(QuestionCard.document_id == document_id)
-            .order_by(QuestionCard.section_number, QuestionCard.order_index)
-            .all()
-        )
-
-    def get_question_cards_by_section(self, db: Session, section_id: str) -> List[QuestionCard]:
-        """Get all question cards for a section, ordered by order index."""
-        return (
-            db.query(QuestionCard)
-            .filter(QuestionCard.section_id == section_id)
-            .order_by(QuestionCard.order_index)
+            .order_by(QuestionCard.interview_theme_id, QuestionCard.order_index)
             .all()
         )
 
@@ -137,30 +127,25 @@ class QuestionCardService:
         self,
         db: Session,
         document_id: str,
-        section_id: str,
-        section_number: int,
         card_data: QuestionCardCreate,
         created_by: str = "user",
-        interview_theme_id: Optional[str] = None,
+        interview_theme_id: str = "",
     ) -> QuestionCard:
         """Create a new question card."""
         card_id = f"qcard_{uuid.uuid4().hex[:12]}"
 
-        # Get next order index for this theme or section
-        if interview_theme_id:
-            max_order = (
-                db.query(func.max(QuestionCard.order_index))
-                .filter(QuestionCard.interview_theme_id == interview_theme_id)
-                .scalar()
-                or -1
+        if not interview_theme_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="themeId is required"
             )
-        else:
-            max_order = (
-                db.query(func.max(QuestionCard.order_index))
-                .filter(QuestionCard.section_id == section_id)
-                .scalar()
-                or -1
-            )
+
+        # Get next order index for this theme
+        max_order = (
+            db.query(func.max(QuestionCard.order_index))
+            .filter(QuestionCard.interview_theme_id == interview_theme_id)
+            .scalar()
+            or -1
+        )
         order_index = max_order + 1
 
         # Resolve fields (supports both frontend and internal naming)
@@ -206,8 +191,6 @@ class QuestionCardService:
             id=card_id,
             document_id=document_id,
             interview_theme_id=interview_theme_id,
-            section_id=section_id if not interview_theme_id else None,
-            section_number=section_number,
             question_text=question_text,
             question_type=question_type,
             importance=card_data.importance,

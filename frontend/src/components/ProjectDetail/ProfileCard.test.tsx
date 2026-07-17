@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { StakeholderProfile } from '@/api/projects'
+import type { StakeholderProfile, StakeholderSlot } from '@/api/projects'
 import { ProfileCard } from './ProfileCard'
 
 const mocks = vi.hoisted(() => ({
@@ -41,6 +41,45 @@ const profile: StakeholderProfile = {
   createdAt: '2026-07-01T00:00:00Z',
   updatedAt: '2026-07-14T00:00:00Z',
 }
+
+const slots: StakeholderSlot[] = [
+  {
+    id: 'slot-frontline',
+    projectId: 'project-1',
+    roleCategory: 'user',
+    roleLabel: '掛號櫃台人員',
+    expectedContributions: [],
+    keyQuestionsToCover: [],
+    priority: 'required',
+    minInterviews: 1,
+    firstWave: true,
+    status: 'assigned',
+    orderIndex: 0,
+    source: 'ai_suggested',
+    profilesCount: 1,
+    interviewsDone: 0,
+    createdAt: '2026-07-01T00:00:00Z',
+    updatedAt: '2026-07-14T00:00:00Z',
+  },
+  {
+    id: 'slot-it',
+    projectId: 'project-1',
+    roleCategory: 'engineering',
+    roleLabel: '資訊維運人員',
+    expectedContributions: [],
+    keyQuestionsToCover: [],
+    priority: 'recommended',
+    minInterviews: 1,
+    firstWave: false,
+    status: 'unassigned',
+    orderIndex: 1,
+    source: 'ai_suggested',
+    profilesCount: 0,
+    interviewsDone: 0,
+    createdAt: '2026-07-01T00:00:00Z',
+    updatedAt: '2026-07-14T00:00:00Z',
+  },
+]
 
 describe('ProfileCard', () => {
   beforeEach(() => {
@@ -88,7 +127,7 @@ describe('ProfileCard', () => {
       seriesId: 'series-1',
       roundNumber: 1,
       objective: '了解掛號流程',
-      generationMode: 'legacy',
+      generationMode: 'follow_up',
       sourceSessionIds: ['session-latest'],
       focusTopics: [],
       excludeCompletedQuestions: true,
@@ -163,5 +202,40 @@ describe('ProfileCard', () => {
 
     expect(await screen.findByRole('button', { name: '查看目前大綱' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '開始下一輪訪談' })).not.toBeInTheDocument()
+  })
+
+  it('lets users reassign the participant to another role or unassigned area', async () => {
+    const onReassign = vi.fn()
+    render(
+      <MemoryRouter initialEntries={['/projects/project-1']}>
+        <Routes>
+          <Route
+            path="/projects/:projectId"
+            element={(
+              <ProfileCard
+                profile={{ ...profile, slotId: 'slot-frontline' }}
+                projectId="project-1"
+                guide={null}
+                slots={slots}
+                onDelete={vi.fn()}
+                onReassign={onReassign}
+                onShowGuideSettings={vi.fn()}
+              />
+            )}
+          />
+        </Routes>
+      </MemoryRouter>,
+    )
+
+    const roleSelect = await screen.findByLabelText('調整王小明的歸屬角色')
+    fireEvent.change(roleSelect, {
+      target: { value: 'slot-it' },
+    })
+    fireEvent.change(roleSelect, {
+      target: { value: '' },
+    })
+
+    expect(onReassign).toHaveBeenNthCalledWith(1, 'profile-1', 'slot-it')
+    expect(onReassign).toHaveBeenNthCalledWith(2, 'profile-1', null)
   })
 })

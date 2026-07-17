@@ -17,7 +17,7 @@ from app.services.evaluation.utterance_classifier import is_question_like
 
 
 class TestQuestionOnlyActivation:
-    """Regression: interviewer questions should activate cards but never advance completion."""
+    """Regression: question-like utterances should activate cards but never advance completion."""
 
     def _judgment(
         self,
@@ -323,30 +323,11 @@ class TestAnswerCorrection:
         assert state2 == "probably_sufficient", "State should not change"
         assert comp2 == 0.0, "Question produces zero completion"
 
-    def test_partial_transcript_cannot_reach_sufficient(self):
-        """Partial transcripts are capped at probably_sufficient even with high confidence."""
+    def test_completed_realtime_utterance_can_reach_sufficient_in_reducer(self):
+        """Reducer can identify sufficient evidence; AI update later caps terminal completion."""
         judgment = self._judgment(
-            confidence=0.95, is_covered=True, evidence_quote="看似完整", missing=[]
-        )
-        state, _, completion = reduce_card_state("listening", judgment, is_partial=True)
-
-        assert state == "probably_sufficient", "Partial should be capped"
-        assert completion <= 0.80, "Partial completion should be capped at 0.80"
-
-    def test_partial_then_final_reaches_sufficient(self):
-        """Partial transcript caps progress, then final evaluation can reach sufficient."""
-        # Partial evaluation
-        judgment1 = self._judgment(
-            confidence=0.85, is_covered=True, evidence_quote="部分轉錄", missing=[]
-        )
-        state1, _, comp1 = reduce_card_state("listening", judgment1, is_partial=True)
-        assert state1 == "probably_sufficient"
-        assert comp1 <= 0.80
-
-        # Final evaluation (not partial)
-        judgment2 = self._judgment(
             confidence=0.90, is_covered=True, evidence_quote="完整轉錄", missing=[]
         )
-        state2, _, comp2 = reduce_card_state(state1, judgment2, is_partial=False)
-        assert state2 == "sufficient", "Final evaluation can reach sufficient"
-        assert comp2 == 0.90
+        state, _, comp = reduce_card_state("listening", judgment)
+        assert state == "sufficient"
+        assert comp == 0.90

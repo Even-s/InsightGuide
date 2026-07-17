@@ -41,7 +41,7 @@ const memo: InsightMemo = {
     expertise: ['掛號流程'],
     boundaries: [],
   },
-  qaSummaries: [],
+  questionSummaries: [],
   painPoints: [{
     description: '尖峰時段需要重複確認掛號資料',
     evidence_quote: '同一筆資料常常要查兩次。',

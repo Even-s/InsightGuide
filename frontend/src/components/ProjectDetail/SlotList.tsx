@@ -18,6 +18,7 @@ interface SlotListProps {
   onUpdateSlot: (slotId: string) => void
   onAddProfile: (slotId: string) => void
   onDeleteProfile: (profileId: string) => void
+  onReassignProfile: (profileId: string, slotId: string | null) => void
   onShowGuideSettings: (profileId: string) => void
 }
 
@@ -209,11 +210,14 @@ export function SlotList({
   onUpdateSlot,
   onAddProfile,
   onDeleteProfile,
+  onReassignProfile,
   onShowGuideSettings,
 }: SlotListProps) {
   const [expandedSlots, setExpandedSlots] = useState<Set<string>>(new Set())
   const [openMenuSlot, setOpenMenuSlot] = useState<string | null>(null)
   const initializedExpansion = useRef(false)
+  const slotIds = new Set(slots.map(slot => slot.id))
+  const unassignedProfiles = profiles.filter(profile => !profile.slotId || !slotIds.has(profile.slotId))
 
   useEffect(() => {
     if (initializedExpansion.current || slots.length === 0) return
@@ -373,6 +377,18 @@ export function SlotList({
                       {slot.profilesCount > 0 ? '新增受訪者' : '指派受訪者'}
                     </button>
                   )}
+
+                  <button
+                    type="button"
+                    onClick={() => onDeleteSlot(slot.id)}
+                    className="inline-flex h-10 w-10 items-center justify-center rounded-md text-natural-400 transition-colors hover:bg-red-50 hover:text-red-500"
+                    aria-label={`刪除「${slot.roleLabel}」角色`}
+                    title={`刪除「${slot.roleLabel}」角色`}
+                  >
+                    <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6M9 7V4a1 1 0 011-1h4a1 1 0 011 1v3m-9 0h12" />
+                    </svg>
+                  </button>
 
                   <div className="relative">
                     <button
@@ -593,7 +609,9 @@ export function SlotList({
                       profile={profile}
                       projectId={projectId}
                       guide={guideStatuses[profile.id] ?? null}
+                      slots={slots}
                       onDelete={onDeleteProfile}
+                      onReassign={onReassignProfile}
                       onShowGuideSettings={onShowGuideSettings}
                     />
                   ))}
@@ -603,6 +621,36 @@ export function SlotList({
           </article>
         )
       })}
+
+      {unassignedProfiles.length > 0 && (
+        <section className="motion-surface-in rounded-lg border border-dashed border-wood-200 bg-wood-50/40 p-5 shadow-natural">
+          <div className="mb-3 flex items-start justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-semibold uppercase tracking-wider text-wood-600">
+                未隸屬任何角色的受訪者
+              </h3>
+              <p className="mt-1 text-xs text-natural-500">
+                這些受訪者目前不屬於任何訪談角色，可用卡片中的「歸屬角色」重新指派。
+              </p>
+            </div>
+            <span className="shrink-0 text-xs font-medium text-natural-500">{unassignedProfiles.length} 人</span>
+          </div>
+          <div className="space-y-2">
+            {unassignedProfiles.map(profile => (
+              <ProfileCard
+                key={profile.id}
+                profile={profile}
+                projectId={projectId}
+                guide={guideStatuses[profile.id] ?? null}
+                slots={slots}
+                onDelete={onDeleteProfile}
+                onReassign={onReassignProfile}
+                onShowGuideSettings={onShowGuideSettings}
+              />
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   )
 }

@@ -3,7 +3,6 @@ import { useParams, useNavigate } from 'react-router-dom'
 import {
   getEvidenceMatrix,
   refreshEvidenceMatrix,
-  updateEvidenceMatrixEntry,
   type EvidenceMatrixResponse,
 } from '@/api/projects'
 
@@ -69,15 +68,6 @@ export default function EvidenceMatrixPage() {
       console.error('Failed to refresh:', err)
     } finally {
       setRefreshing(false)
-    }
-  }
-
-  const handleReject = async (entryId: string) => {
-    try {
-      await updateEvidenceMatrixEntry(entryId, { validation_status: 'rejected' })
-      loadMatrix()
-    } catch (err) {
-      console.error('Failed to update entry:', err)
     }
   }
 
@@ -205,14 +195,6 @@ export default function EvidenceMatrixPage() {
                   >
                     {expandedEntry === entry.id ? '收起' : '展開'}
                   </button>
-                  {entry.validationStatus !== 'rejected' && (
-                    <button
-                      onClick={() => handleReject(entry.id)}
-                      className="px-2 py-1 text-xs text-red-400 hover:bg-red-50 rounded"
-                    >
-                      排除
-                    </button>
-                  )}
                 </div>
               </div>
 

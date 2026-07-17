@@ -1,5 +1,5 @@
 import { apiClient } from './client';
-import type { CardState, InterviewCardState, InterviewSession, DocumentSection } from '../types/interview';
+import type { CardState, InterviewCardState, InterviewSession } from '../types/interview';
 import type { CardStatus, QuestionCard } from '../types/questionCard';
 
 type ApiRecord = Record<string, unknown>;
@@ -8,38 +8,19 @@ function asString(value: unknown) {
   return typeof value === 'string' ? value : undefined;
 }
 
-function asNumber(value: unknown) {
-  return typeof value === 'number' ? value : 0;
-}
-
-function normalizeImageUrl(value: unknown) {
-  const url = asString(value);
-  if (!url) return undefined;
-  return url.replace('http://minio:9000', 'http://localhost:9000');
-}
-
-function normalizeSection(raw: ApiRecord): DocumentSection {
-  return {
-    id: asString(raw.id) ?? '',
-    documentId: asString(raw.documentId) ?? asString(raw.document_id) ?? asString(raw.deckId) ?? asString(raw.deck_id) ?? '',
-    pageNumber: asNumber(raw.pageNumber ?? raw.page_number),
-    title: asString(raw.title),
-    imageUrl: normalizeImageUrl(raw.imageUrl ?? raw.image_url),
-    extractedText: asString(raw.extractedText) ?? asString(raw.extracted_text),
-    speakerNotes: asString(raw.speakerNotes) ?? asString(raw.speaker_notes),
-    aiSummary: asString(raw.aiSummary) ?? asString(raw.ai_summary),
-    topicCardsCount: asNumber(raw.topicCardsCount ?? raw.topic_cards_count),
-    createdAt: asString(raw.createdAt) ?? asString(raw.created_at),
-  };
-}
-
 function normalizeCardState(raw: ApiRecord): InterviewCardState {
+  const stateId = asString(raw.stateId) ?? asString(raw.id) ?? '';
   return {
-    id: asString(raw.id) ?? '',
+    id: stateId,
+    stateId,
     sessionId: asString(raw.sessionId) ?? '',
-    topicCardId: asString(raw.questionCardId) ?? asString(raw.topicCardId) ?? '',
+    questionCardId: asString(raw.questionCardId) ?? '',
     status: raw.status as InterviewCardState['status'],
     confidence: typeof raw.confidence === 'number' ? raw.confidence : null,
+    activationScore: typeof raw.activationScore === 'number' ? raw.activationScore : undefined,
+    completionScore: typeof raw.completionScore === 'number' ? raw.completionScore : undefined,
+    completionSource: asString(raw.completionSource) ?? null,
+    manualNote: asString(raw.manualNote) ?? null,
     coveredAt: asString(raw.coveredAt) ?? asString(raw.answeredAt) ?? null,
     evidenceTranscript: asString(raw.evidenceTranscript) ?? null,
     evidence: raw.evidence && typeof raw.evidence === 'object' ? raw.evidence as Record<string, unknown> : null,
@@ -87,13 +68,6 @@ export const interviewAPI = {
     return response.data;
   },
 
-  async getSections(documentId: string): Promise<DocumentSection[]> {
-    const response = await apiClient.get(`/api/documents/${documentId}/analysis`);
-    const sections = Array.isArray(response.data.sections) ? response.data.sections :
-                     Array.isArray(response.data.slides) ? response.data.slides : [];
-    return sections.map((s: ApiRecord) => normalizeSection(s));
-  },
-
   async getDocumentQuestionCards(documentId: string): Promise<QuestionCard[]> {
     const response = await apiClient.get(`/api/question-cards/document/${documentId}`);
     return response.data;
@@ -107,30 +81,21 @@ export const interviewAPI = {
     return states.map((state: ApiRecord) => normalizeCardState(state));
   },
 
-  async getSessionCards(sessionId: string, documentId: string): Promise<CardState[]> {
-    const [cardStates, questionCards] = await Promise.all([
-      this.getCardStates(sessionId),
-      this.getDocumentQuestionCards(documentId),
-    ]);
-
-    const cardsById = new Map(questionCards.map((card) => [card.id, card]));
-
-    const combined: CardState[] = [];
-
-    for (const state of cardStates) {
-      const questionCard = cardsById.get(state.topicCardId);
-      if (!questionCard) continue;
-      combined.push({
+  async getSessionCards(sessionId: string): Promise<CardState[]> {
+    const response = await apiClient.get(`/api/interview-sessions/${sessionId}/cards`);
+    const cards = Array.isArray(response.data) ? response.data : [];
+    return cards.map((raw: ApiRecord) => {
+      const state = normalizeCardState(raw);
+      const questionCard = raw.questionCard as QuestionCard;
+      return {
         ...state,
         questionCard: {
           ...questionCard,
           status: state.status,
           confidence: state.confidence ?? undefined,
         },
-      });
-    }
-
-    return combined;
+      };
+    });
   },
 
   async updateCardState(
@@ -157,26 +122,11 @@ export const interviewAPI = {
     realtimeItemId?: string,
     startedAt?: string,
     endedAt?: string,
-    askedCardId?: string,
     askedCardIds?: string[],
   ) {
     const response = await apiClient.post(
       `/api/interview-sessions/${sessionId}/utterances`,
-      { transcript, themeId, sectionId: themeId, realtimeItemId, startedAt, endedAt, askedCardId, askedCardIds }
-    );
-    return response.data;
-  },
-
-  async matchPartialTranscript(
-    sessionId: string,
-    transcript: string,
-    themeId: string,
-    activeCardId: string,
-    realtimeItemId?: string
-  ): Promise<{ accepted: boolean; reason?: string }> {
-    const response = await apiClient.post(
-      `/api/interview-sessions/${sessionId}/partial-transcript-match`,
-      { transcript, themeId, sectionId: themeId, activeCardId, realtimeItemId }
+      { transcript, themeId, realtimeItemId, startedAt, endedAt, askedCardIds }
     );
     return response.data;
   },
@@ -209,14 +159,6 @@ export const interviewAPI = {
     return response.data;
   },
 
-  async generateOutputs(sessionId: string): Promise<{
-    brd: { markdown: string; openIssuesCount: number }
-    transcript: { markdown: string; utteranceCount: number }
-  }> {
-    const response = await apiClient.post(`/api/interview-sessions/${sessionId}/outputs/generate`);
-    return response.data;
-  },
-
   async listSessions(params: {
     projectId?: string;
     stakeholderProfileId?: string;
@@ -242,6 +184,3 @@ export const interviewAPI = {
     return response.data;
   },
 };
-
-// Backward-compatible export
-export const presentationAPI = interviewAPI;

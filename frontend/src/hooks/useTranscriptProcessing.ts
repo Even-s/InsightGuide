@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { interviewAPI } from '@/api/interview'
 import { useRealtimeTranscription } from '@/hooks/useRealtimeTranscription'
 import type { PresenterSessionRefs } from './usePresenterSessionRefs'
 import { simplifiedToTraditional } from '@/utils/chineseConverter'
-import { findAskedCards, getActiveCardId } from '@/components/PresenterMode/presenterUtils'
+import { findAskedCards } from '@/components/PresenterMode/presenterUtils'
 import type {
   AudioDiagnosticsSnapshot,
   AudioProcessingProfile,
@@ -39,7 +39,7 @@ export interface TranscriptProcessingResult {
   resetAudioDiagnostics: () => void
 }
 
-export function selectCompletedTranscript(
+function selectCompletedTranscript(
   completedTranscript: string,
   streamedTranscript: string,
 ) {
@@ -81,68 +81,12 @@ export function useTranscriptProcessing({
   const [isPreparingToPresent, setIsPreparingToPresent] = useState(false)
 
   const partialTranscriptRef = useRef('')
-  const partialMatchTimeoutRef = useRef<number | null>(null)
-  const partialMatchInFlightRef = useRef(false)
-  const pendingPartialMatchRef = useRef<string | null>(null)
-  const lastPartialMatchTextRef = useRef('')
   const lastPreviewTextRef = useRef('')
   const pendingSavePromisesRef = useRef(new Set<Promise<unknown>>())
 
-  useEffect(() => {
-    return () => {
-      if (partialMatchTimeoutRef.current) {
-        clearTimeout(partialMatchTimeoutRef.current)
-      }
-    }
-  }, [])
-
-  const sendPartialTranscriptMatch = useCallback((text: string, itemId?: string) => {
-    const activeTheme = refs.currentThemeRef.current
-    const activeSlide = refs.currentSectionRef.current
-    const activeId = activeTheme?.id ?? activeSlide?.id
-    const trimmed = text.trim()
-    const currentActiveCardId = getActiveCardId(refs.cardStatesRef.current, activeId)
-
-    if (!activeId || !currentActiveCardId || !refs.isPresentingRef.current || trimmed.length < 12) return
-    if (trimmed === lastPartialMatchTextRef.current) return
-    if (trimmed.length - lastPartialMatchTextRef.current.length < 8) return
-
-    if (partialMatchInFlightRef.current) {
-      pendingPartialMatchRef.current = trimmed
-      return
-    }
-
-    partialMatchInFlightRef.current = true
-    lastPartialMatchTextRef.current = trimmed
-
-    interviewAPI.matchPartialTranscript(sessionId, trimmed, activeId, currentActiveCardId, itemId)
-      .catch((err) => {
-        console.warn('[useTranscriptProcessing] Partial transcript matching failed:', err)
-      })
-      .finally(() => {
-        partialMatchInFlightRef.current = false
-        const pending = pendingPartialMatchRef.current
-        pendingPartialMatchRef.current = null
-        if (pending && pending !== lastPartialMatchTextRef.current) {
-          sendPartialTranscriptMatch(pending, itemId)
-        }
-      })
-  }, [sessionId, refs])
-
-  const schedulePartialTranscriptMatch = useCallback((text: string, itemId?: string) => {
-    if (partialMatchTimeoutRef.current) {
-      clearTimeout(partialMatchTimeoutRef.current)
-    }
-
-    partialMatchTimeoutRef.current = window.setTimeout(() => {
-      sendPartialTranscriptMatch(text, itemId)
-    }, 800)
-  }, [sendPartialTranscriptMatch])
-
   const previewQuestionCardsFromPartial = useCallback((text: string) => {
     const activeTheme = refs.currentThemeRef.current
-    const activeSlide = refs.currentSectionRef.current
-    const activeId = activeTheme?.id ?? activeSlide?.id
+    const activeId = activeTheme?.id
     const trimmed = text.trim()
 
     if (!activeId || !refs.isPresentingRef.current || trimmed.length < 15) return
@@ -175,17 +119,10 @@ export function useTranscriptProcessing({
   }) => {
     let text = selectCompletedTranscript(payload.transcript, partialTranscriptRef.current)
     const activeTheme = refs.currentThemeRef.current
-    const activeSlide = refs.currentSectionRef.current
-    const activeId = activeTheme?.id ?? activeSlide?.id
+    const activeId = activeTheme?.id
 
     partialTranscriptRef.current = ''
-    lastPartialMatchTextRef.current = ''
     lastPreviewTextRef.current = ''
-    pendingPartialMatchRef.current = null
-    if (partialMatchTimeoutRef.current) {
-      clearTimeout(partialMatchTimeoutRef.current)
-      partialMatchTimeoutRef.current = null
-    }
 
     if (!text || !refs.isPresentingRef.current) {
       setPendingTranscript('')
@@ -204,7 +141,6 @@ export function useTranscriptProcessing({
     const askedCards = activeId
       ? findAskedCards(text, refs.cardStatesRef.current, activeId)
       : []
-    const askedCard = askedCards[0] ?? null
 
     if (askedCards.length > 0) {
       onPreviewDetectedCards?.(askedCards.slice(0, 2))
@@ -219,11 +155,10 @@ export function useTranscriptProcessing({
       payload.itemId,
       payload.startedAt,
       payload.endedAt,
-      askedCard ?? undefined,
       askedCards.length > 0 ? askedCards : undefined,
     )
       .then(() => {
-        if (candidateCards.length > 0 && !askedCard) {
+        if (candidateCards.length > 0 && askedCards.length === 0) {
           onBufferedAnswer()
         }
       })
@@ -260,7 +195,7 @@ export function useTranscriptProcessing({
       lastPreviewTextRef.current = ''
       onClearPreviewDetectedCards?.()
     },
-    onTranscriptDelta: (delta, itemId) => {
+    onTranscriptDelta: (delta) => {
       const convertedDelta = simplifiedToTraditional(delta)
       setPendingTranscript((previous) => {
         const nextTranscript =
@@ -270,7 +205,6 @@ export function useTranscriptProcessing({
 
         partialTranscriptRef.current = nextTranscript
         previewQuestionCardsFromPartial(nextTranscript)
-        schedulePartialTranscriptMatch(nextTranscript, itemId)
         return nextTranscript
       })
     },

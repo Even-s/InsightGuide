@@ -9,12 +9,10 @@ interface MarkdownOutputProps {
 }
 
 type TranscriptEntry =
-  | { type: 'section'; id: string; title: string }
+  | { type: 'heading'; id: string; title: string }
   | {
-      type: 'message'
+      type: 'utterance'
       id: string
-      speaker: 'interviewer' | 'interviewee'
-      label: string
       time?: string
       text: string
     }
@@ -32,16 +30,16 @@ interface ParsedTranscript {
 function parseTranscriptMarkdown(content: string): ParsedTranscript {
   const entries: TranscriptEntry[] = []
   const summary: TranscriptSummary = { title: '訪談逐字稿', items: [] }
-  let currentMessage: Extract<TranscriptEntry, { type: 'message' }> | null = null
+  let currentUtterance: Extract<TranscriptEntry, { type: 'utterance' }> | null = null
 
-  const flushMessage = () => {
-    if (currentMessage?.text.trim()) {
+  const flushUtterance = () => {
+    if (currentUtterance?.text.trim()) {
       entries.push({
-        ...currentMessage,
-        text: currentMessage.text.trim(),
+        ...currentUtterance,
+        text: currentUtterance.text.trim(),
       })
     }
-    currentMessage = null
+    currentUtterance = null
   }
 
   content.split(/\r?\n/).forEach((rawLine, index) => {
@@ -66,68 +64,49 @@ function parseTranscriptMarkdown(content: string): ParsedTranscript {
 
     const sectionMatch = line.match(/^##\s+(.+)$/)
     if (sectionMatch) {
-      flushMessage()
-      entries.push({ type: 'section', id: `section-${index}`, title: sectionMatch[1] })
+      flushUtterance()
+      entries.push({ type: 'heading', id: `heading-${index}`, title: sectionMatch[1] })
       return
     }
 
-    const inlineSpeakerMatch = line.match(/^\*\*(.*?)\*\*\s*(?:\[(.*?)\]|`(.*?)`)?[:：]\s*(.+)$/)
-    if (inlineSpeakerMatch) {
-      flushMessage()
-      const label = normalizeSpeakerLabel(inlineSpeakerMatch[1])
-      currentMessage = {
-        type: 'message',
-        id: `message-${index}`,
-        speaker: getSpeakerSide(label),
-        label,
-        time: inlineSpeakerMatch[2] || inlineSpeakerMatch[3],
-        text: inlineSpeakerMatch[4],
+    const timedLineMatch = line.match(/^(?:[-*]\s*)?(?:\[(.*?)\]|`(.*?)`)\s*(.+)$/)
+    if (timedLineMatch) {
+      flushUtterance()
+      currentUtterance = {
+        type: 'utterance',
+        id: `utterance-${index}`,
+        time: timedLineMatch[1] || timedLineMatch[2],
+        text: timedLineMatch[3],
       }
       return
     }
 
-    const speakerMatch = line.match(/^\*\*(.*?)\*\*\s*(?:`(.*?)`)?$/)
-    if (speakerMatch) {
-      const label = normalizeSpeakerLabel(speakerMatch[1])
-      if (label === '訪問者' || label === '受訪者') {
-        flushMessage()
-        currentMessage = {
-          type: 'message',
-          id: `message-${index}`,
-          speaker: getSpeakerSide(label),
-          label,
-          time: speakerMatch[2],
-          text: '',
-        }
+    if (/^[-*]\s+/.test(line)) {
+      flushUtterance()
+      currentUtterance = {
+        type: 'utterance',
+        id: `utterance-${index}`,
+        text: line.replace(/^[-*]\s+/, ''),
       }
       return
     }
 
-    if (currentMessage) {
-      currentMessage.text = [currentMessage.text, line.replace(/^>\s?/, '')]
+    if (currentUtterance) {
+      currentUtterance.text = [currentUtterance.text, line.replace(/^>\s?/, '')]
         .filter(Boolean)
         .join('\n')
+      return
+    }
+
+    currentUtterance = {
+      type: 'utterance',
+      id: `utterance-${index}`,
+      text: line.replace(/^>\s?/, ''),
     }
   })
 
-  flushMessage()
+  flushUtterance()
   return { summary, entries }
-}
-
-function normalizeSpeakerLabel(label: string) {
-  if (label.includes('受訪者') || label.toLowerCase().includes('interviewee')) return '受訪者'
-  if (
-    label.includes('訪談者') ||
-    label.includes('訪問者') ||
-    label.toLowerCase().includes('interviewer')
-  ) {
-    return '訪問者'
-  }
-  return label.trim()
-}
-
-function getSpeakerSide(label: string): 'interviewer' | 'interviewee' {
-  return label === '受訪者' ? 'interviewee' : 'interviewer'
 }
 
 function TranscriptChat({ content }: { content?: string }) {
@@ -153,7 +132,7 @@ function TranscriptChat({ content }: { content?: string }) {
       </section>
 
       {entries.map((entry) => {
-        if (entry.type === 'section') {
+        if (entry.type === 'heading') {
           return (
             <div key={entry.id} className="flex justify-center">
               <span className="rounded-full bg-cream-200 px-3 py-1 text-xs font-medium text-natural-400">
@@ -163,32 +142,22 @@ function TranscriptChat({ content }: { content?: string }) {
           )
         }
 
-        const isInterviewee = entry.speaker === 'interviewee'
         return (
-          <div
+          <article
             key={entry.id}
-            className={`flex w-full ${isInterviewee ? 'justify-start' : 'justify-end'}`}
+            className="rounded-xl border border-cream-300 bg-white px-4 py-3 shadow-sm"
           >
-            <div className={`max-w-[74%] ${isInterviewee ? 'items-start' : 'items-end'} flex flex-col gap-1`}>
-              <div className={`text-xs text-natural-300 ${isInterviewee ? 'text-left' : 'text-right'}`}>
-                <span>{entry.label}</span>
-                {entry.time ? <span className="ml-2">{entry.time}</span> : null}
-              </div>
-              <div
-                className={`rounded-2xl px-4 py-2.5 text-sm leading-7 shadow-sm ${
-                  isInterviewee
-                    ? 'rounded-bl-md border border-cream-300 bg-white text-natural-700'
-                    : 'rounded-br-md bg-blue-600 text-white'
-                }`}
-              >
-                {entry.text.split('\n').map((line, lineIndex) => (
-                  <p key={`${entry.id}-line-${lineIndex}`} className="whitespace-pre-wrap">
-                    {line}
-                  </p>
-                ))}
-              </div>
+            {entry.time ? (
+              <div className="mb-1 text-xs font-medium text-natural-300">{entry.time}</div>
+            ) : null}
+            <div className="text-sm leading-7 text-natural-700">
+              {entry.text.split('\n').map((line, lineIndex) => (
+                <p key={`${entry.id}-line-${lineIndex}`} className="whitespace-pre-wrap">
+                  {line}
+                </p>
+              ))}
             </div>
-          </div>
+          </article>
         )
       })}
     </div>

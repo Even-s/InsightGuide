@@ -25,7 +25,6 @@ export default defineConfig({
       output: {
         manualChunks: {
           'vendor-opencc': ['opencc-js'],
-          'vendor-recharts': ['recharts'],
         },
       },
     },

@@ -179,6 +179,33 @@ stop_service() {
     esac
 }
 
+kill_listening_port_tree() {
+    local port="$1"
+    local signal="${2:-TERM}"
+    local pids
+
+    pids="$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null | sort -u || true)"
+    [ -z "$pids" ] && return 0
+
+    for pid in $pids; do
+        local ppid
+        local parent_command
+        ppid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')"
+        parent_command="$(ps -o command= -p "$ppid" 2>/dev/null || true)"
+
+        kill "-$signal" "$pid" >/dev/null 2>&1 || true
+
+        # Vite and uvicorn --reload keep a parent watcher that can respawn the
+        # port-listening child. Only stop that parent when it is the known local
+        # dev watcher for this application.
+        case "$parent_command" in
+            *"npm run dev"*|*"uvicorn app.main:app"*)
+                kill "-$signal" "$ppid" >/dev/null 2>&1 || true
+                ;;
+        esac
+    done
+}
+
 wait_for_port_release() {
     local port="$1"
     for _ in $(seq 1 30); do
@@ -188,8 +215,13 @@ wait_for_port_release() {
         sleep 0.1
     done
 
-    lsof -tiTCP:"$port" -sTCP:LISTEN | xargs kill >/dev/null 2>&1 || true
+    kill_listening_port_tree "$port" TERM
     sleep 0.5
+
+    if lsof -tiTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
+        kill_listening_port_tree "$port" KILL
+        sleep 0.5
+    fi
 }
 
 wait_for_process_release() {
@@ -208,11 +240,12 @@ stop_application_services() {
     stop_service backend
 
     # Clean up processes left by older launch scripts.
-    pkill -f "uvicorn app.main:app.*--port ${BACKEND_PORT}" >/dev/null 2>&1 || true
-    pkill -f "celery -A app.workers.celery_app worker" >/dev/null 2>&1 || true
-    pkill -f "$ROOT_DIR/frontend/node_modules/.bin/vite" >/dev/null 2>&1 || true
-    lsof -tiTCP:"$BACKEND_PORT" -sTCP:LISTEN | xargs kill >/dev/null 2>&1 || true
-    lsof -tiTCP:"$FRONTEND_PORT" -sTCP:LISTEN | xargs kill >/dev/null 2>&1 || true
+    kill_listening_port_tree "$BACKEND_PORT" TERM
+    kill_listening_port_tree "$FRONTEND_PORT" TERM
+    pkill -f "$ROOT_DIR/backend/venv/bin/python.*celery -A app.workers.celery_app worker" >/dev/null 2>&1 || true
+    wait_for_port_release "$BACKEND_PORT"
+    wait_for_port_release "$FRONTEND_PORT"
+    wait_for_process_release "$ROOT_DIR/backend/venv/bin/python.*celery -A app.workers.celery_app worker"
 }
 
 celery_ok() {

@@ -128,20 +128,17 @@ class AnswerCompletionScorer:
         completion_score: float,
         is_sufficient: bool,
         has_response: bool,
-        is_partial: bool = False,
     ) -> str:
         """Map completion score to card state.
 
         Args:
             completion_score: The weighted completion score (0-1)
             is_sufficient: Whether sufficiency gates are met
-            has_response: Whether the interviewee has responded at all
-            is_partial: Whether this is from partial (in-flight) transcript
-
+            has_response: Whether the participant has provided relevant content
         Returns:
             Card state string
         """
-        if is_sufficient and not is_partial:
+        if is_sufficient:
             return "sufficient"
 
         if completion_score >= 0.5:

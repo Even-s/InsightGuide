@@ -17,9 +17,7 @@ const COMPLETED_CARD_STATUSES = new Set<CardStatus>([
 
 interface UseCardEventHandlersOptions {
   sessionId: string
-  documentId: string
   currentThemeId: string | undefined
-  currentSectionId: string | undefined
   initialActiveCardId?: string | null
   initialDetectedCardId?: string | null
   sessionStatus?: SessionStatus
@@ -50,9 +48,7 @@ export interface CardEventHandlersResult {
 
 export function useCardEventHandlers({
   sessionId,
-  documentId,
   currentThemeId,
-  currentSectionId,
   initialActiveCardId,
   initialDetectedCardId,
   sessionStatus,
@@ -199,12 +195,12 @@ export function useCardEventHandlers({
   const loadCardStates = useCallback(async () => {
     try {
       setCardsLoading(true)
-      const states = await interviewAPI.getSessionCards(sessionId, documentId)
+      const states = await interviewAPI.getSessionCards(sessionId)
       setCardStates(states)
     } finally {
       setCardsLoading(false)
     }
-  }, [documentId, sessionId])
+  }, [sessionId])
 
   useEffect(() => {
     loadCardStates()
@@ -308,21 +304,20 @@ export function useCardEventHandlers({
       setBufferedAnswerCount(0)
     },
     onMatchingError: (data) => {
-      console.error('Topic matching error received:', data)
+      console.error('Question-card matching error received:', data)
     },
   })
 
   // Followup queue management
   useEffect(() => {
-    const activeSectionId = currentThemeId ?? currentSectionId
-    if (!activeSectionId) return
+    if (!currentThemeId) return
 
     const cardsWithFollowup = cardStates.filter((cs) => {
       const qc = cs.questionCard
-      const isInSection = qc.interviewThemeId === activeSectionId || qc.sectionId === activeSectionId
+      const isInTheme = qc.themeId === currentThemeId
       const hasFollowup = cs.evidence && getEvidenceSuggestedFollowup(cs.evidence as Record<string, unknown>)
       const needsFollowup = cs.status === 'listening' || cs.status === 'probably_sufficient'
-      return isInSection && needsFollowup && hasFollowup && !skippedCards.has(cs.questionCard.id)
+      return isInTheme && needsFollowup && hasFollowup && !skippedCards.has(cs.questionCard.id)
     })
 
     setFollowupQueue((prev) => {
@@ -333,16 +328,15 @@ export function useCardEventHandlers({
       if (newIds.length === 0) return prev
       return [...prev, ...newIds]
     })
-  }, [cardStates, currentThemeId, currentSectionId, skippedCards])
+  }, [cardStates, currentThemeId, skippedCards])
 
   const currentFollowupCard = followupQueue
     .filter((id) => !skippedCards.has(id))
     .map((id) => cardStates.find((cs) => cs.questionCard.id === id))
     .find((cs) => cs && (cs.status === 'listening' || cs.status === 'probably_sufficient'))
 
-  const activeSectionId = currentThemeId ?? currentSectionId
   const followupPrompt = currentFollowupCard
-    ? buildFollowupPrompt([currentFollowupCard], activeSectionId)
+    ? buildFollowupPrompt([currentFollowupCard], currentThemeId)
     : null
 
   const followupQueueLength = followupQueue.filter((id) => !skippedCards.has(id)).length

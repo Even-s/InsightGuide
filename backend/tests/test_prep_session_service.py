@@ -283,7 +283,7 @@ class TestPrepSessionService:
         assert prep_session_service._get_sort_field("unknown") == "created_at"
 
     def test_get_prep_session_interview_sessions(self, mock_db, sample_prep_session):
-        """Test getting presentation sessions for a prep session."""
+        """Test getting interview sessions for a prep session."""
         mock_db.query().filter().first.return_value = sample_prep_session
 
         sessions = [
@@ -300,7 +300,7 @@ class TestPrepSessionService:
         assert result[0].id == "session-1"
 
     def test_get_prep_session_interview_sessions_empty(self, mock_db, sample_prep_session):
-        """Test getting presentation sessions when none exist."""
+        """Test getting interview sessions when none exist."""
         mock_db.query().filter().first.return_value = sample_prep_session
         mock_db.query().filter().order_by().all.return_value = []
 

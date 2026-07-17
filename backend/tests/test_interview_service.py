@@ -79,14 +79,14 @@ class TestInterviewService:
             QuestionCard(
                 id="card-1",
                 document_id="doc-123",
-                section_id="section-1",
+                interview_theme_id="theme-1",
                 question_text="What are the objectives?",
                 importance="must",
             ),
             QuestionCard(
                 id="card-2",
                 document_id="doc-123",
-                section_id="section-1",
+                interview_theme_id="theme-1",
                 question_text="Who are the stakeholders?",
                 importance="should",
             ),
@@ -117,7 +117,6 @@ class TestInterviewService:
             user_id="user-123",
             status="interviewing",
             active_card_id="card-1",
-            active_card_hint_id="card-1",
             active_card_source="user_confirmed",
             active_card_confirmed_at=datetime.utcnow(),
             pending_answer_buffer=["utterance-1"],
@@ -128,7 +127,6 @@ class TestInterviewService:
 
         assert cleared is True
         assert session.active_card_id is None
-        assert session.active_card_hint_id is None
         assert session.active_card_source == "completed"
         assert session.active_card_confirmed_at is None
         assert session.pending_answer_buffer is None
@@ -141,7 +139,6 @@ class TestInterviewService:
             user_id="user-123",
             status="interviewing",
             active_card_id="card-2",
-            active_card_hint_id="card-2",
             active_card_source="user_confirmed",
             created_at=datetime.utcnow(),
         )
@@ -150,37 +147,22 @@ class TestInterviewService:
 
         assert cleared is False
         assert session.active_card_id == "card-2"
-        assert session.active_card_hint_id == "card-2"
         assert session.active_card_source == "user_confirmed"
 
-    def test_continuation_card_state_carries_completed_progress(self):
-        answered_at = datetime.utcnow()
-        source = InterviewCardState(
-            id="state-source",
-            session_id="session-source",
-            question_card_id="card-1",
-            status="sufficient",
-            confidence=0.92,
-            activation_score=0.8,
-            completion_score=0.92,
-            completion_source="ai",
-            answered_at=answered_at,
-            evidence_transcript="第一次訪談的證據",
-            evidence={"satisfiedCriteria": ["criterion-1"]},
-            created_at=answered_at,
-            updated_at=answered_at,
-        )
-
-        carried = interview_service._build_card_state("session-continued", "card-1", source)
+    def test_new_session_card_state_starts_fresh_without_prior_progress(self):
+        carried = interview_service._build_card_state("session-continued", "card-1")
 
         assert carried.session_id == "session-continued"
-        assert carried.status == "sufficient"
-        assert float(carried.completion_score) == pytest.approx(0.92)
-        assert carried.evidence_transcript == "第一次訪談的證據"
-        assert carried.evidence == {"satisfiedCriteria": ["criterion-1"]}
-        assert carried.evidence is not source.evidence
+        assert carried.status == "pending"
+        assert carried.confidence is None
+        assert float(carried.activation_score) == 0
+        assert float(carried.completion_score) == 0
+        assert carried.completion_source is None
+        assert carried.answered_at is None
+        assert carried.evidence_transcript is None
+        assert carried.evidence is None
 
-    def test_continuation_start_does_not_reset_carried_card_progress(self):
+    def test_continuation_start_does_not_reset_session_delta(self):
         session = InterviewSession(
             id="session-continued",
             prep_session_id="prep-123",
@@ -294,9 +276,7 @@ class TestInterviewService:
 
         session_data = InterviewSessionCreate(prepSessionId="prep-123", documentId="doc-123")
 
-        session = interview_service.create_session(
-            db=mock_db, user_id="user-123", session_data=session_data
-        )
+        interview_service.create_session(db=mock_db, user_id="user-123", session_data=session_data)
 
         # Verify session was added
         mock_db.add.assert_called()
@@ -428,7 +408,6 @@ class TestInterviewService:
         sample_card_state.evidence_transcript = "stale transcript"
         sample_card_state.evidence = {"satisfiedCriteria": ["criterion_0"]}
         sample_interview_session.active_card_id = "card-1"
-        sample_interview_session.active_card_hint_id = "card-1"
         sample_interview_session.pending_answer_buffer = ["utt-1"]
         mock_db.query.return_value.filter.return_value.all.return_value = [sample_card_state]
 
@@ -446,7 +425,6 @@ class TestInterviewService:
         assert sample_card_state.evidence_transcript is None
         assert sample_card_state.evidence is None
         assert sample_interview_session.active_card_id is None
-        assert sample_interview_session.active_card_hint_id is None
         assert sample_interview_session.pending_answer_buffer is None
 
     def test_update_session_status_to_paused(self, mock_db, sample_interview_session):
@@ -503,23 +481,23 @@ class TestInterviewService:
         assert session.paused_duration_seconds > 0
         assert session.paused_at is None
 
-    def test_update_session_change_section(self, mock_db, sample_interview_session):
-        """Test changing current section."""
+    def test_update_session_change_theme(self, mock_db, sample_interview_session):
+        """Test changing current interview theme."""
         mock_db.query().filter().first.return_value = sample_interview_session
         mock_db.query().filter().filter().all.return_value = []  # No must cards
 
-        update_data = InterviewSessionUpdate(currentSectionId="section-2")
+        update_data = InterviewSessionUpdate(currentThemeId="theme-2")
 
         session = interview_service.update_session(
             db=mock_db, session_id="session-123", update_data=update_data
         )
 
-        assert session.current_section_id == "section-2"
+        assert session.current_theme_id == "theme-2"
 
     def test_mark_missed_must_cards_at_risk(
         self, mock_db, sample_question_cards, sample_card_state
     ):
-        """Test marking must-ask cards as at_risk when leaving section."""
+        """Test marking must-ask cards as at_risk when leaving a theme."""
         # First call returns question_cards, second returns card_states
         sample_card_state.status = "pending"
         mock_db.query.return_value.filter.return_value.filter.return_value.all.side_effect = [
@@ -532,7 +510,7 @@ class TestInterviewService:
         ]
 
         interview_service._mark_missed_must_cards_at_risk(
-            db=mock_db, session_id="session-123", section_id="section-1"
+            db=mock_db, session_id="session-123", theme_id="theme-1"
         )
 
         # Card state should be updated
@@ -605,8 +583,8 @@ class TestInterviewService:
         from app.schemas.interview import UtteranceCreate
 
         utterance_data = UtteranceCreate(
-            sectionId="section-1",
-            speaker="interviewee",
+            themeId="theme-1",
+            askedCardIds=["card-1", "card-2"],
             transcript="This is my answer",
             startedAt=datetime.utcnow(),
             endedAt=datetime.utcnow(),
@@ -618,7 +596,9 @@ class TestInterviewService:
 
         mock_db.add.assert_called()
         mock_db.commit.assert_called()
-        assert utterance.speaker == "realtime"
+        assert utterance.transcript == "This is my answer"
+        assert utterance.theme_id == "theme-1"
+        assert utterance.asked_card_ids == ["card-1", "card-2"]
 
     def test_get_utterances_all(self, mock_db, sample_interview_session):
         """Test getting all utterances for a session."""
@@ -626,18 +606,14 @@ class TestInterviewService:
             LiveUtterance(
                 id="utt-1",
                 session_id="session-123",
-                speaker="realtime",
                 transcript="Question?",
                 sequence_index=0,
-                is_partial=False,
             ),
             LiveUtterance(
                 id="utt-2",
                 session_id="session-123",
-                speaker="realtime",
                 transcript="Answer",
                 sequence_index=1,
-                is_partial=False,
             ),
         ]
 

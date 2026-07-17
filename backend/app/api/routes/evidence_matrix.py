@@ -1,9 +1,8 @@
 """Evidence Matrix routes."""
 
 import logging
-from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -14,84 +13,76 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _entry_to_response(entry) -> dict:
+def _derived_entry_to_response(project_id: str, entry: dict, index: int) -> dict:
     return {
-        "id": entry.id,
-        "matrixId": entry.matrix_id,
-        "requirementCandidate": entry.requirement_candidate,
-        "category": entry.category,
-        "sourceRoles": entry.source_roles or [],
-        "sourceMemoIds": entry.source_memo_ids or [],
-        "supportingEvidence": entry.supporting_evidence or [],
-        "conflicts": entry.conflicts or [],
-        "validationStatus": entry.validation_status,
-        "missingValidationFrom": entry.missing_validation_from or [],
-        "mentionCount": entry.mention_count,
-        "stakeholderAgreementLevel": entry.stakeholder_agreement_level,
-        "createdAt": entry.created_at.isoformat() if entry.created_at else None,
-        "updatedAt": entry.updated_at.isoformat() if entry.updated_at else None,
+        "id": f"derived_{project_id}_{index + 1}",
+        "matrixId": f"round_aggregate:{project_id}",
+        "requirementCandidate": entry.get("requirement_candidate", ""),
+        "category": entry.get("category"),
+        "sourceRoles": entry.get("source_roles", []) or [],
+        "sourceMemoIds": entry.get("source_memo_ids", []) or [],
+        "supportingEvidence": entry.get("supporting_evidence", []) or [],
+        "conflicts": entry.get("conflicts", []) or [],
+        "validationStatus": entry.get("validation_status", "candidate"),
+        "missingValidationFrom": entry.get("missing_validation_from", []) or [],
+        "mentionCount": entry.get("mention_count", 0),
+        "stakeholderAgreementLevel": entry.get("stakeholder_agreement_level"),
+        "createdAt": None,
+        "updatedAt": None,
+        "editable": False,
+        "source": "round_aggregate",
     }
 
 
 @router.get("/projects/{project_id}/evidence-matrix")
 async def get_evidence_matrix(project_id: str, db: Session = Depends(get_db)):
-    """Get the requirement evidence matrix for a project."""
-    from app.models.requirement_evidence_matrix import (
-        EvidenceMatrixEntry,
-        RequirementEvidenceMatrix,
-    )
+    """Get the requirement evidence matrix derived directly from RoundAggregate."""
+    entries, memos = evidence_matrix_service.build_entries_from_round_aggregates(db, project_id)
+    summary = evidence_matrix_service.summarize_entries(entries, memos)
 
-    matrix = (
-        db.query(RequirementEvidenceMatrix)
-        .filter(RequirementEvidenceMatrix.project_id == project_id)
-        .first()
-    )
-
-    if not matrix:
+    if not memos:
         return {
             "matrix": None,
             "entries": [],
-            "summary": evidence_matrix_service.get_matrix_summary(db, project_id),
+            "summary": summary,
         }
 
-    entries = (
-        db.query(EvidenceMatrixEntry)
-        .filter(EvidenceMatrixEntry.matrix_id == matrix.id)
-        .order_by(EvidenceMatrixEntry.mention_count.desc())
-        .all()
-    )
+    entries = sorted(entries, key=lambda entry: entry.get("mention_count", 0), reverse=True)
 
     return {
         "matrix": {
-            "id": matrix.id,
-            "projectId": matrix.project_id,
-            "status": matrix.status,
-            "memoCount": matrix.memo_count,
-            "lastUpdatedAt": matrix.last_updated_at.isoformat() if matrix.last_updated_at else None,
-            "markdownContent": matrix.markdown_content,
+            "id": f"round_aggregate:{project_id}",
+            "projectId": project_id,
+            "status": "derived",
+            "memoCount": len(memos),
+            "lastUpdatedAt": summary.get("last_updated_at"),
+            "markdownContent": evidence_matrix_service._render_matrix_markdown(entries),
+            "source": "round_aggregate",
+            "editable": False,
         },
-        "entries": [_entry_to_response(e) for e in entries],
-        "summary": evidence_matrix_service.get_matrix_summary(db, project_id),
+        "entries": [
+            _derived_entry_to_response(project_id, entry, index)
+            for index, entry in enumerate(entries)
+        ],
+        "summary": summary,
     }
 
 
 @router.post("/projects/{project_id}/evidence-matrix/refresh")
 async def refresh_evidence_matrix(project_id: str, db: Session = Depends(get_db)):
-    """Refresh (rebuild) the evidence matrix from all insight memos."""
+    """Refresh (rebuild) the evidence matrix from ready RoundAggregate outputs."""
     try:
         matrix = evidence_matrix_service.update_matrix(db, project_id)
     except Exception as e:
         logger.error(f"Failed to refresh evidence matrix: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to refresh evidence matrix")
 
-    from app.models.requirement_evidence_matrix import EvidenceMatrixEntry
-
-    entries = (
-        db.query(EvidenceMatrixEntry)
-        .filter(EvidenceMatrixEntry.matrix_id == matrix.id)
-        .order_by(EvidenceMatrixEntry.mention_count.desc())
-        .all()
+    entries = sorted(
+        getattr(matrix, "_derived_entries", []) or [],
+        key=lambda entry: entry.get("mention_count", 0),
+        reverse=True,
     )
+    memos = getattr(matrix, "_source_memos", []) or []
 
     return {
         "matrix": {
@@ -100,27 +91,15 @@ async def refresh_evidence_matrix(project_id: str, db: Session = Depends(get_db)
             "status": matrix.status,
             "memoCount": matrix.memo_count,
             "lastUpdatedAt": matrix.last_updated_at.isoformat() if matrix.last_updated_at else None,
+            "source": "round_aggregate",
+            "editable": False,
         },
-        "entries": [_entry_to_response(e) for e in entries],
-        "summary": evidence_matrix_service.get_matrix_summary(db, project_id),
+        "entries": [
+            _derived_entry_to_response(project_id, entry, index)
+            for index, entry in enumerate(entries)
+        ],
+        "summary": evidence_matrix_service.summarize_entries(entries, memos, status=matrix.status),
     }
-
-
-@router.put("/evidence-matrix-entries/{entry_id}")
-async def update_matrix_entry(
-    entry_id: str,
-    data: dict,
-    db: Session = Depends(get_db),
-):
-    """Manually update an evidence matrix entry (e.g. mark as rejected)."""
-    allowed_fields = {"validation_status", "category", "conflicts", "missing_validation_from"}
-    update_data = {k: v for k, v in data.items() if k in allowed_fields}
-
-    entry = evidence_matrix_service.update_entry(db, entry_id, update_data)
-    if not entry:
-        raise HTTPException(status_code=404, detail="Entry not found")
-
-    return _entry_to_response(entry)
 
 
 @router.get("/projects/{project_id}/interview-suggestions")

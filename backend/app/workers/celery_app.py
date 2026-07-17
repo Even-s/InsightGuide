@@ -10,7 +10,6 @@ celery_app = Celery(
     backend=settings.CELERY_RESULT_BACKEND,
     include=[
         "app.workers.document_analysis_worker",
-        "app.workers.session_report_worker",
     ],
 )
 

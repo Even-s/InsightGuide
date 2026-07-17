@@ -42,7 +42,6 @@ from app.schemas.question_card import (
     SufficiencyEvidence,
     SufficiencyThresholds,
 )
-from app.schemas.section import SectionResponse, SectionWithQuestionCards
 
 __all__ = [
     # New InsightGuide schemas
@@ -50,8 +49,6 @@ __all__ = [
     "DocumentResponse",
     "DocumentStatus",
     "DocumentAnalysisResponse",
-    "SectionResponse",
-    "SectionWithQuestionCards",
     "QuestionCardSchema",
     "QuestionCardCreate",
     "QuestionCardUpdate",

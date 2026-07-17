@@ -10,7 +10,7 @@ from app.db.session import Base
 
 
 class Document(Base):
-    """Document model - represents a requirements document."""
+    """Document model - represents an interview guide document."""
 
     __tablename__ = "documents"
 
@@ -49,7 +49,6 @@ class Document(Base):
         back_populates="documents",
         foreign_keys=[interview_round_id],
     )
-    sections = relationship("Section", back_populates="document", cascade="all, delete-orphan")
     interview_themes = relationship(
         "InterviewTheme", back_populates="document", cascade="all, delete-orphan"
     )

@@ -31,7 +31,11 @@ from app.schemas.project import (
     StakeholderSlotUpdate,
 )
 from app.services.project_service import project_service
-from app.services.stakeholder_plan_service import stakeholder_plan_service
+from app.services.stakeholder_plan_service import (
+    StakeholderProfileSlotNotFoundError,
+    StakeholderSlotHasProfilesError,
+    stakeholder_plan_service,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -688,8 +692,11 @@ def unskip_stakeholder_slot(slot_id: str, db: Session = Depends(get_db)):
 @router.delete("/stakeholder-slots/{slot_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_stakeholder_slot(slot_id: str, db: Session = Depends(get_db)):
     """Delete a stakeholder slot."""
-    if not stakeholder_plan_service.delete_slot(db, slot_id):
-        raise HTTPException(status_code=404, detail="Slot not found")
+    try:
+        if not stakeholder_plan_service.delete_slot(db, slot_id):
+            raise HTTPException(status_code=404, detail="Slot not found")
+    except StakeholderSlotHasProfilesError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
 
 
 # --- Stakeholder Profiles ---
@@ -728,7 +735,12 @@ def update_stakeholder(
 ):
     """Update a stakeholder profile."""
     update_data = data.model_dump(exclude_none=True)
-    profile = stakeholder_plan_service.update_profile(db, profile_id, update_data)
+    if "slot_id" in data.model_fields_set:
+        update_data["slot_id"] = data.slot_id
+    try:
+        profile = stakeholder_plan_service.update_profile(db, profile_id, update_data)
+    except StakeholderProfileSlotNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     if not profile:
         raise HTTPException(status_code=404, detail="Profile not found")
     return _profile_to_schema(profile)
@@ -813,7 +825,7 @@ def generate_project_brd(project_id: str, db: Session = Depends(get_db)):
             "reason": report.recommendation,
         }
 
-    # Generate project-level BRD from evidence matrix
+    # Generate project-level BRD from RoundAggregate-derived evidence
     try:
         brd_result = brd_generation_service.generate_project_brd(db, project_id)
     except Exception as e:
@@ -837,8 +849,8 @@ def _readiness_to_response(report) -> dict:
         "readinessScore": report.readiness_score,
         "generationMode": report.generation_mode,
         "recommendation": report.recommendation,
-        "readySections": report.ready_sections or [],
-        "insufficientSections": report.insufficient_sections or [],
+        "readyChapters": report.ready_chapters or [],
+        "insufficientChapters": report.insufficient_chapters or [],
         "unresolvedConflicts": report.unresolved_conflicts or [],
         "suggestedNextInterviews": report.suggested_next_interviews or [],
         "stakeholderCoverage": report.stakeholder_coverage,

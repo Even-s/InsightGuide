@@ -5,12 +5,14 @@ import logging
 from typing import List, Optional
 
 import redis.asyncio as async_redis
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.session import get_db
+from app.models.interview_session import InterviewSession
 from app.schemas.interview import (
     InterviewSessionCreate,
     InterviewSessionSchema,
@@ -19,7 +21,6 @@ from app.schemas.interview import (
 from app.schemas.prep_session import (
     PrepSessionCreate,
     PrepSessionListResponse,
-    PrepSessionSchema,
     PrepSessionUpdate,
     PrepSessionWithDocument,
 )
@@ -33,16 +34,30 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def convert_prep_session_to_schema(prep_session) -> PrepSessionSchema:
-    """Convert prep session model to schema."""
-    return PrepSessionSchema(
+def convert_prep_session_to_schema(prep_session, db: Session) -> PrepSessionWithDocument:
+    """Convert prep session model to the canonical prep-session API schema."""
+    usage = billing_service.summarize_documents(db, [prep_session.document_id]).get(
+        prep_session.document_id,
+        billing_service.empty_summary(),
+    )
+    interview_count = (
+        db.query(func.count(InterviewSession.id))
+        .filter(InterviewSession.prep_session_id == prep_session.id)
+        .scalar()
+    )
+
+    return PrepSessionWithDocument(
         id=prep_session.id,
         documentId=prep_session.document_id,
+        documentTitle=prep_session.document.title,
         userId=prep_session.user_id,
         title=prep_session.title,
         status=prep_session.status,
         createdAt=prep_session.created_at,
         updatedAt=prep_session.updated_at,
+        interviewSessionsCount=interview_count or 0,
+        documentCostUsd=usage["totalCostUsd"],
+        documentAiUsage=usage,
     )
 
 
@@ -59,7 +74,7 @@ def convert_interview_session_to_schema(
         documentId=session.document_id,
         userId=session.user_id,
         status=session.status,
-        currentSectionId=session.current_section_id,
+        currentThemeId=session.current_theme_id,
         startedAt=session.started_at,
         endedAt=session.ended_at,
         pausedAt=session.paused_at,
@@ -73,7 +88,7 @@ def convert_interview_session_to_schema(
 @router.get("/", response_model=PrepSessionListResponse)
 async def list_prep_sessions(
     status_filter: Optional[str] = Query(None, alias="status"),
-    document_id: Optional[str] = Query(None, alias="deckId"),
+    document_id: Optional[str] = Query(None, alias="documentId"),
     limit: int = Query(50, ge=1, le=1000),
     offset: int = Query(0, ge=0),
     sort_by: str = Query("createdAt", alias="sortBy", regex="^(createdAt|updatedAt|status)$"),
@@ -85,7 +100,7 @@ async def list_prep_sessions(
 
     Query parameters:
     - status: Filter by prep session status (preparing, ready, archived)
-    - deckId: Filter by document ID
+    - documentId: Filter by document ID
     - limit: Number of prep sessions to return (1-1000, default 50)
     - offset: Number of prep sessions to skip (for pagination)
     - sortBy: Field to sort by (createdAt, updatedAt, status)
@@ -112,7 +127,7 @@ async def list_prep_sessions(
     return result
 
 
-@router.post("/", status_code=status.HTTP_201_CREATED, response_model=PrepSessionSchema)
+@router.post("/", status_code=status.HTTP_201_CREATED, response_model=PrepSessionWithDocument)
 async def create_prep_session(prep_session_data: PrepSessionCreate, db: Session = Depends(get_db)):
     """
     Create a new prep session for a document.
@@ -142,7 +157,7 @@ async def create_prep_session(prep_session_data: PrepSessionCreate, db: Session 
     except Exception as e:
         logger.warning(f"Failed to publish prep session created event: {e}")
 
-    return convert_prep_session_to_schema(prep_session)
+    return convert_prep_session_to_schema(prep_session, db)
 
 
 @router.get("/events")
@@ -223,93 +238,22 @@ async def prep_sessions_global_events_stream():
     )
 
 
-@router.get("/{prep_session_id}", response_model=PrepSessionSchema)
+@router.get("/{prep_session_id}", response_model=PrepSessionWithDocument)
 async def get_prep_session(prep_session_id: str, db: Session = Depends(get_db)):
     """Get prep session by ID."""
     logger.info(f"Retrieving prep session {prep_session_id}")
     prep_session = prep_session_service.get_prep_session(db, prep_session_id)
-    return convert_prep_session_to_schema(prep_session)
+    return convert_prep_session_to_schema(prep_session, db)
 
 
-@router.patch("/{prep_session_id}", response_model=PrepSessionSchema)
+@router.patch("/{prep_session_id}", response_model=PrepSessionWithDocument)
 async def update_prep_session(
     prep_session_id: str, update_data: PrepSessionUpdate, db: Session = Depends(get_db)
 ):
     """Update prep session title or status."""
     logger.info(f"Updating prep session {prep_session_id}")
     prep_session = prep_session_service.update_prep_session(db, prep_session_id, update_data)
-    return convert_prep_session_to_schema(prep_session)
-
-
-@router.post("/fix-stuck-sessions")
-async def fix_stuck_prep_sessions(db: Session = Depends(get_db)):
-    """
-    Fix prep sessions that are stuck in 'preparing' status when their document is already 'analyzed'.
-
-    This endpoint automatically detects and fixes prep sessions that failed to update
-    due to worker restart, errors, or missing update code in older versions.
-
-    Returns a list of fixed prep session IDs.
-    """
-    from datetime import datetime
-
-    from sqlalchemy import and_
-
-    from app.models.document import Document
-    from app.models.prep_session import PrepSession
-    from app.models.question_card import QuestionCard
-
-    logger.info("Starting stuck prep sessions repair")
-
-    # Find all prep sessions in 'preparing' status with analyzed decks
-    stuck_sessions = (
-        db.query(PrepSession, Document)
-        .join(Document, PrepSession.document_id == Document.id)
-        .filter(and_(PrepSession.status == "preparing", Document.status == "analyzed"))
-        .all()
-    )
-
-    if not stuck_sessions:
-        logger.info("No stuck prep sessions found")
-        return {"fixed": [], "count": 0}
-
-    logger.warning(f"Found {len(stuck_sessions)} stuck prep session(s)")
-
-    fixed_ids = []
-    for prep_session, deck in stuck_sessions:
-        # Count topic cards to verify analysis is complete
-        card_count = db.query(QuestionCard).filter(QuestionCard.document_id == deck.id).count()
-
-        logger.info(
-            f"Fixing PrepSession {prep_session.id}: document={deck.id}, "
-            f"cards={card_count}, document_status={deck.status}"
-        )
-
-        prep_session.status = "ready"
-        prep_session.updated_at = datetime.utcnow()
-
-        # Publish SSE event
-        try:
-            event_service.publish_sync(
-                f"prep_{prep_session.id}",
-                {
-                    "type": "PREP_STATUS_CHANGED",
-                    "prepSessionId": prep_session.id,
-                    "status": "ready",
-                    "documentId": deck.id,
-                },
-            )
-            logger.info(f"Published PREP_STATUS_CHANGED event for {prep_session.id}")
-        except Exception as e:
-            logger.warning(f"Failed to publish event for {prep_session.id}: {e}")
-
-        fixed_ids.append(prep_session.id)
-
-    db.commit()
-
-    logger.info(f"Successfully fixed {len(fixed_ids)} prep session(s)")
-
-    return {"fixed": fixed_ids, "count": len(fixed_ids)}
+    return convert_prep_session_to_schema(prep_session, db)
 
 
 @router.delete("/all", status_code=status.HTTP_204_NO_CONTENT)
@@ -343,8 +287,8 @@ async def delete_prep_session(prep_session_id: str, db: Session = Depends(get_db
     - The prep session
     - All interview sessions (cascade)
     - The associated document
-    - All sections (cascade from document)
-    - All topic cards (cascade from document)
+    - All interview themes (cascade from document)
+    - All question cards (cascade from document)
     - S3 files
 
     This action cannot be undone.
@@ -382,7 +326,7 @@ async def create_interview_session_for_prep(prep_session_id: str, db: Session = 
     """
     Create a new interview session under a prep session.
 
-    This initializes an interview session and creates initial card states for all topic cards.
+    This initializes an interview session and creates initial card states for all question cards.
     """
     logger.info(f"Creating interview session for prep session {prep_session_id}")
 

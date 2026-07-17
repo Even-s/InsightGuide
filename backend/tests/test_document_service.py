@@ -34,7 +34,7 @@ class TestDocumentService:
         """Create a sample PDF file upload."""
         file_content = b"%PDF-1.4 test content"
         file = Mock(spec=UploadFile)
-        file.filename = "requirements.pdf"
+        file.filename = "interview-guide.pdf"
         file.content_type = "application/pdf"
         file.file = BytesIO(file_content)
         return file
@@ -44,7 +44,7 @@ class TestDocumentService:
         """Create a sample DOCX file upload."""
         file_content = b"PK\x03\x04 test docx content"
         file = Mock(spec=UploadFile)
-        file.filename = "requirements.docx"
+        file.filename = "interview-guide.docx"
         file.content_type = (
             "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         )
@@ -54,9 +54,9 @@ class TestDocumentService:
     @pytest.fixture
     def sample_md_file(self):
         """Create a sample Markdown file upload."""
-        file_content = b"# Requirements\n\nTest content"
+        file_content = b"# Interview Guide\n\nTest content"
         file = Mock(spec=UploadFile)
-        file.filename = "requirements.md"
+        file.filename = "interview-guide.md"
         file.content_type = "text/markdown"
         file.file = BytesIO(file_content)
         return file
@@ -67,7 +67,7 @@ class TestDocumentService:
         return Document(
             id="doc_123abc",
             user_id="user-123",
-            title="Test Requirements",
+            title="Test Interview Guide",
             source_file_url="https://s3.example.com/documents/doc_123abc/source/file.pdf",
             file_type="pdf",
             status="uploaded",
@@ -138,8 +138,8 @@ class TestDocumentService:
         )
 
         # Execute
-        document = DocumentService.create_document(
-            db=mock_db, file=sample_pdf_file, title="Test Requirements", user_id="user-123"
+        DocumentService.create_document(
+            db=mock_db, file=sample_pdf_file, title="Test Interview Guide", user_id="user-123"
         )
 
         # Verify S3 upload was called
@@ -158,7 +158,7 @@ class TestDocumentService:
         mock_uuid.uuid4().hex = "123abc456def"
         mock_s3.upload_file.return_value = "https://s3.example.com/test.pdf"
 
-        document = DocumentService.create_document(
+        DocumentService.create_document(
             db=mock_db, file=sample_pdf_file, title=None, user_id="user-123"
         )
 

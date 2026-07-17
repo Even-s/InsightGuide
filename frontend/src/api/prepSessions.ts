@@ -54,8 +54,8 @@ export interface InterviewSessionForPrep {
   prepSessionId: string;
   documentId: string;
   userId: string;
-  status: 'idle' | 'preparing' | 'ready' | 'interviewing' | 'paused' | 'section_transitioning' | 'recovering' | 'ended' | 'failed';
-  currentSectionId?: string;
+  status: 'idle' | 'preparing' | 'ready' | 'interviewing' | 'paused' | 'recovering' | 'ended' | 'failed';
+  currentThemeId?: string;
   startedAt?: string;
   endedAt?: string;
   createdAt: string;
@@ -73,24 +73,18 @@ const emptyUsage: AIUsageSummary = {
 };
 
 function normalizePrepSession(raw: Record<string, unknown>): PrepSessionResponse {
-  const documentId = (raw.documentId ?? raw.deckId ?? '') as string;
-  const documentTitle = (raw.documentTitle ?? raw.deckTitle ?? raw.title ?? documentId) as string;
-  const interviewSessionsCount = (raw.interviewSessionsCount ?? raw.presentationSessionsCount ?? 0) as number;
-  const documentCostUsd = (raw.documentCostUsd ?? raw.deckCostUsd ?? 0) as number;
-  const documentAiUsage = (raw.documentAiUsage ?? raw.deckAiUsage ?? emptyUsage) as AIUsageSummary;
-
   return {
     id: raw.id as string,
-    documentId,
-    documentTitle,
+    documentId: raw.documentId as string,
+    documentTitle: raw.documentTitle as string,
     userId: raw.userId as string,
     title: raw.title as string | undefined,
     status: raw.status as PrepSessionResponse['status'],
     createdAt: raw.createdAt as string,
     updatedAt: raw.updatedAt as string,
-    interviewSessionsCount,
-    documentCostUsd,
-    documentAiUsage,
+    interviewSessionsCount: raw.interviewSessionsCount as number,
+    documentCostUsd: raw.documentCostUsd as number,
+    documentAiUsage: (raw.documentAiUsage ?? emptyUsage) as AIUsageSummary,
   };
 }
 
@@ -99,7 +93,7 @@ export const prepSessionsAPI = {
     const response = await apiClient.get('/api/prep-sessions/', {
       params: {
         status: params.status,
-        deckId: params.documentId,
+        documentId: params.documentId,
         limit: params.limit || 50,
         offset: params.offset || 0,
         sortBy: params.sortBy || 'createdAt',

@@ -29,7 +29,7 @@ const listeningCardStates = [
   {
     id: 'state-1',
     sessionId: 'session-1',
-    topicCardId: 'card-1',
+    questionCardId: 'card-1',
     status: 'listening',
     confidence: 0,
     evidence: {
@@ -43,8 +43,7 @@ const listeningCardStates = [
     questionCard: {
       id: 'card-1',
       documentId: 'doc-1',
-      sectionId: '',
-      sectionNumber: 0,
+      themeId: 'theme-1',
       questionText: '目前如何處理掛號？',
       focusText: '掛號流程',
       questionType: 'clarification',

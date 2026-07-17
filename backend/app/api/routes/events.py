@@ -27,7 +27,7 @@ async def stream_session_events(session_id: str, db: Session = Depends(get_db)):
     - QUESTION_PARTIALLY_ANSWERED: Question card partially answered
     - QUESTION_AT_RISK: Important question at risk of being skipped
     - QUESTION_SKIPPED: Question was skipped
-    - SECTION_CHANGED: Section transition
+    - THEME_CHANGED: Interview theme transition
     - SESSION_ENDED: Interview ended
 
     Usage (JavaScript):
@@ -50,7 +50,7 @@ async def stream_session_events(session_id: str, db: Session = Depends(get_db)):
     """
     logger.info(f"SSE stream requested for session {session_id}")
 
-    # Verify session or document exists (deck analysis uses document_id as session key)
+    # Verify session or document exists (guide analysis uses document_id as session key)
     session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
 
     if not session:

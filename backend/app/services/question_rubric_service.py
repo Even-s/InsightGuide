@@ -417,7 +417,7 @@ class QuestionRubricService:
     def _save_rubric_to_card(self, db: Session, card: QuestionCard, rubric: Dict[str, Any]) -> None:
         """
         Save the compiled rubric back to the card's coverage_rule.
-        Maintains backward compatibility by not removing existing fields.
+        Keep existing matching hints while adding the compiled rubric fields.
 
         Args:
             db: Database session

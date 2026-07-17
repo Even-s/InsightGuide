@@ -293,7 +293,7 @@ export default function ProjectSessionsPage() {
                       onClick={() => navigate(`/projects/${card.project.id}/evidence-matrix`)}
                       className="px-4 py-2.5 bg-cream-50 text-natural-700 rounded-lg hover:bg-cream-100 transition-colors font-medium text-sm border border-cream-200"
                     >
-                      查看報告
+                      證據矩陣
                     </button>
                     <button
                       type="button"

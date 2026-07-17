@@ -6,9 +6,7 @@ const DocumentUploadPage = lazy(() => import('./routes/DocumentUploadPage'))
 const HomePage = lazy(() => import('./routes/HomePage'))
 const EditorPage = lazy(() => import('./routes/EditorPage'))
 const PresenterPage = lazy(() => import('./routes/PresenterPage'))
-const InterviewReportPage = lazy(() => import('./routes/InterviewReportPage'))
 const PrepSessionListPage = lazy(() => import('./routes/PrepSessionListPage'))
-const BRDGenerationPage = lazy(() => import('./routes/BRDGenerationPage'))
 const SessionLogPage = lazy(() => import('./routes/SessionLogPage'))
 const ProjectDetailPage = lazy(() => import('./routes/ProjectDetailPage'))
 const ProjectSessionsPage = lazy(() => import('./routes/ProjectSessionsPage'))
@@ -32,8 +30,6 @@ function AnimatedRoutes() {
         <Route path="/editor/:documentId" element={<EditorPage />} />
         <Route path="/interview/:documentId" element={<PresenterPage />} />
         <Route path="/interview/session/:sessionId" element={<PresenterPage />} />
-        <Route path="/interview/:documentId/report/:sessionId" element={<InterviewReportPage />} />
-        <Route path="/interview/:sessionId/brd" element={<BRDGenerationPage />} />
         <Route path="/sessions/:sessionId/insight-memo" element={<InsightMemoPage />} />
         <Route path="/sessions/:sessionId/log" element={<SessionLogPage />} />
       </Routes>

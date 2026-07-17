@@ -25,5 +25,4 @@ class User(Base):
     interview_sessions = relationship(
         "InterviewSession", back_populates="user", cascade="all, delete-orphan"
     )
-    brd_drafts = relationship("BRDDraft", back_populates="user", cascade="all, delete-orphan")
     projects = relationship("Project", back_populates="user", cascade="all, delete-orphan")

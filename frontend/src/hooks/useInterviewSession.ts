@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { interviewAPI } from '../api/interview';
-import type { InterviewSession, SessionStatus, DocumentSection } from '../types/interview';
+import type { InterviewSession, SessionStatus } from '../types/interview';
 import apiClient from '../api/client';
 
 export interface InterviewTheme {
@@ -45,7 +45,6 @@ function calculateActiveElapsedMs(session: InterviewSession) {
 export function useInterviewSession(sessionId: string) {
   const [session, setSession] = useState<InterviewSession | null>(null);
   const [themes, setThemes] = useState<InterviewTheme[]>([]);
-  const [sections, setSections] = useState<DocumentSection[]>([]);
   const [currentThemeIndex, setCurrentThemeIndex] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
   const [themePreparing, setThemePreparing] = useState(false);
@@ -92,20 +91,14 @@ export function useInterviewSession(sessionId: string) {
 
       // Load themes from interview plan
       let loadedThemes: InterviewTheme[] = [];
-      try {
-        const planResponse = await apiClient.get(`/api/documents/${sessionData.documentId}/interview-plan`);
-        const plan = planResponse.data;
-        loadedThemes = (plan.themes || []).filter((t: InterviewTheme) => t.isEnabled);
-        setThemes(loadedThemes);
+      const planResponse = await apiClient.get(`/api/documents/${sessionData.documentId}/interview-plan`);
+      const plan = planResponse.data;
+      loadedThemes = (plan.themes || []).filter((t: InterviewTheme) => t.isEnabled);
+      setThemes(loadedThemes);
 
-        // Mark already-ready themes
-        for (const t of loadedThemes) {
-          if (t.rubricReady) preparedThemes.current.add(t.id);
-        }
-      } catch {
-        // Fallback: load sections when no themes available
-        const sectionsData = await interviewAPI.getSections(sessionData.documentId);
-        setSections(sectionsData);
+      // Mark already-ready themes
+      for (const t of loadedThemes) {
+        if (t.rubricReady) preparedThemes.current.add(t.id);
       }
 
       // Prepare first theme rubrics (blocking before UI becomes ready)
@@ -130,20 +123,18 @@ export function useInterviewSession(sessionId: string) {
   useEffect(() => { loadSession(); }, [loadSession]);
 
   const currentTheme = themes[currentThemeIndex] ?? null;
-  const currentSection = sections[currentThemeIndex] ?? null;
 
   const startPresenting = useCallback(async () => {
     try {
-      const payload: { status: SessionStatus; currentSectionId?: string } = { status: 'interviewing' }
-      const activeSectionId = currentTheme?.id ?? currentSection?.id
-      if (activeSectionId) payload.currentSectionId = activeSectionId
+      const payload: { status: SessionStatus; currentThemeId?: string } = { status: 'interviewing' }
+      if (currentTheme?.id) payload.currentThemeId = currentTheme.id
 
       const updated = await interviewAPI.updateSession(sessionId, payload);
       setSession(updated);
     } catch (err) {
       console.error('Failed to start:', err);
     }
-  }, [sessionId, currentTheme, currentSection]);
+  }, [sessionId, currentTheme]);
 
   const pausePresenting = useCallback(async () => {
     try {
@@ -155,11 +146,11 @@ export function useInterviewSession(sessionId: string) {
   }, [sessionId]);
 
   const nextTheme = useCallback(async () => {
-    const maxIndex = themes.length > 0 ? themes.length - 1 : sections.length - 1;
+    const maxIndex = themes.length - 1;
     if (currentThemeIndex < maxIndex) {
       const newIndex = currentThemeIndex + 1;
       setCurrentThemeIndex(newIndex);
-      const nextId = themes[newIndex]?.id ?? sections[newIndex]?.id;
+      const nextId = themes[newIndex]?.id;
 
       // Ensure theme rubrics are ready before evaluation can start
       if (nextId && themes[newIndex] && !preparedThemes.current.has(nextId)) {
@@ -167,18 +158,18 @@ export function useInterviewSession(sessionId: string) {
       }
 
       try {
-        await interviewAPI.updateSession(sessionId, { currentSectionId: nextId });
+        await interviewAPI.updateSession(sessionId, { currentThemeId: nextId });
       } catch (err) {
-        console.warn('Failed to update current section:', err);
+        console.warn('Failed to update current theme:', err);
       }
     }
-  }, [sessionId, themes, sections, currentThemeIndex, prepareTheme]);
+  }, [sessionId, themes, currentThemeIndex, prepareTheme]);
 
   const previousTheme = useCallback(async () => {
     if (currentThemeIndex > 0) {
       const newIndex = currentThemeIndex - 1;
       setCurrentThemeIndex(newIndex);
-      const prevId = themes[newIndex]?.id ?? sections[newIndex]?.id;
+      const prevId = themes[newIndex]?.id;
 
       // Ensure theme rubrics are ready
       if (prevId && themes[newIndex] && !preparedThemes.current.has(prevId)) {
@@ -186,12 +177,12 @@ export function useInterviewSession(sessionId: string) {
       }
 
       try {
-        await interviewAPI.updateSession(sessionId, { currentSectionId: prevId });
+        await interviewAPI.updateSession(sessionId, { currentThemeId: prevId });
       } catch (err) {
-        console.warn('Failed to update current section:', err);
+        console.warn('Failed to update current theme:', err);
       }
     }
-  }, [sessionId, themes, sections, currentThemeIndex, prepareTheme]);
+  }, [sessionId, themes, currentThemeIndex, prepareTheme]);
 
   const endSession = useCallback(async () => {
     try {
@@ -222,9 +213,6 @@ export function useInterviewSession(sessionId: string) {
     themes,
     currentTheme,
     currentThemeIndex,
-    sections,
-    currentSection,
-    currentSectionIndex: currentThemeIndex,
     isLoading,
     themePreparing,
     error,

@@ -22,6 +22,14 @@ EXCLUSIVE_RATIONALE_PREFIX = re.compile(
 )
 
 
+class StakeholderSlotHasProfilesError(ValueError):
+    """Raised when trying to delete a role slot that still has assigned participants."""
+
+
+class StakeholderProfileSlotNotFoundError(ValueError):
+    """Raised when assigning a profile to a missing slot."""
+
+
 ROLE_CATEGORIES = [
     "business",
     "product",
@@ -810,7 +818,25 @@ class StakeholderPlanService:
         slot = db.query(StakeholderSlot).filter(StakeholderSlot.id == slot_id).first()
         if not slot:
             return False
+        project_id = slot.project_id
+        deleted_order = slot.order_index
+
+        assigned_profiles = (
+            db.query(StakeholderProfile.id).filter(StakeholderProfile.slot_id == slot_id).count()
+        )
+        if assigned_profiles > 0:
+            raise StakeholderSlotHasProfilesError(
+                "此角色底下仍有已指派受訪者，請先移除受訪者後再刪除角色。"
+            )
+
         db.delete(slot)
+        db.query(StakeholderSlot).filter(
+            StakeholderSlot.project_id == project_id,
+            StakeholderSlot.order_index > deleted_order,
+        ).update(
+            {StakeholderSlot.order_index: StakeholderSlot.order_index - 1},
+            synchronize_session=False,
+        )
         db.commit()
         return True
 
@@ -858,8 +884,23 @@ class StakeholderPlanService:
         profile = db.query(StakeholderProfile).filter(StakeholderProfile.id == profile_id).first()
         if not profile:
             return None
+
+        if "slot_id" in data and data["slot_id"] is not None:
+            target_slot = (
+                db.query(StakeholderSlot)
+                .filter(
+                    StakeholderSlot.id == data["slot_id"],
+                    StakeholderSlot.project_id == profile.project_id,
+                )
+                .first()
+            )
+            if not target_slot:
+                raise StakeholderProfileSlotNotFoundError("找不到要指派的角色。")
+
         for key, value in data.items():
-            if value is not None and hasattr(profile, key):
+            if key == "slot_id" and hasattr(profile, key):
+                setattr(profile, key, value)
+            elif value is not None and hasattr(profile, key):
                 setattr(profile, key, value)
         profile.updated_at = datetime.utcnow()
         db.commit()
@@ -919,7 +960,6 @@ class StakeholderPlanService:
 
         for slot in slots:
             slot_profiles = [p for p in profiles if p.slot_id == slot.id]
-            interviewed = [p for p in slot_profiles if p.status == "interviewed"]
             interviews_done = sum(p.interview_count for p in slot_profiles)
 
             detail = {
@@ -1011,7 +1051,7 @@ class StakeholderPlanService:
         db.commit()
 
     def update_plan_after_interview(
-        self, db: Session, project_id: str, memo_id: str
+        self, db: Session, project_id: str, _memo_id: str
     ) -> Dict[str, Any]:
         """Update plan after an interview completes (called after Insight Memo generation).
 

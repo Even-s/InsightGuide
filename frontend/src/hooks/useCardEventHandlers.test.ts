@@ -11,7 +11,7 @@ vi.mock('@/api/interview', () => ({
       {
         id: 'cs-1',
         sessionId: 'session-1',
-        topicCardId: 'card-1',
+        questionCardId: 'card-1',
         status: 'pending',
         confidence: 0,
         evidenceTranscript: null,
@@ -20,10 +20,10 @@ vi.mock('@/api/interview', () => ({
         updatedAt: '2026-01-01',
         questionCard: {
           id: 'card-1',
+          documentId: 'doc-1',
           focusText: 'Focus 1',
           questionText: 'Question 1',
-          interviewThemeId: 'theme-1',
-          sectionId: '',
+          themeId: 'theme-1',
           status: 'pending',
           confidence: 0,
           importance: 'must',
@@ -54,9 +54,7 @@ describe('useCardEventHandlers', () => {
     const { result } = renderHook(() =>
       useCardEventHandlers({
         sessionId: 'session-1',
-        documentId: 'doc-1',
         currentThemeId: 'theme-1',
-        currentSectionId: undefined,
       }),
     )
 
@@ -71,9 +69,7 @@ describe('useCardEventHandlers', () => {
     const { result } = renderHook(() =>
       useCardEventHandlers({
         sessionId: 'session-1',
-        documentId: 'doc-1',
         currentThemeId: 'theme-1',
-        currentSectionId: undefined,
       }),
     )
 
@@ -93,9 +89,7 @@ describe('useCardEventHandlers', () => {
     const { result } = renderHook(() =>
       useCardEventHandlers({
         sessionId: 'session-1',
-        documentId: 'doc-1',
         currentThemeId: 'theme-1',
-        currentSectionId: undefined,
       }),
     )
 
@@ -110,9 +104,7 @@ describe('useCardEventHandlers', () => {
     const { result } = renderHook(() =>
       useCardEventHandlers({
         sessionId: 'session-1',
-        documentId: 'doc-1',
         currentThemeId: 'theme-1',
-        currentSectionId: undefined,
       }),
     )
 
@@ -129,9 +121,7 @@ describe('useCardEventHandlers', () => {
     const { result } = renderHook(() =>
       useCardEventHandlers({
         sessionId: 'session-1',
-        documentId: 'doc-1',
         currentThemeId: 'theme-1',
-        currentSectionId: undefined,
         initialActiveCardId: 'card-1',
       }),
     )
@@ -146,7 +136,7 @@ describe('useCardEventHandlers', () => {
       {
         id: 'cs-1',
         sessionId: 'session-1',
-        topicCardId: 'card-1',
+        questionCardId: 'card-1',
         status: 'sufficient',
         confidence: 1,
         evidenceTranscript: '完整回答',
@@ -159,9 +149,7 @@ describe('useCardEventHandlers', () => {
           focusText: 'Focus 1',
           questionText: 'Question 1',
           questionType: 'clarification',
-          interviewThemeId: 'theme-1',
-          sectionId: '',
-          sectionNumber: 0,
+          themeId: 'theme-1',
           status: 'sufficient',
           confidence: 1,
           importance: 'must',
@@ -185,9 +173,7 @@ describe('useCardEventHandlers', () => {
     const { result } = renderHook(() =>
       useCardEventHandlers({
         sessionId: 'session-1',
-        documentId: 'doc-1',
         currentThemeId: 'theme-1',
-        currentSectionId: undefined,
         initialActiveCardId: 'card-1',
       }),
     )
@@ -203,9 +189,7 @@ describe('useCardEventHandlers', () => {
     const { result } = renderHook(() =>
       useCardEventHandlers({
         sessionId: 'session-1',
-        documentId: 'doc-1',
         currentThemeId: 'theme-1',
-        currentSectionId: undefined,
         initialActiveCardId: null,
         initialDetectedCardId: 'card-1',
       }),
@@ -221,9 +205,7 @@ describe('useCardEventHandlers', () => {
     const { result } = renderHook(() =>
       useCardEventHandlers({
         sessionId: 'session-1',
-        documentId: 'doc-1',
         currentThemeId: 'theme-1',
-        currentSectionId: undefined,
       }),
     )
 
@@ -251,9 +233,7 @@ describe('useCardEventHandlers', () => {
     const { result } = renderHook(() =>
       useCardEventHandlers({
         sessionId: 'session-1',
-        documentId: 'doc-1',
         currentThemeId: 'theme-1',
-        currentSectionId: undefined,
       }),
     )
 
@@ -287,9 +267,7 @@ describe('useCardEventHandlers', () => {
     const { result } = renderHook(() =>
       useCardEventHandlers({
         sessionId: 'session-1',
-        documentId: 'doc-1',
         currentThemeId: 'theme-1',
-        currentSectionId: undefined,
         initialDetectedCardId: 'card-1',
       }),
     )
@@ -316,9 +294,7 @@ describe('useCardEventHandlers', () => {
     const { result } = renderHook(() =>
       useCardEventHandlers({
         sessionId: 'session-1',
-        documentId: 'doc-1',
         currentThemeId: 'theme-1',
-        currentSectionId: undefined,
         initialActiveCardId: 'card-1',
       }),
     )
@@ -348,9 +324,7 @@ describe('useCardEventHandlers', () => {
     const { result } = renderHook(() =>
       useCardEventHandlers({
         sessionId: 'session-1',
-        documentId: 'doc-1',
         currentThemeId: 'theme-1',
-        currentSectionId: undefined,
       }),
     )
 

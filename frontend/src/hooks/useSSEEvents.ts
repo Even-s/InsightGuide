@@ -148,7 +148,7 @@ export function useSSEEvents(sessionId: string, options: UseSSEEventsOptions = {
 
     eventSource.addEventListener('MATCHING_ERROR', (e) => {
       const data = JSON.parse(e.data);
-      console.error('Topic matching error:', data);
+      console.error('Question-card matching error:', data);
       optionsRef.current.onMatchingError?.(data);
     });
 

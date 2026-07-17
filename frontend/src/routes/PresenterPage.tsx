@@ -29,7 +29,7 @@ export default function PresenterPage() {
       return
     }
 
-    setError('Missing session or deck id')
+    setError('Missing session or document id')
     setIsLoading(false)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [documentId, urlSessionId])
@@ -84,7 +84,7 @@ export default function PresenterPage() {
         } catch { /* stakeholder lookup failed */ }
       }
 
-      // Check if an active (non-ended) session already exists for this deck
+      // Check if an active (non-ended) session already exists for this guide document
       try {
         const sessionsRes = await apiClient.get('/api/interview-sessions', {
           params: { projectId: resolvedProjectId, limit: 50 }

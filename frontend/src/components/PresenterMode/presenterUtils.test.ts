@@ -7,8 +7,7 @@ function cardState(id: string, questionText: string): CardState {
     status: 'pending',
     questionCard: {
       id,
-      interviewThemeId: 'theme-1',
-      sectionId: '',
+      themeId: 'theme-1',
       questionText,
       focusText: questionText,
     },

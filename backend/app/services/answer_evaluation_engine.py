@@ -62,7 +62,7 @@ class AnswerEvaluationEngine:
 
         mustMentionElements are the visible "important elements" in interview mode.
         semanticAnchors are matching hints that normalize into at most three
-        element IDs, with anchor IDs accepted as compatibility aliases.
+        element IDs for scoring.
         """
         coverage_rule = question_card_service.normalize_coverage_rule_for_important_elements(
             getattr(card, "coverage_rule", None) or {}
@@ -110,8 +110,6 @@ class AnswerEvaluationEngine:
         self,
         card: QuestionCard,
         completion: Dict[str, Any],
-        completion_percentage: float = 0,  # noqa: ARG002
-        is_sufficient: bool = False,  # noqa: ARG002
     ) -> tuple[List[str], List[str]]:
         """Keep AI completion percentage and element IDs internally consistent."""
         required_element_ids = set(self._get_required_element_ids(card))
@@ -137,15 +135,13 @@ class AnswerEvaluationEngine:
         session_id: str,
         utterance_id: str,
         utterance_text: str,
-        section_id: str,
-        speaker: str = "interviewee",
-        asked_card_id: Optional[str] = None,
+        theme_id: str,
         asked_card_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
-        Process a new speaker-neutral utterance.
+        Process a new role-neutral Realtime utterance.
 
-        Realtime transcripts no longer distinguish interviewer and interviewee.
+        Realtime transcripts no longer assign participant roles.
         Routing is therefore based on utterance function: question-like text
         suggests related cards, while answer-like text may add evidence only
         to cards that have already been confirmed by a human.
@@ -159,10 +155,10 @@ class AnswerEvaluationEngine:
 
             logger.info(
                 f"Processing utterance for session={session_id}, "
-                f"section={section_id}, speaker={speaker}, text='{utterance_text[:50]}...'"
+                f"theme={theme_id}, text='{utterance_text[:50]}...'"
             )
 
-            explicit_card_ids = self._normalize_card_ids(asked_card_ids, asked_card_id)
+            explicit_card_ids = self._normalize_card_ids(asked_card_ids)
 
             # The frontend-provided cards are explicit routing decisions and
             # must win over heuristic utterance classification. This prevents
@@ -174,14 +170,11 @@ class AnswerEvaluationEngine:
                     session_id,
                     utterance_id,
                     utterance_text,
-                    section_id,
-                    asked_card_id,
+                    theme_id,
                     explicit_card_ids,
                 )
             else:
-                return self._evaluate_answer(
-                    db, session_id, utterance_id, utterance_text, section_id, speaker
-                )
+                return self._evaluate_answer(db, session_id, utterance_id, utterance_text, theme_id)
 
         except Exception as e:
             logger.error(f"Error processing utterance: {str(e)}", exc_info=True)
@@ -191,11 +184,10 @@ class AnswerEvaluationEngine:
     def _normalize_card_ids(
         self,
         card_ids: Optional[List[str]] = None,
-        fallback_card_id: Optional[str] = None,
     ) -> List[str]:
         """Return unique, non-empty card ids while preserving order."""
         normalized: List[str] = []
-        for card_id in [*(card_ids or []), fallback_card_id]:
+        for card_id in card_ids or []:
             if not card_id or card_id in normalized:
                 continue
             normalized.append(card_id)
@@ -207,8 +199,7 @@ class AnswerEvaluationEngine:
         session_id: str,
         utterance_id: str,
         utterance_text: str,
-        section_id: str,
-        asked_card_id: Optional[str] = None,
+        theme_id: str,
         asked_card_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """Suggest one or more related cards for a question-like utterance.
@@ -217,7 +208,7 @@ class AnswerEvaluationEngine:
         change the current card; a human confirmation via /active-card is
         required before transcripts are attributed to that card.
         """
-        explicit_card_ids = self._normalize_card_ids(asked_card_ids, asked_card_id)
+        explicit_card_ids = self._normalize_card_ids(asked_card_ids)
 
         # Find target cards
         if explicit_card_ids:
@@ -236,7 +227,7 @@ class AnswerEvaluationEngine:
             )
         else:
             target_candidates = self.find_candidate_cards(
-                db, session_id, section_id, utterance_text, top_k=3
+                db, session_id, theme_id, utterance_text, top_k=3
             )
             best_score = (
                 float(target_candidates[0].get("score", 0) or 0) if target_candidates else 0
@@ -311,14 +302,12 @@ class AnswerEvaluationEngine:
         self,
         db: Session,
         session_id: str,
-        section_id: str,
+        theme_id: str,
         question_text: str,
         top_k: int = 3,
     ) -> List[str]:
         """Find one primary card plus close related cards for a question-like utterance."""
-        candidates = self.find_candidate_cards(
-            db, session_id, section_id, question_text, top_k=top_k
-        )
+        candidates = self.find_candidate_cards(db, session_id, theme_id, question_text, top_k=top_k)
         if not candidates:
             return []
 
@@ -334,14 +323,14 @@ class AnswerEvaluationEngine:
         self,
         db: Session,
         session_id: str,
-        section_id: str,
+        theme_id: str,
         question_text: str,
     ) -> Optional[str]:
         """Find which card a question is about using text similarity. No state bonus."""
         candidates = self._load_candidate_cards(
             db,
             session_id,
-            section_id,
+            theme_id,
             statuses=["pending", "listening", "probably_sufficient", "at_risk"],
         )
         if not candidates:
@@ -368,7 +357,7 @@ class AnswerEvaluationEngine:
         self,
         db: Session,
         session_id: str,
-        section_id: str,
+        theme_id: str,
         question_text: str,
         top_k: int = 3,
     ) -> List[Dict[str, Any]]:
@@ -376,7 +365,7 @@ class AnswerEvaluationEngine:
         candidates = self._load_candidate_cards(
             db,
             session_id,
-            section_id,
+            theme_id,
             statuses=["pending", "listening", "probably_sufficient", "at_risk"],
         )
         if not candidates:
@@ -411,16 +400,14 @@ class AnswerEvaluationEngine:
         session_id: str,
         utterance_id: str,
         utterance_text: str,
-        section_id: str,
-        speaker: str = "interviewee",
+        theme_id: str,
     ) -> List[Dict[str, Any]]:
-        """Evaluate speaker-neutral content for one or more related cards."""
+        """Evaluate role-neutral content for one or more related cards."""
         from app.models.interview_session import InterviewSession
 
         session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
         active_card_id = session.active_card_id if session else None
         active_source = session.active_card_source if session else None
-        active_hint_id = active_card_id or (session.active_card_hint_id if session else None)
 
         manual_selection_sources = {
             "user_confirmed",
@@ -430,7 +417,7 @@ class AnswerEvaluationEngine:
         is_manual_selection = bool(active_card_id) and active_source in manual_selection_sources
 
         # If no card has been confirmed by a human yet, keep a short replay
-        # buffer.  This lets the interviewer confirm an AI suggestion a moment
+        # buffer. This lets the facilitator confirm an AI suggestion a moment
         # late without losing the answer segment, while avoiding unlimited
         # attribution of older small talk to the next selected card.
         if not is_manual_selection and session:
@@ -444,11 +431,11 @@ class AnswerEvaluationEngine:
             )
             return []
 
-        primary_card_id = active_card_id if is_manual_selection else active_hint_id
+        primary_card_id = active_card_id if is_manual_selection else None
         candidate_cards = self._load_candidate_cards(
             db,
             session_id,
-            section_id,
+            theme_id,
             statuses=["listening", "probably_sufficient", "at_risk"],
         )
         if not candidate_cards:
@@ -495,7 +482,7 @@ class AnswerEvaluationEngine:
         recent_context = self._build_structured_context(
             db,
             session_id,
-            section_id,
+            theme_id,
             utterance_text,
             filtered_candidates,
         )
@@ -530,7 +517,6 @@ class AnswerEvaluationEngine:
                 utterance_id=utterance_id,
                 utterance_text=utterance_text,
                 judgment=judgment,
-                is_partial=False,
                 model_used="gpt-5.4-mini",
             )
             if update:
@@ -541,90 +527,6 @@ class AnswerEvaluationEngine:
         db.commit()
         logger.info(f"Answer evaluated: {len(updates)} cards updated")
         return updates
-
-    def process_partial_transcript(
-        self,
-        db: Session,
-        session_id: str,
-        transcript_text: str,
-        section_id: str,
-        speaker: str = "interviewee",  # noqa: ARG002
-        active_card_id: Optional[str] = None,
-    ) -> List[Dict[str, Any]]:
-        """
-        Process an in-flight transcript buffer without creating an utterance row.
-
-        This lets interview mode start card matching while Realtime transcription
-        is still streaming deltas. The completed transcript is still saved later
-        through create_utterance().
-        """
-        transcript_text = transcript_text.strip()
-        if len(transcript_text) < 8:
-            return []
-
-        try:
-            logger.info(
-                "Processing partial transcript for session=%s, section=%s, text='%s...'",
-                session_id,
-                section_id,
-                transcript_text[:30],
-            )
-
-            # Use a temporary ID for partial transcripts
-            temp_utterance_id = f"partial_{datetime.utcnow().timestamp()}"
-
-            candidate_cards = self._load_candidate_cards(
-                db,
-                session_id,
-                section_id,
-                active_card_id=active_card_id,
-                statuses=["listening"],
-            )
-            if not candidate_cards:
-                logger.info("No active card found for partial transcript")
-                return []
-
-            judgments = self._batch_judge_answer_sufficiency(
-                transcript_text, candidate_cards, session_id=session_id, db=db
-            )
-
-            # Phase 2: Cap partial transcript judgments at probably_sufficient
-            # Partial transcripts cannot produce "sufficient" state
-            for judgment in judgments:
-                if judgment.get("is_covered") or judgment.get("is_sufficient"):
-                    judgment["is_covered"] = False
-                    judgment["is_sufficient"] = False
-                    # Cap confidence to prevent sufficient state
-                    if judgment.get("confidence", 0) >= 0.85:
-                        judgment["confidence"] = 0.80
-
-            updates = []
-            for card_data, judgment in zip(candidate_cards, judgments):
-                update = self._update_card_state(
-                    db=db,
-                    card_state=card_data["state"],
-                    card=card_data["card"],
-                    utterance_id=temp_utterance_id,
-                    utterance_text=transcript_text,
-                    judgment=judgment,
-                    is_partial=True,
-                    model_used="gpt-5.4-mini",
-                )
-                if update:
-                    updates.append(update)
-
-            db.commit()
-            logger.info(
-                "Processed partial transcript for active card: %s/%s cards updated",
-                len(updates),
-                len(candidate_cards),
-            )
-            return updates
-
-        except Exception as e:
-            logger.error(f"Error processing partial transcript: {str(e)}", exc_info=True)
-            db.rollback()
-            return []
 
     def _chinese_overlap_score(self, text: str, reference: str, n: int = 2) -> float:
         """Calculate character n-gram overlap between text and reference.
@@ -767,12 +669,12 @@ class AnswerEvaluationEngine:
         self,
         db: Session,
         session_id: str,
-        section_id: str,
+        theme_id: str,
         active_card_id: Optional[str] = None,
         statuses: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
-        """Load question cards that need evaluation for the current section."""
-        # Get all card states for cards in this section that are not yet sufficient
+        """Load question cards that need evaluation for the current theme."""
+        # Get all card states for cards in this theme that are not yet sufficient
         from app.models.interview_session import InterviewSession
 
         session = db.query(InterviewSession).filter(InterviewSession.id == session_id).first()
@@ -780,17 +682,12 @@ class AnswerEvaluationEngine:
         if not session:
             return []
 
-        from sqlalchemy import or_
-
-        # Get question cards matching by theme_id or section_id
+        # Get question cards matching the active interview theme.
         cards = (
             db.query(QuestionCard)
             .filter(
                 QuestionCard.document_id == session.document_id,
-                or_(
-                    QuestionCard.interview_theme_id == section_id,
-                    QuestionCard.section_id == section_id,
-                ),
+                QuestionCard.interview_theme_id == theme_id,
             )
             .all()
         )
@@ -828,26 +725,23 @@ class AnswerEvaluationEngine:
         self,
         db: Session,
         session_id: str,
-        section_id: str,  # noqa: ARG002 – reserved for future theme filtering
+        theme_id: str,  # noqa: ARG002 – reserved for future theme filtering
         current_text: str,
         candidate_cards: List[Dict[str, Any]],  # noqa: ARG002 – reserved for enriched context
     ) -> str:
         """Build structured context for LLM evaluation.
 
-        Includes recent utterances for the current theme/section so GPT can judge
+        Includes recent utterances for the current theme so GPT can judge
         cumulative sufficiency (not just the latest sentence in isolation).
         Limited to last 10 utterances to avoid unbounded scans as interviews grow long.
         Capped at ~2000 chars to stay within reasonable prompt size.
-
-        Note: LiveUtterance model does not have theme_id or section_id fields,
-        so we currently fetch all utterances for the session. Future enhancement
-        could add theme_id filtering if the model is updated.
         """
         # Fetch last 10 utterances ordered by sequence_index descending, then reverse for chronological
         recent_utterances = (
             db.query(LiveUtterance)
             .filter(
                 LiveUtterance.session_id == session_id,
+                LiveUtterance.theme_id == theme_id,
             )
             .order_by(LiveUtterance.sequence_index.desc())
             .limit(10)
@@ -857,12 +751,11 @@ class AnswerEvaluationEngine:
 
         lines = []
         for utt in all_utterances:
-            speaker = utt.speaker or "speaker"
-            lines.append(f"[{speaker}]: {utt.transcript}")
+            lines.append(utt.transcript)
 
         # Add current utterance if not already included
         if current_text and (not all_utterances or all_utterances[-1].transcript != current_text):
-            lines.append(f"[current]: {current_text}")
+            lines.append(current_text)
 
         # If total context exceeds ~2000 chars, keep the most recent lines
         context = "\n".join(lines)
@@ -1143,7 +1036,6 @@ class AnswerEvaluationEngine:
         utterance_id: str,
         utterance_text: str,
         judgment: Dict[str, Any],
-        is_partial: bool = False,
         model_used: str = "gpt-5.4-mini",
     ) -> Optional[Dict[str, Any]]:
         """Update card state based on sufficiency judgment.
@@ -1156,38 +1048,25 @@ class AnswerEvaluationEngine:
             return None
 
         ai_confidence = judgment.get("sufficiency_score", None) or judgment.get("confidence", 0.0)
-        is_covered = judgment.get("is_sufficient", None) or judgment.get("is_covered", False)
         current_activation = float(card_state.activation_score or 0)
         current_completion = float(card_state.completion_score or 0)
         covered_element_ids = set(judgment.get("covered_element_ids", []) or [])
         missing_element_ids = set(judgment.get("missing_element_ids", []) or [])
-        if covered_element_ids or missing_element_ids:
-            covered, missing = self._normalize_completion_element_ids(
-                card=card,
-                completion={
-                    "covered_element_ids": list(covered_element_ids),
-                    "missing_element_ids": list(missing_element_ids),
-                },
-                completion_percentage=ai_confidence * 100,
-                is_sufficient=bool(is_covered),
-            )
-        else:
-            covered, missing = [], []
 
         # Deterministic reducer with activation/completion separation
         new_status, new_activation, new_completion = reduce_card_state(
-            current_status=old_status, judgment=judgment, is_partial=is_partial
+            current_status=old_status, judgment=judgment
         )
         # AI can suggest that a card is probably covered, but completion is a
-        # product decision left to the interviewer.  Terminal completion states
+        # product decision left to the facilitator. Terminal completion states
         # are only produced by explicit manual actions (see manual_complete_card).
-        if not is_partial and new_status == "sufficient":
+        if new_status == "sufficient":
             new_status = "probably_sufficient"
             new_completion = min(new_completion, 0.85)
         # Scores only accumulate upward (never decrease)
         new_activation = max(current_activation, new_activation)
         new_completion = max(current_completion, new_completion)
-        # confidence field = completion_score for backward compatibility
+        # Public confidence mirrors completion score for UI progress display.
         new_confidence = new_completion
 
         # Always write CardCoverageEvaluation for traceability (even if no state change)
@@ -1200,8 +1079,6 @@ class AnswerEvaluationEngine:
                     "covered_element_ids": list(covered_element_ids),
                     "missing_element_ids": list(missing_element_ids),
                 },
-                completion_percentage=ai_confidence * 100,
-                is_sufficient=bool(is_covered),
             )
 
         coverage_eval = CardCoverageEvaluation(

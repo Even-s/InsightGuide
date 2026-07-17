@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.models.card_criterion_evidence import CardCriterionEvidence
 from app.models.interview_insight_memo import InterviewInsightMemo
@@ -97,14 +97,24 @@ class InterviewRoundAggregateService:
 
         coverage_items = []
         coverage_counts: dict[str, int] = {}
-        if latest_session:
+        if session_ids:
             card_states = (
                 db.query(InterviewCardState)
-                .filter(InterviewCardState.session_id == latest_session.id)
-                .order_by(InterviewCardState.question_card_id.asc())
+                .filter(InterviewCardState.session_id.in_(session_ids))
+                .order_by(
+                    InterviewCardState.updated_at.asc(),
+                    InterviewCardState.created_at.asc(),
+                    InterviewCardState.id.asc(),
+                )
                 .all()
             )
+            latest_state_by_card = {}
             for state in card_states:
+                latest_state_by_card[state.question_card_id] = state
+
+            for state in sorted(
+                latest_state_by_card.values(), key=lambda item: item.question_card_id
+            ):
                 coverage_counts[state.status] = coverage_counts.get(state.status, 0) + 1
                 coverage_items.append(
                     {
@@ -116,6 +126,7 @@ class InterviewRoundAggregateService:
                         "evidenceTranscript": state.evidence_transcript,
                         "evidence": state.evidence,
                         "answeredAt": state.answered_at.isoformat() if state.answered_at else None,
+                        "sourceSessionId": state.session_id,
                     }
                 )
 
@@ -151,6 +162,8 @@ class InterviewRoundAggregateService:
         aggregate.source_session_ids = session_ids
         aggregate.coverage_snapshot = {
             "sourceSessionId": latest_session.id if latest_session else None,
+            "sourceSessionIds": session_ids,
+            "mergeMode": "latest_state_per_question_card",
             "counts": coverage_counts,
             "cards": coverage_items,
         }
@@ -199,11 +212,34 @@ class InterviewRoundAggregateService:
         db: Session,
         project_id: str,
     ) -> List[InterviewInsightMemo]:
-        """Return exactly one current cumulative memo per ready round."""
+        """Return exactly one current cumulative memo per ready round.
+
+        Project-level derivatives should not scan ``InterviewInsightMemo``
+        directly. They read through the ready round aggregates, whose
+        ``latest_memo_id`` is the canonical pointer for cumulative round output.
+        """
+        return [
+            aggregate.latest_memo
+            for aggregate in self.ready_aggregates_for_project(db, project_id)
+            if aggregate.latest_memo is not None
+        ]
+
+    def ready_aggregates_for_project(
+        self,
+        db: Session,
+        project_id: str,
+    ) -> List[InterviewRoundAggregate]:
+        """Return the canonical ready aggregate rows for a project.
+
+        BRD, Readiness and Evidence Matrix services use these aggregate rows as
+        their source of truth. The joined memo is only accepted when it is the
+        aggregate's latest completed memo.
+        """
         return (
-            db.query(InterviewInsightMemo)
+            db.query(InterviewRoundAggregate)
+            .options(joinedload(InterviewRoundAggregate.latest_memo))
             .join(
-                InterviewRoundAggregate,
+                InterviewInsightMemo,
                 InterviewRoundAggregate.latest_memo_id == InterviewInsightMemo.id,
             )
             .join(InterviewRound, InterviewRound.id == InterviewRoundAggregate.round_id)
@@ -213,7 +249,13 @@ class InterviewRoundAggregateService:
                 InterviewRoundAggregate.status == "ready",
                 InterviewInsightMemo.status == "completed",
             )
-            .order_by(InterviewInsightMemo.interview_date.asc())
+            .order_by(
+                InterviewSeries.created_at.asc(),
+                InterviewRound.round_number.asc(),
+                InterviewRound.created_at.asc(),
+                InterviewRoundAggregate.generated_at.asc(),
+                InterviewRoundAggregate.id.asc(),
+            )
             .all()
         )
 

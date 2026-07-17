@@ -130,8 +130,8 @@ class PrepSessionService:
         - Prep session
         - All interview sessions (cascade)
         - The associated document
-        - All sections (cascade from document)
-        - All topic cards (cascade from document)
+        - All interview themes (cascade from document)
+        - All question cards (cascade from document)
 
         Args:
             db: Database session
@@ -147,7 +147,7 @@ class PrepSessionService:
             from app.services.document_service import document_service
 
             # The document is the aggregate root for uploaded content. Deleting it
-            # cascades to prep sessions, interview sessions, sections, question
+            # cascades to prep sessions, interview sessions, interview themes, question
             # cards, card states, and utterances in one database transaction.
             document_service.delete_document(db, document_id, commit=False)
             db.commit()
@@ -246,7 +246,7 @@ class PrepSessionService:
         )
 
         # Convert to response schema with document info and interview session count
-        prep_sessions_with_deck = []
+        prep_sessions_with_document = []
         for prep_session in prep_sessions:
             usage = document_usage.get(prep_session.document_id, billing_service.empty_summary())
             # Count interview sessions for this prep session
@@ -256,7 +256,7 @@ class PrepSessionService:
                 .scalar()
             )
 
-            prep_sessions_with_deck.append(
+            prep_sessions_with_document.append(
                 PrepSessionWithDocument(
                     id=prep_session.id,
                     documentId=prep_session.document_id,
@@ -273,7 +273,7 @@ class PrepSessionService:
             )
 
         return PrepSessionListResponse(
-            prepSessions=prep_sessions_with_deck, total=total, limit=limit, offset=offset
+            prepSessions=prep_sessions_with_document, total=total, limit=limit, offset=offset
         )
 
     def _get_sort_field(self, sort_by: str) -> str:
