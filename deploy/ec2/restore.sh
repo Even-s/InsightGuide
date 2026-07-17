@@ -55,8 +55,9 @@ echo "Restoring MinIO bucket..."
     mc mirror --overwrite --remove /backup "local/$S3_BUCKET_NAME"
   '
 
-echo "Applying current migrations and restarting services..."
+echo "Applying current migrations and enforcing the clean schema..."
 "${compose[@]}" run --rm migrate
+echo "Restarting services..."
 "${compose[@]}" up -d --wait backend worker web
 
 echo "Restore completed from ${backup_id}."

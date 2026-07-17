@@ -23,6 +23,7 @@ if str(BACKEND_DIR) not in sys.path:
 
 import app.models  # noqa: F401  Registers every current model on Base.metadata.
 from app.db.session import Base, engine
+from scripts.smoke_clean_baseline_schema import main as smoke_clean_baseline_schema
 
 DEFAULT_USER_ID = "user_default"
 DEFAULT_USER_EMAIL = "demo@insightguide.local"
@@ -49,6 +50,12 @@ def ensure_default_user() -> None:
         )
 
 
+def enforce_clean_schema() -> None:
+    """Fail deployment if the connected database is not the clean baseline schema."""
+    print("Enforcing clean baseline schema.")
+    smoke_clean_baseline_schema()
+
+
 def main() -> None:
     """Create a clean baseline or upgrade an existing managed schema."""
     config = alembic_config()
@@ -66,6 +73,7 @@ def main() -> None:
             Base.metadata.create_all(bind=connection)
         command.stamp(config, "head")
         ensure_default_user()
+        enforce_clean_schema()
         print("Database baseline created and stamped at the current Alembic head.")
         return
 
@@ -78,6 +86,7 @@ def main() -> None:
     print("Existing Alembic-managed database detected; applying migrations.")
     command.upgrade(config, "head")
     ensure_default_user()
+    enforce_clean_schema()
     print("Database migrations completed.")
 
 

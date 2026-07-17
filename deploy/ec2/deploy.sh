@@ -53,7 +53,7 @@ echo "Starting PostgreSQL, Redis, and MinIO..."
 echo "Creating the private MinIO bucket and CORS policy..."
 "${compose[@]}" run --rm minio-init
 
-echo "Applying database migrations..."
+echo "Applying database migrations and enforcing the clean schema..."
 "${compose[@]}" run --rm migrate
 
 echo "Starting API, worker, and frontend gateway..."

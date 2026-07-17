@@ -119,8 +119,14 @@ The deployment script performs these operations in order:
 3. Start PostgreSQL, Redis, and MinIO.
 4. Create the private MinIO bucket and CORS policy.
 5. Initialize a clean database from the current models, or run Alembic upgrades on an existing managed database.
-6. Start FastAPI, Celery, and Caddy.
-7. Verify the API health endpoint inside the container network.
+6. Enforce the clean baseline schema with `scripts/smoke_clean_baseline_schema.py`.
+7. Start FastAPI, Celery, and Caddy.
+8. Verify the API health endpoint inside the container network.
+
+Deployment intentionally treats schema drift as a hard failure. A database that is stamped at the
+current Alembic head but still contains retired compatibility tables or old columns is not allowed to
+start the application. For prototype environments, rebuild the schema from an empty database instead
+of adding compatibility migrations for old data shapes.
 
 Useful operations:
 
@@ -150,7 +156,9 @@ RESTORE_CONFIRM=restore-20260715T120000Z \
   deploy/ec2/restore.sh 20260715T120000Z
 ```
 
-Restore stops all application writers, restores PostgreSQL and MinIO, reapplies migrations, and restarts the services.
+Restore stops all application writers, restores PostgreSQL and MinIO, reapplies migrations, enforces
+the clean schema, and restarts the services. If the restored backup contains an older or drifted
+schema, restore fails before application containers are restarted.
 
 ## 7. Prototype acceptance checks
 
@@ -176,6 +184,7 @@ After deployment, verify:
 - `/health` is currently a liveness response, not a full PostgreSQL/Redis readiness check.
 - The prototype uses the clean baseline Alembic migration. Deployment bootstrap can initialize an
   empty database and stamp the current head, but it refuses to guess the state of a populated
-  database that has no `alembic_version` table.
+  database that has no `alembic_version` table. It also refuses to start against Alembic-managed
+  databases whose actual schema does not match the clean baseline smoke check.
 - PDF and DOCX source-document parsing needs a separate implementation review. The EC2 image does
   not install LibreOffice or Poppler because neither executable is called by the current application.
