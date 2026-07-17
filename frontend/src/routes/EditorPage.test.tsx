@@ -248,6 +248,8 @@ describe('EditorPage', () => {
     vi.mocked(listStakeholders).mockResolvedValue([{
       id: 'profile-1',
       projectId: 'proj-1',
+      assignedSlotIds: ['slot-frontline'],
+      primarySlotId: 'slot-frontline',
       name: '王小明',
       roleTitle: '掛號櫃台人員',
       stakeholderType: 'actual_user',

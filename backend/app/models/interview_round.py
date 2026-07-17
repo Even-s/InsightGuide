@@ -73,3 +73,8 @@ class InterviewRound(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
+    slot_assignments = relationship(
+        "InterviewRoundSlot",
+        back_populates="interview_round",
+        cascade="all, delete-orphan",
+    )

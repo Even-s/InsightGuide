@@ -41,6 +41,7 @@ python-dotenv==1.0.1
 httpx==0.26.0
 tenacity==8.2.3
 numpy==1.26.4
+opencc-python-reimplemented==0.1.7
 
 # Validation
 email-validator==2.1.0.post1

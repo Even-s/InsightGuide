@@ -12,7 +12,9 @@ from sqlalchemy.orm import Session
 from app.models.interview_session import InterviewSession
 from app.models.project import Project
 from app.models.stakeholder_profile import StakeholderProfile
+from app.models.stakeholder_profile_slot import StakeholderProfileSlot
 from app.models.stakeholder_slot import StakeholderSlot
+from app.utils.chinese import to_traditional_zh
 
 logger = logging.getLogger(__name__)
 
@@ -236,8 +238,8 @@ class StakeholderPlanService:
         from app.services.openai_service import openai_service
 
         project_context = {
-            "title": project.title,
-            "description": project.description or "",
+            "title": to_traditional_zh(project.title),
+            "description": to_traditional_zh(project.description or ""),
             "brd_scope": project.brd_scope or {},
         }
         existing_roles = [
@@ -254,7 +256,7 @@ class StakeholderPlanService:
         user_payload = {
             "project": project_context,
             "existing_roles": existing_roles,
-            "spoken_description": transcript or "",
+            "spoken_description": to_traditional_zh(transcript or ""),
             "current_draft": current_draft or {},
         }
         result = openai_service.chat_completion(
@@ -269,6 +271,7 @@ class StakeholderPlanService:
                         "「唯有此角色」等排他句型。\n"
                         "預期取得的資訊請提供 3-4 個精簡項目。\n"
                         "關鍵問題請提供 4-6 題；每題只問一件事，使用自然口語，並從具體經驗切入。\n"
+                        "所有輸出文字必須使用台灣繁體中文，不可使用簡體中文。\n"
                         "只回傳符合指定 schema 的 JSON。"
                     ),
                 },
@@ -314,12 +317,12 @@ class StakeholderPlanService:
 
         user_payload = {
             "project": {
-                "title": project.title,
-                "description": project.description or "",
+                "title": to_traditional_zh(project.title),
+                "description": to_traditional_zh(project.description or ""),
                 "brd_scope": project.brd_scope or {},
             },
             "slot": slot_context or {},
-            "spoken_description": transcript,
+            "spoken_description": to_traditional_zh(transcript),
         }
         result = openai_service.chat_completion(
             messages=[
@@ -331,6 +334,7 @@ class StakeholderPlanService:
                         "未提及時請回傳空字串或空陣列，不可杜撰個人資料。\n"
                         "stakeholder_type 可依職稱、部門、專案與受訪角色脈絡分類。\n"
                         "專長與不熟悉領域各保留最多 5 個簡短、自然的繁體中文項目。\n"
+                        "所有輸出文字必須使用台灣繁體中文，不可使用簡體中文。\n"
                         "只回傳符合指定 schema 的 JSON。"
                     ),
                 },
@@ -355,9 +359,9 @@ class StakeholderPlanService:
             raise TypeError(f"expected object, got {type(result).__name__}")
 
         return {
-            "name": str(result.get("name", "")).strip(),
-            "role_title": str(result.get("role_title", "")).strip(),
-            "department": str(result.get("department", "")).strip(),
+            "name": to_traditional_zh(str(result.get("name", ""))),
+            "role_title": to_traditional_zh(str(result.get("role_title", ""))),
+            "department": to_traditional_zh(str(result.get("department", ""))),
             "stakeholder_type": self._normalize_role_category(result.get("stakeholder_type")),
             "expertise_tags": self._normalize_string_list(result.get("expertise_tags"))[:5],
             "knowledge_boundaries": self._normalize_string_list(result.get("knowledge_boundaries"))[
@@ -382,13 +386,13 @@ class StakeholderPlanService:
 
         user_payload = {
             "project": {
-                "title": project.title,
-                "description": project.description or "",
+                "title": to_traditional_zh(project.title),
+                "description": to_traditional_zh(project.description or ""),
                 "brd_scope": project.brd_scope or {},
             },
             "participant": profile_context,
             "current_draft": current_draft,
-            "spoken_instruction": transcript,
+            "spoken_instruction": to_traditional_zh(transcript),
         }
         result = openai_service.chat_completion(
             messages=[
@@ -402,6 +406,7 @@ class StakeholderPlanService:
                         "時長限制 10 到 90 分鐘並取最接近的 5 分鐘。\n"
                         "訪談風格只能是 exploratory、structured、validation 或空字串。\n"
                         "文字使用自然、精簡的繁體中文；多個主題用頓號分隔。\n"
+                        "所有輸出文字必須使用台灣繁體中文，不可使用簡體中文。\n"
                         "只回傳符合指定 schema 的 JSON。"
                     ),
                 },
@@ -437,9 +442,11 @@ class StakeholderPlanService:
         }
         merged = {
             "duration_minutes": current_draft.get("duration_minutes", 30),
-            "interview_purpose": str(current_draft.get("interview_purpose", "") or "").strip(),
-            "focus_topics": str(current_draft.get("focus_topics", "") or "").strip(),
-            "exclude_topics": str(current_draft.get("exclude_topics", "") or "").strip(),
+            "interview_purpose": to_traditional_zh(
+                str(current_draft.get("interview_purpose", "") or "")
+            ),
+            "focus_topics": to_traditional_zh(str(current_draft.get("focus_topics", "") or "")),
+            "exclude_topics": to_traditional_zh(str(current_draft.get("exclude_topics", "") or "")),
             "interview_style": str(current_draft.get("interview_style", "") or "").strip(),
         }
 
@@ -452,7 +459,7 @@ class StakeholderPlanService:
 
         for field in ("interview_purpose", "focus_topics", "exclude_topics"):
             if field in changed_fields:
-                merged[field] = str(result.get(field, "") or "").strip()
+                merged[field] = to_traditional_zh(str(result.get(field, "") or ""))
 
         if "interview_style" in changed_fields:
             style = result.get("interview_style")
@@ -469,14 +476,16 @@ class StakeholderPlanService:
         if not isinstance(result, dict):
             raise TypeError(f"expected object, got {type(result).__name__}")
 
-        role_label = str(result.get("role_label", "")).strip()
+        role_label = to_traditional_zh(str(result.get("role_label", "")))
         if not role_label:
             raise ValueError("stakeholder slot draft has no role_label")
 
         return {
             "role_category": self._normalize_role_category(result.get("role_category")),
             "role_label": role_label,
-            "rationale": self._neutralize_rationale(result.get("rationale", "")),
+            "rationale": self._neutralize_rationale(
+                to_traditional_zh(str(result.get("rationale", "")))
+            ),
             "expected_contributions": self._normalize_string_list(
                 result.get("expected_contributions")
             ),
@@ -492,7 +501,7 @@ class StakeholderPlanService:
     def _normalize_string_list(value: Any) -> List[str]:
         if not isinstance(value, list):
             return []
-        return [str(item).strip() for item in value if str(item).strip()]
+        return [to_traditional_zh(str(item)) for item in value if str(item).strip()]
 
     @staticmethod
     def _normalize_role_category(value: Any) -> str:
@@ -822,7 +831,9 @@ class StakeholderPlanService:
         deleted_order = slot.order_index
 
         assigned_profiles = (
-            db.query(StakeholderProfile.id).filter(StakeholderProfile.slot_id == slot_id).count()
+            db.query(StakeholderProfileSlot.id)
+            .filter(StakeholderProfileSlot.slot_id == slot_id)
+            .count()
         )
         if assigned_profiles > 0:
             raise StakeholderSlotHasProfilesError(
@@ -861,7 +872,6 @@ class StakeholderPlanService:
         profile = StakeholderProfile(
             id=f"stkh_{uuid.uuid4().hex[:12]}",
             project_id=project_id,
-            slot_id=data.get("slot_id"),
             name=data["name"],
             role_title=data.get("role_title"),
             department=data.get("department"),
@@ -872,9 +882,17 @@ class StakeholderPlanService:
             notes=data.get("notes"),
         )
         db.add(profile)
+        db.flush()
+
+        self._replace_profile_slots(
+            db,
+            profile,
+            data.get("slot_ids", []),
+            data.get("primary_slot_id"),
+        )
+
         db.commit()
         db.refresh(profile)
-
         self._update_slot_statuses(db, project_id)
         return profile
 
@@ -885,22 +903,8 @@ class StakeholderPlanService:
         if not profile:
             return None
 
-        if "slot_id" in data and data["slot_id"] is not None:
-            target_slot = (
-                db.query(StakeholderSlot)
-                .filter(
-                    StakeholderSlot.id == data["slot_id"],
-                    StakeholderSlot.project_id == profile.project_id,
-                )
-                .first()
-            )
-            if not target_slot:
-                raise StakeholderProfileSlotNotFoundError("找不到要指派的角色。")
-
         for key, value in data.items():
-            if key == "slot_id" and hasattr(profile, key):
-                setattr(profile, key, value)
-            elif value is not None and hasattr(profile, key):
+            if value is not None and hasattr(profile, key):
                 setattr(profile, key, value)
         profile.updated_at = datetime.utcnow()
         db.commit()
@@ -941,6 +945,65 @@ class StakeholderPlanService:
     def cancel_profile(self, db: Session, profile_id: str) -> Optional[StakeholderProfile]:
         return self.update_profile(db, profile_id, {"status": "unavailable"})
 
+    def set_profile_slots(
+        self,
+        db: Session,
+        profile_id: str,
+        slot_ids: List[str],
+        primary_slot_id: Optional[str] = None,
+    ) -> Optional[StakeholderProfile]:
+        """Replace a profile's many-to-many role assignments."""
+        profile = db.query(StakeholderProfile).filter(StakeholderProfile.id == profile_id).first()
+        if not profile:
+            return None
+
+        self._replace_profile_slots(db, profile, slot_ids, primary_slot_id)
+        profile.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(profile)
+        self._update_slot_statuses(db, profile.project_id)
+        return profile
+
+    def _replace_profile_slots(
+        self,
+        db: Session,
+        profile: StakeholderProfile,
+        slot_ids: Optional[List[str]],
+        primary_slot_id: Optional[str] = None,
+    ) -> None:
+        normalized_slot_ids = list(dict.fromkeys(slot_ids or []))
+        if primary_slot_id and primary_slot_id not in normalized_slot_ids:
+            normalized_slot_ids.insert(0, primary_slot_id)
+        if normalized_slot_ids:
+            slots_found = (
+                db.query(StakeholderSlot.id)
+                .filter(
+                    StakeholderSlot.project_id == profile.project_id,
+                    StakeholderSlot.id.in_(normalized_slot_ids),
+                )
+                .all()
+            )
+            existing = {row[0] for row in slots_found}
+            missing = [slot_id for slot_id in normalized_slot_ids if slot_id not in existing]
+            if missing:
+                raise StakeholderProfileSlotNotFoundError("找不到要指派的角色。")
+
+        primary = primary_slot_id or (normalized_slot_ids[0] if normalized_slot_ids else None)
+
+        db.query(StakeholderProfileSlot).filter(
+            StakeholderProfileSlot.profile_id == profile.id
+        ).delete(synchronize_session=False)
+        for slot_id in normalized_slot_ids:
+            db.add(
+                StakeholderProfileSlot(
+                    id=f"stps_{uuid.uuid4().hex[:12]}",
+                    project_id=profile.project_id,
+                    profile_id=profile.id,
+                    slot_id=slot_id,
+                    is_primary=(slot_id == primary),
+                )
+            )
+
     def get_plan_status(self, db: Session, project_id: str) -> Dict[str, Any]:
         """Get current stakeholder plan status overview."""
         slots = (
@@ -953,13 +1016,24 @@ class StakeholderPlanService:
         profiles = (
             db.query(StakeholderProfile).filter(StakeholderProfile.project_id == project_id).all()
         )
+        assignments = (
+            db.query(StakeholderProfileSlot)
+            .filter(StakeholderProfileSlot.project_id == project_id)
+            .all()
+        )
+        profiles_by_id = {p.id: p for p in profiles}
+        profiles_by_slot: Dict[str, List[StakeholderProfile]] = {}
+        for assignment in assignments:
+            profile = profiles_by_id.get(assignment.profile_id)
+            if profile:
+                profiles_by_slot.setdefault(assignment.slot_id, []).append(profile)
 
         slot_details = []
         total_required = 0
         completed_required = 0
 
         for slot in slots:
-            slot_profiles = [p for p in profiles if p.slot_id == slot.id]
+            slot_profiles = profiles_by_slot.get(slot.id, [])
             interviews_done = sum(p.interview_count for p in slot_profiles)
 
             detail = {
@@ -1026,8 +1100,12 @@ class StakeholderPlanService:
 
             profiles = (
                 db.query(StakeholderProfile)
+                .join(
+                    StakeholderProfileSlot,
+                    StakeholderProfileSlot.profile_id == StakeholderProfile.id,
+                )
                 .filter(
-                    StakeholderProfile.slot_id == slot.id,
+                    StakeholderProfileSlot.slot_id == slot.id,
                     StakeholderProfile.status != "unavailable",
                 )
                 .all()

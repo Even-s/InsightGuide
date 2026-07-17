@@ -30,6 +30,7 @@ class InterviewRoundCreate(BaseModel):
     generationMode: GenerationMode = "follow_up"
     sourceSessionIds: List[str] = Field(default_factory=list)
     focusTopics: List[str] = Field(default_factory=list)
+    targetSlotIds: List[str] = Field(default_factory=list)
     excludeCompletedQuestions: bool = True
 
 
@@ -62,6 +63,7 @@ class InterviewRoundResponse(BaseModel):
     generationMode: str
     sourceSessionIds: List[str]
     focusTopics: List[str]
+    targetSlotIds: List[str] = Field(default_factory=list)
     excludeCompletedQuestions: bool
     guideDocumentId: Optional[str]
     guideVersion: Optional[int] = None

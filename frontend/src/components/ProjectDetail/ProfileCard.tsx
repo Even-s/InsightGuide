@@ -11,7 +11,7 @@ interface ProfileCardProps {
   guide: InterviewGuide | null
   slots?: StakeholderSlot[]
   onDelete: (profileId: string) => void
-  onReassign?: (profileId: string, slotId: string | null) => void
+  onReassign?: (profileId: string, slotIds: string[]) => void
   onShowGuideSettings: (profileId: string) => void
 }
 
@@ -27,7 +27,7 @@ export function ProfileCard({
   const navigate = useNavigate()
   const guideReady = guide && guide.card_count > 0
   const validSlotIds = new Set(slots.map(slot => slot.id))
-  const selectedSlotId = profile.slotId && validSlotIds.has(profile.slotId) ? profile.slotId : ''
+  const assignedSlotIds = (profile.assignedSlotIds || []).filter(slotId => validSlotIds.has(slotId))
   const [latestRecordSessionId, setLatestRecordSessionId] = useState<string | null>(null)
   const [sessions, setSessions] = useState<InterviewSession[]>([])
   const [roundModalView, setRoundModalView] = useState<'create' | 'history' | null>(null)
@@ -121,21 +121,31 @@ export function ProfileCard({
       )}
       {onReassign && slots.length > 0 && (
         <div className="mt-3 ml-8 flex flex-wrap items-center gap-2 border-t border-cream-100 pt-2">
-          <label htmlFor={`profile-slot-${profile.id}`} className="text-[11px] font-medium text-natural-400">
+          <span className="text-[11px] font-medium text-natural-400">
             歸屬角色
-          </label>
-          <select
-            id={`profile-slot-${profile.id}`}
-            value={selectedSlotId}
-            onChange={event => onReassign(profile.id, event.target.value || null)}
-            className="h-8 max-w-full rounded-md border border-cream-300 bg-white px-2 text-xs text-natural-600 focus:border-sage-400 focus:outline-none focus:ring-2 focus:ring-sage-100"
-            aria-label={`調整${profile.name}的歸屬角色`}
-          >
-            <option value="">未隸屬任何角色</option>
-            {slots.map(slot => (
-              <option key={slot.id} value={slot.id}>{slot.roleLabel}</option>
-            ))}
-          </select>
+          </span>
+          {slots.map(slot => {
+            const checked = assignedSlotIds.includes(slot.id)
+            const nextSlotIds = checked
+              ? assignedSlotIds.filter(slotId => slotId !== slot.id)
+              : [...assignedSlotIds, slot.id]
+            return (
+              <button
+                key={slot.id}
+                type="button"
+                onClick={() => onReassign(profile.id, nextSlotIds)}
+                className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors ${
+                  checked
+                    ? 'border-sage-300 bg-sage-50 text-sage-700'
+                    : 'border-cream-200 bg-white text-natural-400 hover:border-sage-200 hover:text-sage-600'
+                }`}
+                aria-pressed={checked}
+              >
+                {checked ? '✓ ' : '+ '}
+                {slot.roleLabel}
+              </button>
+            )
+          })}
         </div>
       )}
       {roundModalView && (

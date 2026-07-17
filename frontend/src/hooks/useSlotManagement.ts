@@ -7,7 +7,7 @@ import {
   deleteStakeholderSlot,
   reorderStakeholderSlots,
   deleteStakeholder,
-  updateStakeholder,
+  updateStakeholderProfileSlots,
   type StakeholderPlan,
 } from '@/api/projects'
 
@@ -134,10 +134,13 @@ export function useSlotManagement({ projectId, plan, loadData }: UseSlotManageme
     }
   }
 
-  const handleReassignProfile = async (profileId: string, slotId: string | null) => {
+  const handleReassignProfile = async (profileId: string, slotIds: string[]) => {
     try {
       setSlotActionError(null)
-      await updateStakeholder(profileId, { slot_id: slotId })
+      await updateStakeholderProfileSlots(profileId, {
+        slot_ids: slotIds,
+        primary_slot_id: slotIds[0] || null,
+      })
       loadData()
     } catch (err) {
       console.error('Failed to reassign stakeholder:', err)

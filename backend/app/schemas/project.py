@@ -110,7 +110,6 @@ class StakeholderSlotSchema(BaseModel):
 
 
 class StakeholderProfileCreate(BaseModel):
-    slot_id: Optional[str] = None
     name: str
     role_title: Optional[str] = None
     department: Optional[str] = None
@@ -119,6 +118,8 @@ class StakeholderProfileCreate(BaseModel):
     knowledge_boundaries: List[str] = Field(default_factory=list)
     decision_power: Optional[str] = None
     notes: Optional[str] = None
+    slot_ids: List[str] = Field(default_factory=list)
+    primary_slot_id: Optional[str] = None
 
 
 class StakeholderProfileDraft(BaseModel):
@@ -149,7 +150,6 @@ class InterviewGuideDraftResponse(BaseModel):
 
 
 class StakeholderProfileUpdate(BaseModel):
-    slot_id: Optional[str] = None
     name: Optional[str] = None
     role_title: Optional[str] = None
     department: Optional[str] = None
@@ -161,10 +161,16 @@ class StakeholderProfileUpdate(BaseModel):
     notes: Optional[str] = None
 
 
+class StakeholderProfileSlotUpdate(BaseModel):
+    slot_ids: List[str] = Field(default_factory=list)
+    primary_slot_id: Optional[str] = None
+
+
 class StakeholderProfileSchema(BaseModel):
     id: str
     projectId: str
-    slotId: Optional[str] = None
+    assignedSlotIds: List[str] = Field(default_factory=list)
+    primarySlotId: Optional[str] = None
     name: str
     roleTitle: Optional[str] = None
     department: Optional[str] = None

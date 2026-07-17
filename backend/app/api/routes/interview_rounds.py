@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.api.routes.interview_helpers import convert_session_to_schema
 from app.db.session import get_db
 from app.models.interview_round import InterviewRound
+from app.models.interview_round_slot import InterviewRoundSlot
 from app.models.prep_session import PrepSession
 from app.models.question_card import QuestionCard
 from app.schemas.interview import InterviewSessionCreate, InterviewSessionSchema
@@ -55,6 +56,12 @@ def _round_response(db: Session, interview_round: InterviewRound) -> InterviewRo
         if interview_round.guide_document:
             guide_version = interview_round.guide_document.guide_version
     session_ids = [session.id for session in interview_round.interview_sessions]
+    target_slot_ids = [
+        row.slot_id
+        for row in db.query(InterviewRoundSlot)
+        .filter(InterviewRoundSlot.round_id == interview_round.id)
+        .all()
+    ]
     aggregate = interview_round.aggregate
     return InterviewRoundResponse(
         id=interview_round.id,
@@ -64,6 +71,7 @@ def _round_response(db: Session, interview_round: InterviewRound) -> InterviewRo
         generationMode=interview_round.generation_mode,
         sourceSessionIds=interview_round.source_session_ids or [],
         focusTopics=interview_round.focus_topics or [],
+        targetSlotIds=target_slot_ids,
         excludeCompletedQuestions=interview_round.exclude_completed_questions,
         guideDocumentId=interview_round.guide_document_id,
         guideVersion=guide_version,
@@ -149,6 +157,7 @@ def create_interview_round(
             generation_mode=payload.generationMode,
             source_session_ids=payload.sourceSessionIds,
             focus_topics=payload.focusTopics,
+            target_slot_ids=payload.targetSlotIds,
             exclude_completed_questions=payload.excludeCompletedQuestions,
         )
     except ValueError as exc:

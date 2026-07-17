@@ -10,7 +10,7 @@ const mockCreateSlot = vi.fn().mockResolvedValue(undefined)
 const mockDeleteSlot = vi.fn().mockResolvedValue(undefined)
 const mockReorderSlots = vi.fn().mockResolvedValue(undefined)
 const mockDeleteStakeholder = vi.fn().mockResolvedValue(undefined)
-const mockUpdateStakeholder = vi.fn().mockResolvedValue(undefined)
+const mockUpdateStakeholderProfileSlots = vi.fn().mockResolvedValue(undefined)
 
 vi.mock('@/api/projects', () => ({
   skipStakeholderSlot: (...args: unknown[]) => mockSkipSlot(...args),
@@ -20,7 +20,7 @@ vi.mock('@/api/projects', () => ({
   deleteStakeholderSlot: (...args: unknown[]) => mockDeleteSlot(...args),
   reorderStakeholderSlots: (...args: unknown[]) => mockReorderSlots(...args),
   deleteStakeholder: (...args: unknown[]) => mockDeleteStakeholder(...args),
-  updateStakeholder: (...args: unknown[]) => mockUpdateStakeholder(...args),
+  updateStakeholderProfileSlots: (...args: unknown[]) => mockUpdateStakeholderProfileSlots(...args),
 }))
 
 const mockPlan = {
@@ -214,20 +214,26 @@ describe('useSlotManagement', () => {
     expect(loadData).toHaveBeenCalled()
   })
 
-  it('handleReassignProfile moves a participant to another slot or unassigned area', async () => {
+  it('handleReassignProfile replaces a participant role assignment set', async () => {
     const { result } = renderHook(() =>
       useSlotManagement({ projectId: 'proj-1', plan: mockPlan as unknown as StakeholderPlan, loadData }),
     )
 
     await act(async () => {
-      await result.current.handleReassignProfile('profile-1', 'slot-2')
+      await result.current.handleReassignProfile('profile-1', ['slot-2'])
     })
     await act(async () => {
-      await result.current.handleReassignProfile('profile-1', null)
+      await result.current.handleReassignProfile('profile-1', [])
     })
 
-    expect(mockUpdateStakeholder).toHaveBeenNthCalledWith(1, 'profile-1', { slot_id: 'slot-2' })
-    expect(mockUpdateStakeholder).toHaveBeenNthCalledWith(2, 'profile-1', { slot_id: null })
+    expect(mockUpdateStakeholderProfileSlots).toHaveBeenNthCalledWith(1, 'profile-1', {
+      slot_ids: ['slot-2'],
+      primary_slot_id: 'slot-2',
+    })
+    expect(mockUpdateStakeholderProfileSlots).toHaveBeenNthCalledWith(2, 'profile-1', {
+      slot_ids: [],
+      primary_slot_id: null,
+    })
     expect(loadData).toHaveBeenCalledTimes(2)
   })
 

@@ -102,6 +102,20 @@ wait_for_container() {
     fail "$container 未就緒（目前狀態：$(container_state "$container")）"
 }
 
+run_migrations() {
+    if [ ! -x "$ROOT_DIR/backend/venv/bin/alembic" ]; then
+        fail "找不到 Alembic，請先執行 ./insightguide.sh setup"
+        return 1
+    fi
+
+    info "執行資料庫 migration：alembic upgrade head"
+    (
+        cd "$ROOT_DIR/backend" || exit 1
+        env DEBUG=false venv/bin/alembic upgrade head
+    )
+    ok "資料庫 schema 已更新"
+}
+
 service_label() {
     printf "insightguide.%s" "$1"
 }

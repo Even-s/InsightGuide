@@ -164,7 +164,8 @@ export function AddProfileModal({ slotId, projectId, onClose, onAdd }: AddProfil
     if (!projectId || !profileName.trim() || isRecording || isProcessingVoice) return
     try {
       await createStakeholder(projectId, {
-        slot_id: slotId || undefined,
+        slot_ids: slotId ? [slotId] : [],
+        primary_slot_id: slotId || null,
         name: profileName.trim(),
         role_title: profileRole.trim() || undefined,
         department: profileDept.trim() || undefined,

@@ -7,11 +7,13 @@ from typing import List, Optional
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.card_criterion_evidence import CardCriterionEvidence
+from app.models.card_evidence_slot import CardEvidenceSlot
 from app.models.interview_insight_memo import InterviewInsightMemo
 from app.models.interview_round import InterviewRound
 from app.models.interview_round_aggregate import InterviewRoundAggregate
 from app.models.interview_series import InterviewSeries
 from app.models.interview_session import InterviewCardState, InterviewSession
+from app.models.stakeholder_slot import StakeholderSlot
 
 
 class InterviewRoundAggregateService:
@@ -141,6 +143,37 @@ class InterviewRoundAggregateService:
             latest_by_criterion = {}
             for row in criterion_rows:
                 latest_by_criterion[(row.card_id, row.criterion_id)] = row
+            latest_evidence_ids = [
+                row.id for row in latest_by_criterion.values() if getattr(row, "id", None)
+            ]
+            slots_by_evidence = {}
+            if latest_evidence_ids:
+                attribution_rows = (
+                    db.query(CardEvidenceSlot)
+                    .filter(CardEvidenceSlot.evidence_id.in_(latest_evidence_ids))
+                    .all()
+                )
+                slot_ids = list({row.slot_id for row in attribution_rows})
+                slots_by_id = {
+                    slot.id: slot
+                    for slot in db.query(StakeholderSlot)
+                    .filter(StakeholderSlot.id.in_(slot_ids))
+                    .all()
+                }
+                for attribution in attribution_rows:
+                    slot = slots_by_id.get(attribution.slot_id)
+                    slots_by_evidence.setdefault(attribution.evidence_id, []).append(
+                        {
+                            "slotId": attribution.slot_id,
+                            "roleLabel": slot.role_label if slot else attribution.slot_id,
+                            "roleCategory": slot.role_category if slot else None,
+                            "relevance": (
+                                float(attribution.relevance)
+                                if attribution.relevance is not None
+                                else None
+                            ),
+                        }
+                    )
             evidence_items = [
                 {
                     "cardId": row.card_id,
@@ -154,6 +187,10 @@ class InterviewRoundAggregateService:
                         else None
                     ),
                     "sourceSessionId": row.session_id,
+                    "sourceSlotIds": [
+                        item["slotId"] for item in slots_by_evidence.get(getattr(row, "id", ""), [])
+                    ],
+                    "sourceRoles": slots_by_evidence.get(getattr(row, "id", ""), []),
                 }
                 for row in latest_by_criterion.values()
             ]

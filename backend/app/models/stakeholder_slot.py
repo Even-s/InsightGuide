@@ -40,4 +40,8 @@ class StakeholderSlot(Base):
 
     # Relationships
     project = relationship("Project", back_populates="stakeholder_slots")
-    profiles = relationship("StakeholderProfile", back_populates="slot")
+    profile_assignments = relationship(
+        "StakeholderProfileSlot",
+        back_populates="slot",
+        cascade="all, delete-orphan",
+    )

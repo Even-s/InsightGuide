@@ -15,13 +15,16 @@ from sqlalchemy.orm import Session
 
 from app.models.document import Document
 from app.models.interview_round import InterviewRound
+from app.models.interview_round_slot import InterviewRoundSlot
 from app.models.interview_series import InterviewSeries
 from app.models.interview_session import InterviewSession
 from app.models.interview_theme import InterviewTheme
 from app.models.prep_session import PrepSession
 from app.models.project import Project
 from app.models.question_card import QuestionCard
+from app.models.question_card_slot import QuestionCardSlot
 from app.models.stakeholder_profile import StakeholderProfile
+from app.models.stakeholder_profile_slot import StakeholderProfileSlot
 from app.models.stakeholder_slot import StakeholderSlot
 from app.services.openai_service import openai_service
 
@@ -70,13 +73,6 @@ class StakeholderCardGenerator:
         if not stakeholder:
             raise ValueError(f"Stakeholder {stakeholder_profile_id} not found")
 
-        # Get slot info if linked
-        slot = None
-        if stakeholder.slot_id:
-            slot = (
-                db.query(StakeholderSlot).filter(StakeholderSlot.id == stakeholder.slot_id).first()
-            )
-
         # Step 1: Get or create an isolated guide document for this round.
         document = self._get_or_create_round_document(db, project, stakeholder, interview_round)
 
@@ -94,6 +90,8 @@ class StakeholderCardGenerator:
                 "This interview guide already has interview sessions and is immutable. "
                 "Create a new interview round instead."
             )
+
+        slots = self._target_slots_for_round(db, stakeholder, interview_round)
 
         # Step 2: Get or create prep session
         prep_session = self._get_or_create_prep_session(db, document, project.user_id)
@@ -116,7 +114,7 @@ class StakeholderCardGenerator:
             )
 
         # Step 3: Generate themes using AI
-        themes_data = self._generate_themes(project, stakeholder, slot)
+        themes_data = self._generate_themes(project, stakeholder, slots)
 
         # Step 4: Create InterviewTheme records
         themes = []
@@ -143,7 +141,7 @@ class StakeholderCardGenerator:
         all_cards = []
         for theme in themes:
             try:
-                cards_data = self._generate_cards_for_theme(project, stakeholder, slot, theme)
+                cards_data = self._generate_cards_for_theme(project, stakeholder, slots, theme)
             except Exception as e:
                 logger.warning(f"Card generation failed for theme '{theme.title}': {e}")
                 cards_data = self._fallback_cards_for_theme(theme)
@@ -165,11 +163,20 @@ class StakeholderCardGenerator:
                     order_index=idx,
                     status="pending",
                     created_by="ai",
-                    target_roles=[stakeholder.stakeholder_type],
+                    target_roles=[slot.role_label for slot in slots]
+                    or [stakeholder.stakeholder_type],
                     expertise_required=stakeholder.expertise_tags,
                     question_intent=card_data.get("question_intent"),
                 )
                 db.add(card)
+                for slot in slots:
+                    db.add(
+                        QuestionCardSlot(
+                            id=f"qcsl_{uuid.uuid4().hex[:12]}",
+                            question_card_id=card.id,
+                            slot_id=slot.id,
+                        )
+                    )
                 all_cards.append(card)
 
         # Compile rubrics immediately (local, fast — no LLM)
@@ -342,8 +349,45 @@ class StakeholderCardGenerator:
 
         return prep_session
 
+    def _target_slots_for_round(
+        self,
+        db: Session,
+        stakeholder: StakeholderProfile,
+        interview_round: InterviewRound,
+    ) -> List[StakeholderSlot]:
+        round_slot_ids = [
+            row.slot_id
+            for row in db.query(InterviewRoundSlot)
+            .filter(InterviewRoundSlot.round_id == interview_round.id)
+            .all()
+        ]
+        if round_slot_ids:
+            return (
+                db.query(StakeholderSlot)
+                .filter(StakeholderSlot.id.in_(round_slot_ids))
+                .order_by(StakeholderSlot.order_index)
+                .all()
+            )
+
+        profile_slot_ids = [
+            row.slot_id
+            for row in db.query(StakeholderProfileSlot)
+            .filter(StakeholderProfileSlot.profile_id == stakeholder.id)
+            .order_by(StakeholderProfileSlot.is_primary.desc(), StakeholderProfileSlot.created_at)
+            .all()
+        ]
+        if not profile_slot_ids:
+            return []
+
+        return (
+            db.query(StakeholderSlot)
+            .filter(StakeholderSlot.id.in_(profile_slot_ids))
+            .order_by(StakeholderSlot.order_index)
+            .all()
+        )
+
     def _generate_themes(
-        self, project: Project, stakeholder: StakeholderProfile, slot: Optional[StakeholderSlot]
+        self, project: Project, stakeholder: StakeholderProfile, slots: List[StakeholderSlot]
     ) -> List[Dict[str, Any]]:
         """Use AI to generate interview themes for this stakeholder."""
         brd_scope = project.brd_scope or {}
@@ -379,14 +423,26 @@ class StakeholderCardGenerator:
         if stakeholder.knowledge_boundaries:
             context_parts.append(f"知識範圍：{', '.join(stakeholder.knowledge_boundaries)}")
 
-        if slot:
-            if slot.expected_contributions:
-                contributions = "\n".join(f"- {c}" for c in slot.expected_contributions)
-                context_parts.append(f"預期提供資訊：\n{contributions}")
+        if slots:
+            role_lines = "\n".join(f"- {slot.role_label}（{slot.role_category}）" for slot in slots)
+            context_parts.append(f"本輪涵蓋角色：\n{role_lines}")
 
-            if slot.key_questions_to_cover:
-                questions = "\n".join(f"- {q}" for q in slot.key_questions_to_cover)
-                context_parts.append(f"建議關鍵問題：\n{questions}")
+            contributions = []
+            questions = []
+            for slot in slots:
+                contributions.extend(
+                    f"{slot.role_label}：{item}" for item in (slot.expected_contributions or [])
+                )
+                questions.extend(
+                    f"{slot.role_label}：{item}" for item in (slot.key_questions_to_cover or [])
+                )
+            if contributions:
+                context_parts.append(
+                    "預期提供資訊：\n" + "\n".join(f"- {c}" for c in contributions)
+                )
+
+            if questions:
+                context_parts.append("建議關鍵問題：\n" + "\n".join(f"- {q}" for q in questions))
 
         context = "\n".join(context_parts)
 
@@ -510,10 +566,10 @@ class StakeholderCardGenerator:
             logger.warning(f"AI theme generation failed, using defaults: {e}")
 
         # Fallback to default themes
-        return self._default_themes(stakeholder, slot)
+        return self._default_themes(stakeholder, slots)
 
     def _default_themes(
-        self, stakeholder: StakeholderProfile, slot: Optional[StakeholderSlot]
+        self, stakeholder: StakeholderProfile, slots: List[StakeholderSlot]
     ) -> List[Dict[str, Any]]:
         """Fallback themes if AI generation fails."""
         return [
@@ -563,14 +619,17 @@ class StakeholderCardGenerator:
         self,
         project: Project,
         stakeholder: StakeholderProfile,
-        slot: Optional[StakeholderSlot],
+        slots: List[StakeholderSlot],
         theme: InterviewTheme,
     ) -> List[Dict[str, Any]]:
         """Generate question cards for a specific theme."""
+        role_context = (
+            "\n涵蓋角色：" + "、".join(slot.role_label for slot in slots) if slots else ""
+        )
         context = f"""專案：{project.title}
 受訪者：{stakeholder.name} ({stakeholder.stakeholder_type})
 主題：{theme.title}
-主題說明：{theme.rationale}"""
+主題說明：{theme.rationale}{role_context}"""
 
         try:
             import json

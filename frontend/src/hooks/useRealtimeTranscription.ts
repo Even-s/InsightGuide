@@ -5,6 +5,7 @@ import {
   useAudioDiagnostics,
   type AudioProcessingProfile,
 } from '@/hooks/useAudioDiagnostics'
+import { toTraditionalChinese } from '@/utils/traditionalChinese'
 
 const OPENAI_REALTIME_WEBRTC_URL = 'https://api.openai.com/v1/realtime/calls'
 
@@ -152,7 +153,7 @@ export function useRealtimeTranscription({
   }, [observeDiagnosticPeerConnection, observeDiagnosticStream])
 
   const emitCompletedTranscript = useCallback((transcript: string, itemId?: string, eventId?: string) => {
-    const text = transcript.trim()
+    const text = toTraditionalChinese(transcript)
     if (!text || text === lastCompletedTextRef.current) return
 
     const startedAt = speechStartedAtRef.current ?? firstDeltaAtRef.current
@@ -223,10 +224,11 @@ export function useRealtimeTranscription({
         if (message.delta) {
           recordDiagnosticEvent('transcript_delta')
           firstDeltaAtRef.current = firstDeltaAtRef.current ?? new Date().toISOString()
-          deltaBufferRef.current += message.delta
+          const delta = toTraditionalChinese(message.delta)
+          deltaBufferRef.current += delta
           deltaItemIdRef.current = message.item_id ?? deltaItemIdRef.current
           setIsTranscribing(true)
-          callbacksRef.current.onTranscriptDelta?.(message.delta, message.item_id)
+          callbacksRef.current.onTranscriptDelta?.(delta, message.item_id)
           scheduleDeltaFlush(deltaBufferRef.current)
         }
         break
@@ -240,8 +242,9 @@ export function useRealtimeTranscription({
         deltaItemIdRef.current = undefined
 
         if (message.transcript?.trim()) {
-          recordDiagnosticEvent('transcript_completed', message.transcript.trim())
-          emitCompletedTranscript(message.transcript, message.item_id, message.event_id)
+          const transcript = toTraditionalChinese(message.transcript)
+          recordDiagnosticEvent('transcript_completed', transcript)
+          emitCompletedTranscript(transcript, message.item_id, message.event_id)
         }
         break
 

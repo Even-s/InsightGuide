@@ -90,9 +90,45 @@ def test_voice_role_draft_transcribes_then_parses(role_draft):
         )
 
     assert response.status_code == 200
-    assert response.json() == {"transcript": transcript, "draft": role_draft}
+    expected_transcript = "我想加入掛號櫃檯人員，了解現場流程和常見例外。"
+    assert response.json() == {"transcript": expected_transcript, "draft": role_draft}
     assert transcribe.call_args.kwargs["model"] == "gpt-4o-transcribe"
-    assert assist.call_args.kwargs["transcript"] == transcript
+    assert assist.call_args.kwargs["transcript"] == expected_transcript
+
+
+def test_project_voice_fields_normalizes_transcript_and_ai_result_to_traditional_chinese():
+    simplified_transcript = "线上预约与当日挂号系统，协助柜台人员处理资料。"
+    simplified_result = {
+        "title": "线上预约挂号系统",
+        "description": "协助柜台人员处理线上预约和当日挂号资料。",
+        "business_domain": "医疗挂号",
+        "key_objectives": ["确认预约流程", "整理柜台痛点"],
+        "out_of_scope": ["线上付款"],
+    }
+
+    with (
+        patch(
+            "app.services.openai_service.openai_service.client.audio.transcriptions.create",
+            return_value=SimpleNamespace(text=simplified_transcript),
+        ),
+        patch(
+            "app.services.openai_service.openai_service.chat_completion",
+            return_value=simplified_result,
+        ),
+    ):
+        response = client.post(
+            "/api/projects/voice-to-project-fields",
+            files={"audio": ("project.webm", b"a" * 1500, "audio/webm")},
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["transcript"] == "線上預約與當日掛號系統，協助櫃檯人員處理資料。"
+    assert data["parsed"]["title"] == "線上預約掛號系統"
+    assert data["parsed"]["description"] == "協助櫃檯人員處理線上預約和當日掛號資料。"
+    assert data["parsed"]["business_domain"] == "醫療掛號"
+    assert data["parsed"]["key_objectives"] == ["確認預約流程", "整理櫃檯痛點"]
+    assert data["parsed"]["out_of_scope"] == ["線上付款"]
 
 
 def test_voice_profile_draft_transcribes_and_uses_slot_context(mock_database):
@@ -130,9 +166,10 @@ def test_voice_profile_draft_transcribes_and_uses_slot_context(mock_database):
         )
 
     assert response.status_code == 200
-    assert response.json() == {"transcript": transcript, "draft": profile_draft}
+    expected_transcript = "王小明是門診櫃檯組長，熟悉掛號流程，但不熟系統架構。"
+    assert response.json() == {"transcript": expected_transcript, "draft": profile_draft}
     assert transcribe.call_args.kwargs["model"] == "gpt-4o-transcribe"
-    assert assist.call_args.kwargs["transcript"] == transcript
+    assert assist.call_args.kwargs["transcript"] == expected_transcript
     assert assist.call_args.kwargs["slot_context"]["role_label"] == "掛號櫃台人員"
 
 
@@ -141,7 +178,7 @@ def test_voice_interview_guide_draft_preserves_current_options(mock_database):
     profile = SimpleNamespace(
         id="profile_1",
         project_id="proj_test",
-        slot_id="slot_ops",
+        slot_assignments=[SimpleNamespace(slot_id="slot_ops")],
         name="王小明",
         role_title="門診櫃台組長",
         department="門診行政部",
@@ -154,7 +191,8 @@ def test_voice_interview_guide_draft_preserves_current_options(mock_database):
         role_label="掛號櫃台人員",
         rationale="了解現場掛號流程。",
     )
-    mock_database.query.return_value.filter.return_value.first.side_effect = [profile, slot]
+    mock_database.query.return_value.filter.return_value.first.side_effect = [profile]
+    mock_database.query.return_value.filter.return_value.all.return_value = [slot]
     current = {
         "duration_minutes": 30,
         "interview_purpose": "了解現有掛號流程",
@@ -190,7 +228,10 @@ def test_voice_interview_guide_draft_preserves_current_options(mock_database):
     assert response.json() == {"transcript": transcript, "draft": draft}
     assert assist.call_args.kwargs["current_draft"] == current
     assert assist.call_args.kwargs["profile_context"]["name"] == "王小明"
-    assert assist.call_args.kwargs["profile_context"]["slot"]["role_label"] == "掛號櫃台人員"
+    assert (
+        assist.call_args.kwargs["profile_context"]["slot"]["roles"][0]["role_label"]
+        == "掛號櫃台人員"
+    )
 
 
 def test_refine_role_draft_requires_role_name():

@@ -13,6 +13,7 @@ const ProjectSessionsPage = lazy(() => import('./routes/ProjectSessionsPage'))
 const InsightMemoPage = lazy(() => import('./routes/InsightMemoPage'))
 const EvidenceMatrixPage = lazy(() => import('./routes/EvidenceMatrixPage'))
 const BRDReadinessPage = lazy(() => import('./routes/BRDReadinessPage'))
+const StakeholdersPage = lazy(() => import('./routes/StakeholdersPage'))
 
 function AnimatedRoutes() {
   const location = useLocation()
@@ -24,6 +25,7 @@ function AnimatedRoutes() {
         <Route path="/projects/new" element={<DocumentUploadPage />} />
         <Route path="/projects" element={<ProjectSessionsPage />} />
         <Route path="/projects/:projectId" element={<ProjectDetailPage />} />
+        <Route path="/projects/:projectId/stakeholders" element={<StakeholdersPage />} />
         <Route path="/projects/:projectId/evidence-matrix" element={<EvidenceMatrixPage />} />
         <Route path="/projects/:projectId/readiness" element={<BRDReadinessPage />} />
         <Route path="/prep-sessions" element={<PrepSessionListPage />} />

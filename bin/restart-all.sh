@@ -48,7 +48,11 @@ wait_for_container insightguide-redis
 wait_for_container insightguide-minio
 echo ""
 
-bold "2. 啟動後端 API"
+bold "2. 更新資料庫 schema"
+run_migrations
+echo ""
+
+bold "3. 啟動後端 API"
 if [ "$MODE" = "start" ] && http_ok "$BACKEND_URL/health"; then
     ok "後端已在運行"
 else
@@ -63,7 +67,7 @@ else
 fi
 echo ""
 
-bold "3. 啟動 Celery worker"
+bold "4. 啟動 Celery worker"
 if [ "$MODE" = "start" ] && celery_ok; then
     ok "Celery 已在運行"
 else
@@ -77,7 +81,7 @@ else
 fi
 echo ""
 
-bold "4. 啟動前端"
+bold "5. 啟動前端"
 if [ "$MODE" = "start" ] && http_ok "$FRONTEND_URL"; then
     ok "前端已在運行"
 else

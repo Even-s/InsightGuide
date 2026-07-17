@@ -52,6 +52,8 @@ restart_component() {
         backend)
             wait_for_docker
             compose up -d postgres redis minio
+            wait_for_container insightguide-postgres
+            run_migrations
             stop_service backend
             start_service backend "$ROOT_DIR/backend" \
                 "env DEBUG=false venv/bin/python -m uvicorn app.main:app --host 0.0.0.0 --port $BACKEND_PORT --reload"

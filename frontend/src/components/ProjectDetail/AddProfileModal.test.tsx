@@ -88,7 +88,8 @@ describe('AddProfileModal voice input', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '新增' }))
     await waitFor(() => expect(createStakeholder).toHaveBeenCalledWith('proj-1', {
-      slot_id: 'slot-ops',
+      slot_ids: ['slot-ops'],
+      primary_slot_id: 'slot-ops',
       name: '王小明',
       role_title: '門診櫃台組長',
       department: '門診行政部',

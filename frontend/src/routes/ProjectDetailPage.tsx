@@ -356,12 +356,20 @@ export default function ProjectDetailPage() {
               完整覆蓋 {stakeholderPlan.total_slots} 個角色，第一輪優先 {stakeholderPlan.first_wave_total} 個
             </p>
           </div>
-          <button
-            onClick={() => setShowAddSlot(true)}
-            className="px-3 py-1.5 text-xs text-sage-600 border border-sage-200 rounded-lg hover:bg-sage-50"
-          >
-            + 新增角色
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => navigate(`/projects/${projectId}/stakeholders`)}
+              className="px-3 py-1.5 text-xs text-natural-600 border border-cream-300 rounded-lg bg-white hover:border-sage-200 hover:bg-sage-50 hover:text-sage-700"
+            >
+              管理受訪者
+            </button>
+            <button
+              onClick={() => setShowAddSlot(true)}
+              className="px-3 py-1.5 text-xs text-sage-600 border border-sage-200 rounded-lg hover:bg-sage-50"
+            >
+              + 新增角色
+            </button>
+          </div>
         </div>
 
         {slotActionError && (

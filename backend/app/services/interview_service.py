@@ -27,6 +27,7 @@ from app.schemas.interview import (
     UtteranceCreate,
 )
 from app.services.billing_service import billing_service
+from app.utils.chinese import to_traditional_zh
 
 logger = logging.getLogger(__name__)
 
@@ -561,7 +562,7 @@ class InterviewService:
         old_status = card_state.status
         card_state.status = update_data.status
         card_state.confidence = update_data.confidence
-        card_state.evidence_transcript = update_data.evidenceTranscript
+        card_state.evidence_transcript = to_traditional_zh(update_data.evidenceTranscript)
         card_state.evidence = update_data.evidence
         card_state.updated_at = datetime.utcnow()
 
@@ -635,7 +636,7 @@ class InterviewService:
             realtime_event_id=utterance_data.realtimeItemId,
             theme_id=utterance_data.themeId,
             asked_card_ids=utterance_data.askedCardIds or [],
-            transcript=utterance_data.transcript,
+            transcript=to_traditional_zh(utterance_data.transcript),
             started_at=utterance_data.startedAt,
             ended_at=utterance_data.endedAt,
             sequence_index=existing_count,

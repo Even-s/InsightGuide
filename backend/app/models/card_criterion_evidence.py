@@ -3,6 +3,7 @@
 from datetime import datetime
 
 from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, Numeric, String, Text
+from sqlalchemy.orm import relationship
 
 from app.db.session import Base
 
@@ -40,3 +41,9 @@ class CardCriterionEvidence(Base):
     model = Column(String, nullable=False)
     evaluation_seq = Column(Integer, nullable=False)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+
+    slot_attributions = relationship(
+        "CardEvidenceSlot",
+        back_populates="evidence",
+        cascade="all, delete-orphan",
+    )

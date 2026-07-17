@@ -31,6 +31,8 @@ vi.mock('@/api/interviewRounds', () => ({
 const profile: StakeholderProfile = {
   id: 'profile-1',
   projectId: 'project-1',
+  assignedSlotIds: [],
+  primarySlotId: null,
   name: '王小明',
   roleTitle: '櫃台人員',
   stakeholderType: 'actual_user',
@@ -130,6 +132,7 @@ describe('ProfileCard', () => {
       generationMode: 'follow_up',
       sourceSessionIds: ['session-latest'],
       focusTopics: [],
+      targetSlotIds: [],
       excludeCompletedQuestions: true,
       guideDocumentId: 'document-1',
       guideVersion: 1,
@@ -204,7 +207,7 @@ describe('ProfileCard', () => {
     expect(screen.queryByRole('button', { name: '開始下一輪訪談' })).not.toBeInTheDocument()
   })
 
-  it('lets users reassign the participant to another role or unassigned area', async () => {
+  it('lets users assign the participant to multiple roles or remove a role', async () => {
     const onReassign = vi.fn()
     render(
       <MemoryRouter initialEntries={['/projects/project-1']}>
@@ -213,7 +216,7 @@ describe('ProfileCard', () => {
             path="/projects/:projectId"
             element={(
               <ProfileCard
-                profile={{ ...profile, slotId: 'slot-frontline' }}
+                profile={{ ...profile, assignedSlotIds: ['slot-frontline'], primarySlotId: 'slot-frontline' }}
                 projectId="project-1"
                 guide={null}
                 slots={slots}
@@ -227,15 +230,10 @@ describe('ProfileCard', () => {
       </MemoryRouter>,
     )
 
-    const roleSelect = await screen.findByLabelText('調整王小明的歸屬角色')
-    fireEvent.change(roleSelect, {
-      target: { value: 'slot-it' },
-    })
-    fireEvent.change(roleSelect, {
-      target: { value: '' },
-    })
+    fireEvent.click(await screen.findByRole('button', { name: '+ 資訊維運人員' }))
+    fireEvent.click(screen.getByRole('button', { name: '✓ 掛號櫃台人員' }))
 
-    expect(onReassign).toHaveBeenNthCalledWith(1, 'profile-1', 'slot-it')
-    expect(onReassign).toHaveBeenNthCalledWith(2, 'profile-1', null)
+    expect(onReassign).toHaveBeenNthCalledWith(1, 'profile-1', ['slot-frontline', 'slot-it'])
+    expect(onReassign).toHaveBeenNthCalledWith(2, 'profile-1', [])
   })
 })

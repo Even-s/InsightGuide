@@ -121,7 +121,6 @@ def upgrade() -> None:
         "stakeholder_profiles",
         sa.Column("id", sa.String(), nullable=False),
         sa.Column("project_id", sa.String(), nullable=False),
-        sa.Column("slot_id", sa.String(), nullable=True),
         sa.Column("name", sa.String(), nullable=False),
         sa.Column("role_title", sa.String(), nullable=True),
         sa.Column("department", sa.String(), nullable=True),
@@ -138,7 +137,6 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         sa.ForeignKeyConstraint(["project_id"], ["projects.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(["slot_id"], ["stakeholder_slots.id"], ondelete="SET NULL"),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(
@@ -147,8 +145,40 @@ def upgrade() -> None:
         ["project_id"],
         unique=False,
     )
+    op.create_table(
+        "stakeholder_profile_slots",
+        sa.Column("id", sa.String(), nullable=False),
+        sa.Column("project_id", sa.String(), nullable=False),
+        sa.Column("profile_id", sa.String(), nullable=False),
+        sa.Column("slot_id", sa.String(), nullable=False),
+        sa.Column("is_primary", sa.Boolean(), nullable=False),
+        sa.Column("fit_level", sa.String(), nullable=False),
+        sa.Column("notes", sa.Text(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=False),
+        sa.Column("updated_at", sa.DateTime(), nullable=False),
+        sa.ForeignKeyConstraint(["profile_id"], ["stakeholder_profiles.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["project_id"], ["projects.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["slot_id"], ["stakeholder_slots.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("profile_id", "slot_id", name="uq_stakeholder_profile_slot"),
+    )
     op.create_index(
-        op.f("ix_stakeholder_profiles_slot_id"), "stakeholder_profiles", ["slot_id"], unique=False
+        op.f("ix_stakeholder_profile_slots_profile_id"),
+        "stakeholder_profile_slots",
+        ["profile_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_stakeholder_profile_slots_project_id"),
+        "stakeholder_profile_slots",
+        ["project_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_stakeholder_profile_slots_slot_id"),
+        "stakeholder_profile_slots",
+        ["slot_id"],
+        unique=False,
     )
     op.create_table(
         "interview_series",
@@ -220,6 +250,29 @@ def upgrade() -> None:
     )
     op.create_index(
         op.f("ix_interview_rounds_status"), "interview_rounds", ["status"], unique=False
+    )
+    op.create_table(
+        "interview_round_slots",
+        sa.Column("id", sa.String(), nullable=False),
+        sa.Column("round_id", sa.String(), nullable=False),
+        sa.Column("slot_id", sa.String(), nullable=False),
+        sa.Column("created_at", sa.DateTime(), nullable=False),
+        sa.ForeignKeyConstraint(["round_id"], ["interview_rounds.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["slot_id"], ["stakeholder_slots.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("round_id", "slot_id", name="uq_interview_round_slot"),
+    )
+    op.create_index(
+        op.f("ix_interview_round_slots_round_id"),
+        "interview_round_slots",
+        ["round_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_interview_round_slots_slot_id"),
+        "interview_round_slots",
+        ["slot_id"],
+        unique=False,
     )
     op.create_table(
         "documents",
@@ -450,6 +503,29 @@ def upgrade() -> None:
         unique=False,
     )
     op.create_index(op.f("ix_question_cards_status"), "question_cards", ["status"], unique=False)
+    op.create_table(
+        "question_card_slots",
+        sa.Column("id", sa.String(), nullable=False),
+        sa.Column("question_card_id", sa.String(), nullable=False),
+        sa.Column("slot_id", sa.String(), nullable=False),
+        sa.Column("created_at", sa.DateTime(), nullable=False),
+        sa.ForeignKeyConstraint(["question_card_id"], ["question_cards.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["slot_id"], ["stakeholder_slots.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("question_card_id", "slot_id", name="uq_question_card_slot"),
+    )
+    op.create_index(
+        op.f("ix_question_card_slots_question_card_id"),
+        "question_card_slots",
+        ["question_card_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_question_card_slots_slot_id"),
+        "question_card_slots",
+        ["slot_id"],
+        unique=False,
+    )
     op.create_table(
         "ai_usage_events",
         sa.Column("id", sa.String(), nullable=False),
@@ -741,6 +817,31 @@ def upgrade() -> None:
         unique=False,
     )
     op.create_table(
+        "card_evidence_slots",
+        sa.Column("id", sa.String(), nullable=False),
+        sa.Column("evidence_id", sa.String(), nullable=False),
+        sa.Column("slot_id", sa.String(), nullable=False),
+        sa.Column("relevance", sa.Numeric(precision=4, scale=3), nullable=True),
+        sa.Column("reason", sa.Text(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=False),
+        sa.ForeignKeyConstraint(["evidence_id"], ["card_criterion_evidence.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["slot_id"], ["stakeholder_slots.id"], ondelete="CASCADE"),
+        sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("evidence_id", "slot_id", name="uq_card_evidence_slot"),
+    )
+    op.create_index(
+        op.f("ix_card_evidence_slots_evidence_id"),
+        "card_evidence_slots",
+        ["evidence_id"],
+        unique=False,
+    )
+    op.create_index(
+        op.f("ix_card_evidence_slots_slot_id"),
+        "card_evidence_slots",
+        ["slot_id"],
+        unique=False,
+    )
+    op.create_table(
         "interview_round_aggregates",
         sa.Column("id", sa.String(), nullable=False),
         sa.Column("round_id", sa.String(), nullable=False),
@@ -796,6 +897,9 @@ def downgrade() -> None:
         table_name="interview_round_aggregates",
     )
     op.drop_table("interview_round_aggregates")
+    op.drop_index(op.f("ix_card_evidence_slots_slot_id"), table_name="card_evidence_slots")
+    op.drop_index(op.f("ix_card_evidence_slots_evidence_id"), table_name="card_evidence_slots")
+    op.drop_table("card_evidence_slots")
     op.drop_index("ix_cce_session_card_criterion", table_name="card_criterion_evidence")
     op.drop_index("ix_cce_session_card", table_name="card_criterion_evidence")
     op.drop_index(
@@ -843,6 +947,11 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_ai_usage_events_interview_session_id"), table_name="ai_usage_events")
     op.drop_index(op.f("ix_ai_usage_events_document_id"), table_name="ai_usage_events")
     op.drop_table("ai_usage_events")
+    op.drop_index(op.f("ix_question_card_slots_slot_id"), table_name="question_card_slots")
+    op.drop_index(
+        op.f("ix_question_card_slots_question_card_id"), table_name="question_card_slots"
+    )
+    op.drop_table("question_card_slots")
     op.drop_index(op.f("ix_question_cards_status"), table_name="question_cards")
     op.drop_index(op.f("ix_question_cards_interview_theme_id"), table_name="question_cards")
     op.drop_index(op.f("ix_question_cards_document_id"), table_name="question_cards")
@@ -873,6 +982,9 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_documents_is_frozen"), table_name="documents")
     op.drop_index(op.f("ix_documents_interview_round_id"), table_name="documents")
     op.drop_table("documents")
+    op.drop_index(op.f("ix_interview_round_slots_slot_id"), table_name="interview_round_slots")
+    op.drop_index(op.f("ix_interview_round_slots_round_id"), table_name="interview_round_slots")
+    op.drop_table("interview_round_slots")
     op.drop_index(op.f("ix_interview_rounds_status"), table_name="interview_rounds")
     op.drop_index(op.f("ix_interview_rounds_series_id"), table_name="interview_rounds")
     op.drop_index(op.f("ix_interview_rounds_guide_document_id"), table_name="interview_rounds")
@@ -881,7 +993,14 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_interview_series_stakeholder_profile_id"), table_name="interview_series")
     op.drop_index(op.f("ix_interview_series_project_id"), table_name="interview_series")
     op.drop_table("interview_series")
-    op.drop_index(op.f("ix_stakeholder_profiles_slot_id"), table_name="stakeholder_profiles")
+    op.drop_index(op.f("ix_stakeholder_profile_slots_slot_id"), table_name="stakeholder_profile_slots")
+    op.drop_index(
+        op.f("ix_stakeholder_profile_slots_project_id"), table_name="stakeholder_profile_slots"
+    )
+    op.drop_index(
+        op.f("ix_stakeholder_profile_slots_profile_id"), table_name="stakeholder_profile_slots"
+    )
+    op.drop_table("stakeholder_profile_slots")
     op.drop_index(op.f("ix_stakeholder_profiles_project_id"), table_name="stakeholder_profiles")
     op.drop_table("stakeholder_profiles")
     op.drop_index(op.f("ix_stakeholder_slots_project_id"), table_name="stakeholder_slots")

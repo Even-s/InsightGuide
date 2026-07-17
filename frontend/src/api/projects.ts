@@ -134,7 +134,8 @@ export interface StakeholderSlot {
 export interface StakeholderProfile {
   id: string
   projectId: string
-  slotId?: string
+  assignedSlotIds: string[]
+  primarySlotId?: string | null
   name: string
   roleTitle?: string
   department?: string
@@ -299,7 +300,8 @@ export async function deleteStakeholderSlot(slotId: string): Promise<void> {
 // --- Stakeholder Profile API ---
 
 export async function createStakeholder(projectId: string, data: {
-  slot_id?: string
+  slot_ids?: string[]
+  primary_slot_id?: string | null
   name: string
   role_title?: string
   department?: string
@@ -319,7 +321,6 @@ export async function listStakeholders(projectId: string): Promise<StakeholderPr
 }
 
 export async function updateStakeholder(profileId: string, data: {
-  slot_id?: string | null
   name?: string
   stakeholder_type?: string
   expertise_tags?: string[]
@@ -327,6 +328,14 @@ export async function updateStakeholder(profileId: string, data: {
   status?: string
 }): Promise<StakeholderProfile> {
   const res = await apiClient.put(`/api/projects/stakeholders/${profileId}`, data)
+  return res.data
+}
+
+export async function updateStakeholderProfileSlots(profileId: string, data: {
+  slot_ids: string[]
+  primary_slot_id?: string | null
+}): Promise<StakeholderProfile> {
+  const res = await apiClient.put(`/api/projects/stakeholders/${profileId}/slots`, data)
   return res.data
 }
 

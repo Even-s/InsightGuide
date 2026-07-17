@@ -54,3 +54,8 @@ class QuestionCard(Base):
         cascade="all, delete-orphan",
         passive_deletes=True,
     )
+    slot_sources = relationship(
+        "QuestionCardSlot",
+        back_populates="question_card",
+        cascade="all, delete-orphan",
+    )

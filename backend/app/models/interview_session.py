@@ -92,6 +92,7 @@ class InterviewSession(Base):
         cascade="all, delete-orphan",
     )
 
+
 class InterviewCardState(Base):
     """InterviewCardState model - tracks question card state during an interview session."""
 

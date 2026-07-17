@@ -23,6 +23,7 @@ from app.schemas.project import (
     StakeholderProfileDraft,
     StakeholderProfileDraftResponse,
     StakeholderProfileSchema,
+    StakeholderProfileSlotUpdate,
     StakeholderProfileUpdate,
     StakeholderSlotCreate,
     StakeholderSlotDraft,
@@ -36,6 +37,7 @@ from app.services.stakeholder_plan_service import (
     StakeholderSlotHasProfilesError,
     stakeholder_plan_service,
 )
+from app.utils.chinese import normalize_traditional_zh, to_traditional_zh
 
 logger = logging.getLogger(__name__)
 
@@ -68,8 +70,14 @@ def _project_to_schema(project) -> ProjectSchema:
 
 def _slot_to_schema(slot, db: Session) -> StakeholderSlotSchema:
     from app.models.stakeholder_profile import StakeholderProfile
+    from app.models.stakeholder_profile_slot import StakeholderProfileSlot
 
-    profiles = db.query(StakeholderProfile).filter(StakeholderProfile.slot_id == slot.id).all()
+    profiles = (
+        db.query(StakeholderProfile)
+        .join(StakeholderProfileSlot, StakeholderProfileSlot.profile_id == StakeholderProfile.id)
+        .filter(StakeholderProfileSlot.slot_id == slot.id)
+        .all()
+    )
     interviews_done = sum(p.interview_count for p in profiles)
 
     return StakeholderSlotSchema(
@@ -94,10 +102,17 @@ def _slot_to_schema(slot, db: Session) -> StakeholderSlotSchema:
 
 
 def _profile_to_schema(profile) -> StakeholderProfileSchema:
+    assignments = list(getattr(profile, "slot_assignments", []) or [])
+    assigned_slot_ids = [assignment.slot_id for assignment in assignments]
+    primary_assignment = next(
+        (assignment for assignment in assignments if assignment.is_primary), None
+    )
+
     return StakeholderProfileSchema(
         id=profile.id,
         projectId=profile.project_id,
-        slotId=profile.slot_id,
+        assignedSlotIds=assigned_slot_ids,
+        primarySlotId=primary_assignment.slot_id if primary_assignment else None,
         name=profile.name,
         roleTitle=profile.role_title,
         department=profile.department,
@@ -142,7 +157,7 @@ async def voice_to_project_fields(audio: UploadFile = File(...)):
             file=(filename, io.BytesIO(audio_bytes)),
             language="zh",
         )
-        transcript = transcript_response.text.strip()
+        transcript = to_traditional_zh(transcript_response.text)
     except Exception as e:
         logger.error(f"Whisper transcription failed: {e}")
         raise HTTPException(status_code=500, detail="語音轉文字失敗")
@@ -161,6 +176,7 @@ async def voice_to_project_fields(audio: UploadFile = File(...)):
                     "content": (
                         "你是專案需求分析助手。使用者用語音描述了一個專案需求。"
                         "請從中萃取結構化資訊，填入 JSON 格式。\n"
+                        "所有輸出文字必須使用台灣繁體中文，不可使用簡體中文。\n"
                         "如果某欄位使用者沒有提到，設為 null。\n"
                         "只回傳 JSON，不要其他文字。"
                     ),
@@ -194,6 +210,7 @@ async def voice_to_project_fields(audio: UploadFile = File(...)):
             parsed = json.loads(content)
         else:
             parsed = ai_result
+        parsed = normalize_traditional_zh(parsed)
     except Exception as e:
         logger.error(f"GPT parsing failed: {e}")
         raise HTTPException(
@@ -371,7 +388,7 @@ async def voice_to_stakeholder_slot_draft(
             language="zh",
             response_format="json",
         )
-        transcript = str(getattr(transcript_response, "text", "") or "").strip()
+        transcript = to_traditional_zh(str(getattr(transcript_response, "text", "") or ""))
     except Exception as exc:
         logger.exception("Stakeholder role transcription failed: %s", exc)
         raise HTTPException(
@@ -456,7 +473,7 @@ async def voice_to_stakeholder_profile_draft(
             language="zh",
             response_format="json",
         )
-        transcript = str(getattr(transcript_response, "text", "") or "").strip()
+        transcript = to_traditional_zh(str(getattr(transcript_response, "text", "") or ""))
     except Exception as exc:
         logger.exception("Stakeholder profile transcription failed: %s", exc)
         raise HTTPException(
@@ -521,22 +538,29 @@ async def voice_to_interview_guide_draft(
     except (json.JSONDecodeError, TypeError, ValueError) as exc:
         raise HTTPException(status_code=400, detail="訪談大綱設定格式不正確。") from exc
 
-    slot_context = {}
-    if profile.slot_id:
-        slot = (
-            db.query(StakeholderSlot)
-            .filter(
-                StakeholderSlot.id == profile.slot_id,
-                StakeholderSlot.project_id == project_id,
-            )
-            .first()
+    assigned_slot_ids = [
+        assignment.slot_id for assignment in (getattr(profile, "slot_assignments", None) or [])
+    ]
+    slots = (
+        db.query(StakeholderSlot)
+        .filter(
+            StakeholderSlot.project_id == project_id,
+            StakeholderSlot.id.in_(assigned_slot_ids),
         )
-        if slot:
-            slot_context = {
+        .all()
+        if assigned_slot_ids
+        else []
+    )
+    slot_context = {
+        "roles": [
+            {
                 "role_category": slot.role_category,
                 "role_label": slot.role_label,
                 "rationale": slot.rationale or "",
             }
+            for slot in slots
+        ]
+    }
 
     profile_context = {
         "name": profile.name,
@@ -567,7 +591,7 @@ async def voice_to_interview_guide_draft(
             language="zh",
             response_format="json",
         )
-        transcript = str(getattr(transcript_response, "text", "") or "").strip()
+        transcript = to_traditional_zh(str(getattr(transcript_response, "text", "") or ""))
     except Exception as exc:
         logger.exception("Interview guide settings transcription failed: %s", exc)
         raise HTTPException(
@@ -711,7 +735,10 @@ def create_stakeholder(
     if not project:
         raise HTTPException(status_code=404, detail="Project not found")
 
-    profile = stakeholder_plan_service.create_profile(db, project_id, data.model_dump())
+    try:
+        profile = stakeholder_plan_service.create_profile(db, project_id, data.model_dump())
+    except StakeholderProfileSlotNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return _profile_to_schema(profile)
 
 
@@ -735,10 +762,27 @@ def update_stakeholder(
 ):
     """Update a stakeholder profile."""
     update_data = data.model_dump(exclude_none=True)
-    if "slot_id" in data.model_fields_set:
-        update_data["slot_id"] = data.slot_id
     try:
         profile = stakeholder_plan_service.update_profile(db, profile_id, update_data)
+    except StakeholderProfileSlotNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    if not profile:
+        raise HTTPException(status_code=404, detail="Profile not found")
+    return _profile_to_schema(profile)
+
+
+@router.put("/stakeholders/{profile_id}/slots")
+def update_stakeholder_profile_slots(
+    profile_id: str, data: StakeholderProfileSlotUpdate, db: Session = Depends(get_db)
+):
+    """Replace a stakeholder profile's role memberships."""
+    try:
+        profile = stakeholder_plan_service.set_profile_slots(
+            db,
+            profile_id,
+            data.slot_ids,
+            data.primary_slot_id,
+        )
     except StakeholderProfileSlotNotFoundError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     if not profile:

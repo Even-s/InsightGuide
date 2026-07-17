@@ -8,8 +8,10 @@ from sqlalchemy.orm import Session
 
 from app.models.interview_insight_memo import InterviewInsightMemo
 from app.models.interview_round import InterviewRound
+from app.models.interview_round_slot import InterviewRoundSlot
 from app.models.interview_series import InterviewSeries
 from app.models.interview_session import InterviewSession
+from app.models.stakeholder_profile_slot import StakeholderProfileSlot
 from app.services.interview_series_service import interview_series_service
 from app.services.stakeholder_card_generator import stakeholder_card_generator
 
@@ -43,6 +45,7 @@ class InterviewRoundService:
         generation_mode: str = "follow_up",
         source_session_ids: Optional[List[str]] = None,
         focus_topics: Optional[List[str]] = None,
+        target_slot_ids: Optional[List[str]] = None,
         exclude_completed_questions: bool = True,
     ) -> InterviewRound:
         if generation_mode not in GENERATION_MODES:
@@ -72,6 +75,20 @@ class InterviewRoundService:
             if valid_count != len(source_ids):
                 raise ValueError("One or more source sessions do not belong to this stakeholder")
 
+        target_ids = list(dict.fromkeys(target_slot_ids or []))
+        if target_ids:
+            valid_count = (
+                db.query(StakeholderProfileSlot)
+                .filter(
+                    StakeholderProfileSlot.profile_id == series.stakeholder_profile_id,
+                    StakeholderProfileSlot.project_id == series.project_id,
+                    StakeholderProfileSlot.slot_id.in_(target_ids),
+                )
+                .count()
+            )
+            if valid_count != len(target_ids):
+                raise ValueError("One or more target roles do not belong to this stakeholder")
+
         max_round = (
             db.query(func.max(InterviewRound.round_number))
             .filter(InterviewRound.series_id == series_id)
@@ -90,6 +107,15 @@ class InterviewRoundService:
             status="draft",
         )
         db.add(interview_round)
+        db.flush()
+        for slot_id in target_ids:
+            db.add(
+                InterviewRoundSlot(
+                    id=f"irsl_{uuid.uuid4().hex[:12]}",
+                    round_id=interview_round.id,
+                    slot_id=slot_id,
+                )
+            )
         db.commit()
         db.refresh(interview_round)
         return interview_round
@@ -102,6 +128,7 @@ class InterviewRoundService:
         objective: Optional[str] = None,
         focus_topics: Optional[List[str]] = None,
     ) -> InterviewRound:
+        series = interview_series_service.get_series(db, series_id)
         latest = (
             db.query(InterviewRound)
             .filter(InterviewRound.series_id == series_id)
@@ -143,8 +170,19 @@ class InterviewRoundService:
             generation_mode="follow_up" if latest else "new_scope",
             source_session_ids=source_ids,
             focus_topics=focus_topics,
+            target_slot_ids=self._profile_slot_ids(db, series.stakeholder_profile_id),
             exclude_completed_questions=True,
         )
+
+    @staticmethod
+    def _profile_slot_ids(db: Session, profile_id: str) -> List[str]:
+        return [
+            row.slot_id
+            for row in db.query(StakeholderProfileSlot)
+            .filter(StakeholderProfileSlot.profile_id == profile_id)
+            .order_by(StakeholderProfileSlot.is_primary.desc(), StakeholderProfileSlot.created_at)
+            .all()
+        ]
 
     def generate_round_guide(
         self,

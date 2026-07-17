@@ -30,8 +30,16 @@ def persist_criterion_evidence(
         evaluation_seq: Sequence number for this evaluation
     """
     from app.models.card_criterion_evidence import CardCriterionEvidence
+    from app.models.card_evidence_slot import CardEvidenceSlot
+    from app.models.question_card_slot import QuestionCardSlot
 
     skip_statuses = {"not_addressed"}
+    source_slot_ids = [
+        row.slot_id
+        for row in db.query(QuestionCardSlot)
+        .filter(QuestionCardSlot.question_card_id == card_id)
+        .all()
+    ]
     for crit_eval in criterion_evaluations:
         status = crit_eval.get("status", "not_addressed")
         if status in skip_statuses:
@@ -53,6 +61,16 @@ def persist_criterion_evidence(
             created_at=datetime.utcnow(),
         )
         db.add(evidence)
+        for slot_id in source_slot_ids:
+            db.add(
+                CardEvidenceSlot(
+                    id=f"cesl_{uuid.uuid4().hex[:12]}",
+                    evidence_id=evidence.id,
+                    slot_id=slot_id,
+                    relevance=crit_eval.get("evaluator_confidence"),
+                    reason=crit_eval.get("reason"),
+                )
+            )
 
 
 def load_existing_evidence(
@@ -152,7 +170,5 @@ def derive_state_from_ledger(
         e["status"] not in ("not_addressed", "not_applicable") for e in criterion_evaluations
     )
 
-    state = answer_completion_scorer.determine_state(
-        completion_score, is_sufficient, has_response
-    )
+    state = answer_completion_scorer.determine_state(completion_score, is_sufficient, has_response)
     return (state, completion_score)

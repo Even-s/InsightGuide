@@ -9,6 +9,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { createProject, listProjects, voiceToProjectFields, type Project } from '@/api/projects'
+import { normalizeTraditionalChinese, toTraditionalChinese } from '@/utils/traditionalChinese'
 
 export default function DocumentUploadPage() {
   const [title, setTitle] = useState('')
@@ -48,16 +49,18 @@ export default function DocumentUploadPage() {
         setIsProcessingVoice(true)
         try {
           const result = await voiceToProjectFields(blob)
-          if (result.parsed.title) setTitle(result.parsed.title)
-          if (result.parsed.description) {
+          const parsed = normalizeTraditionalChinese(result.parsed)
+          const transcript = toTraditionalChinese(result.transcript)
+          if (parsed.title) setTitle(parsed.title)
+          if (parsed.description) {
             const parts: string[] = []
-            if (result.parsed.description) parts.push(result.parsed.description)
-            if (result.parsed.business_domain) parts.push(`領域：${result.parsed.business_domain}`)
-            if (result.parsed.key_objectives?.length) parts.push(`目標：${result.parsed.key_objectives.join('、')}`)
-            if (result.parsed.out_of_scope?.length) parts.push(`不含：${result.parsed.out_of_scope.join('、')}`)
+            if (parsed.description) parts.push(parsed.description)
+            if (parsed.business_domain) parts.push(`領域：${parsed.business_domain}`)
+            if (parsed.key_objectives?.length) parts.push(`目標：${parsed.key_objectives.join('、')}`)
+            if (parsed.out_of_scope?.length) parts.push(`不含：${parsed.out_of_scope.join('、')}`)
             setDescription(parts.join('\n'))
-          } else if (result.transcript) {
-            setDescription(result.transcript)
+          } else if (transcript) {
+            setDescription(transcript)
           }
         } catch (error: unknown) {
           const axiosErr = error as { response?: { data?: { detail?: string } } }

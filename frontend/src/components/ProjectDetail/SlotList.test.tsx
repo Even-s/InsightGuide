@@ -159,7 +159,8 @@ describe('SlotList', () => {
       profiles: [{
         id: 'profile-engineer',
         projectId: 'proj-1',
-        slotId: 'slot-engineering',
+        assignedSlotIds: ['slot-engineering'],
+        primarySlotId: 'slot-engineering',
         name: '王小明',
         roleTitle: '系統維運工程師',
         department: '資訊部',
@@ -194,6 +195,8 @@ describe('SlotList', () => {
       profiles: [{
         id: 'profile-unassigned',
         projectId: 'proj-1',
+        assignedSlotIds: [],
+        primarySlotId: null,
         name: '陳未分配',
         roleTitle: '候補受訪者',
         department: '門診',
@@ -210,10 +213,8 @@ describe('SlotList', () => {
     expect(screen.getByText('未隸屬任何角色的受訪者')).toBeInTheDocument()
     expect(screen.getByText('陳未分配')).toBeInTheDocument()
 
-    fireEvent.change(screen.getByLabelText('調整陳未分配的歸屬角色'), {
-      target: { value: 'slot-user' },
-    })
-    expect(onReassignProfile).toHaveBeenCalledWith('profile-unassigned', 'slot-user')
+    fireEvent.click(screen.getByRole('button', { name: '+ 掛號櫃台人員' }))
+    expect(onReassignProfile).toHaveBeenCalledWith('profile-unassigned', ['slot-user'])
   })
 
   it('groups reorder, skip, and delete actions in the more menu', () => {

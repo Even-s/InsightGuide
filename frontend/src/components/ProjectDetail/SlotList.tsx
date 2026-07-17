@@ -18,7 +18,7 @@ interface SlotListProps {
   onUpdateSlot: (slotId: string) => void
   onAddProfile: (slotId: string) => void
   onDeleteProfile: (profileId: string) => void
-  onReassignProfile: (profileId: string, slotId: string | null) => void
+  onReassignProfile: (profileId: string, slotIds: string[]) => void
   onShowGuideSettings: (profileId: string) => void
 }
 
@@ -217,7 +217,9 @@ export function SlotList({
   const [openMenuSlot, setOpenMenuSlot] = useState<string | null>(null)
   const initializedExpansion = useRef(false)
   const slotIds = new Set(slots.map(slot => slot.id))
-  const unassignedProfiles = profiles.filter(profile => !profile.slotId || !slotIds.has(profile.slotId))
+  const unassignedProfiles = profiles.filter(profile => (
+    !profile.assignedSlotIds?.some(slotId => slotIds.has(slotId))
+  ))
 
   useEffect(() => {
     if (initializedExpansion.current || slots.length === 0) return
@@ -252,7 +254,7 @@ export function SlotList({
   return (
     <div className="space-y-5">
       {slots.map((slot, slotIndex) => {
-        const slotProfiles = profiles.filter(profile => profile.slotId === slot.id)
+        const slotProfiles = profiles.filter(profile => profile.assignedSlotIds?.includes(slot.id))
         const roleStyle = ROLE_STYLES[slot.roleCategory] || DEFAULT_ROLE_STYLE
         const progress = Math.min(100, Math.round((slot.interviewsDone / Math.max(slot.minInterviews, 1)) * 100))
         const isSkipped = slot.status === 'skipped'

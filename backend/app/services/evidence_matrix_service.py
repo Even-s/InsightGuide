@@ -103,23 +103,67 @@ class EvidenceMatrixService:
                     .filter(StakeholderProfile.id == memo.stakeholder_profile_id)
                     .first()
                 )
+            role_context = self._memo_role_context(db, memo)
+            role_labels = [role["roleLabel"] for role in role_context] or [
+                stakeholder.stakeholder_type if stakeholder else "unknown"
+            ]
 
             for candidate in memo.requirement_candidates or []:
-                all_candidates.append(
-                    {
-                        "memo_id": memo.id,
-                        "stakeholder_role": (
-                            stakeholder.stakeholder_type if stakeholder else "unknown"
-                        ),
-                        "stakeholder_name": stakeholder.name if stakeholder else "未知",
-                        "description": candidate.get("description", ""),
-                        "source": candidate.get("source", "inferred"),
-                        "confidence": candidate.get("confidence", "medium"),
-                        "evidence_quote": candidate.get("evidence_quote", ""),
-                        "needs_validation_from": candidate.get("needs_validation_from", []),
-                    }
-                )
+                for role_label in role_labels:
+                    all_candidates.append(
+                        {
+                            "memo_id": memo.id,
+                            "stakeholder_role": role_label,
+                            "stakeholder_name": stakeholder.name if stakeholder else "未知",
+                            "description": candidate.get("description", ""),
+                            "source": candidate.get("source", "inferred"),
+                            "confidence": candidate.get("confidence", "medium"),
+                            "evidence_quote": candidate.get("evidence_quote", ""),
+                            "needs_validation_from": candidate.get("needs_validation_from", []),
+                            "source_roles": role_context,
+                        }
+                    )
         return all_candidates
+
+    @staticmethod
+    def _memo_role_context(db: Session, memo: Any) -> List[Dict]:
+        from app.models.interview_round_slot import InterviewRoundSlot
+        from app.models.stakeholder_profile_slot import StakeholderProfileSlot
+        from app.models.stakeholder_slot import StakeholderSlot
+
+        slot_ids: List[str] = []
+        if getattr(memo, "interview_round_id", None):
+            slot_ids = [
+                row.slot_id
+                for row in db.query(InterviewRoundSlot)
+                .filter(InterviewRoundSlot.round_id == memo.interview_round_id)
+                .all()
+            ]
+        if not slot_ids and getattr(memo, "stakeholder_profile_id", None):
+            slot_ids = [
+                row.slot_id
+                for row in db.query(StakeholderProfileSlot)
+                .filter(StakeholderProfileSlot.profile_id == memo.stakeholder_profile_id)
+                .order_by(
+                    StakeholderProfileSlot.is_primary.desc(), StakeholderProfileSlot.created_at
+                )
+                .all()
+            ]
+        if not slot_ids:
+            return []
+        slots = (
+            db.query(StakeholderSlot)
+            .filter(StakeholderSlot.id.in_(list(dict.fromkeys(slot_ids))))
+            .all()
+        )
+        return [
+            {
+                "slotId": slot.id,
+                "roleLabel": slot.role_label,
+                "roleCategory": slot.role_category,
+            }
+            for slot in slots
+        ]
 
     def update_matrix(self, db: Session, project_id: str) -> RequirementEvidenceMatrix:
         """Refresh derived matrix metadata from one canonical cumulative memo per round.
