@@ -146,10 +146,10 @@
 
 | ID | P | 測試情境 | 前置條件與步驟摘要 | 預期結果 | 自動化 |
 |---|---|---|---|---|---|
-| DOC-001 | P1 | 上傳支援格式 | 分別上傳 TD-08 PDF、DOCX、Markdown | 檔案存入 MinIO，Document 建立，檔名/MIME/狀態正確 | API/INT |
+| DOC-001 | P1 | 上傳支援格式 | 分別上傳 TD-08 PDF、DOCX、Markdown | 檔案存入 MinIO，Document 建立，檔名/MIME/狀態正確；Markdown 可直接分析，PDF/DOCX 在解析器完成前應明確進入失敗狀態而非假裝分析成功 | API/INT |
 | DOC-002 | P1 | 非法、空白與超大檔案 | 上傳空檔、錯誤副檔名、超過限制檔案 | 拒絕並回傳明確狀態碼；MinIO/DB 不留半成品 | API/INT |
 | DOC-003 | P0 | 從專案主題建立文件 | 由 guide 生成流程呼叫 `/documents/from-topic` | 建立的 document 綁定正確 project，進入 analysis 流程 | API |
-| DOC-004 | P0 | Celery 分析成功 | 送出文件，worker 產生 themes/cards | 狀態依序更新，sections/themes/cards 完整，SSE 發出完成事件 | INT |
+| DOC-004 | P0 | Celery 分析成功 | 送出可直接解析的 Markdown/TXT 文件，worker 產生 themes/cards | 狀態依序更新，themes/cards 完整，SSE 發出完成事件 | INT |
 | DOC-005 | P1 | 分析失敗與重試 | 模擬轉檔、OpenAI、MinIO 或 worker 失敗 | 狀態為 failed 且保留原因；重試不建立重複主題／卡片 | INT |
 | DOC-006 | P1 | 分析中頁面 | 開啟仍在 processing 的 document | 顯示進度並輪詢／接收事件；完成後自動載入，沒有無限 loading | E2E |
 | EDT-001 | P0 | 準備模式載入 | TD-04 開啟 `/editor/:documentId` | 顯示訪談目標、主題順序、提問依據、BRD mapping 與問題數 | E2E |
@@ -178,7 +178,7 @@
 | INT-011 | P1 | 多候選卡片 | 一句回答可能對應多張卡 | 顯示候選，選擇後 active card 正確；buffered answer 不遺失 | UNIT/E2E |
 | INT-012 | P1 | 手動完成與復原 | 對卡片 manual complete，再 undo | 狀態與 manual override 正確持久化；SSE/UI 同步 | API/E2E |
 | INT-013 | P1 | 追問佇列 | 產生多個追問並跳過第一個 | 顯示當前追問與佇列長度；跳過後進下一個，不重複 | UNIT/E2E |
-| INT-014 | P1 | 主題前後切換 | 第一個、中央、最後一個主題操作導航 | 邊界按鈕停用；current theme/section 與後端一致 | API/E2E |
+| INT-014 | P1 | 主題前後切換 | 第一個、中央、最後一個主題操作導航 | 邊界按鈕停用；current theme 與後端一致 | API/E2E |
 | INT-015 | P0 | 暫停與恢復 | 訪談中暫停，再恢復 | session interviewing ↔ paused；錄音／轉錄狀態一致，不重複計時 | API/E2E |
 | INT-016 | P0 | 重新整理與續訪 | 進行中重新整理，或由 session URL 進入 | 載入原 session、current theme、卡片狀態與 transcript；不建立新 session | API/E2E |
 | INT-017 | P1 | SSE 斷線重連 | 中斷 Redis/SSE 後恢復，傳送重複事件 | 自動重連；事件冪等，不重複更新卡片或 transcript | INT/E2E |

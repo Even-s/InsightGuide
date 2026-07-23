@@ -10,15 +10,14 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import inspect
+from sqlalchemy.exc import SQLAlchemyError
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from app.db.session import engine
-
 
 REQUIRED_TABLES = {
     "users",
@@ -59,6 +58,7 @@ FORBIDDEN_TABLES = {
 }
 
 REQUIRED_COLUMNS = {
+    "projects": {"mode", "is_ephemeral", "expires_at", "template_id"},
     "documents": {"interview_round_id", "guide_version", "is_frozen"},
     "interview_sessions": {
         "current_theme_id",
@@ -88,6 +88,10 @@ FORBIDDEN_COLUMNS = {
     "interview_themes": {"source_section_ids"},
     "interview_insight_memos": {"qa_summaries"},
     "brd_readiness_reports": {"ready_sections", "insufficient_sections"},
+}
+
+REQUIRED_FK_DELETE_BEHAVIORS = {
+    ("interview_sessions", "current_theme_id"): "SET NULL",
 }
 
 
@@ -128,6 +132,26 @@ def main() -> None:
                 f"{table_name}: forbidden columns {', '.join(present_forbidden_columns)}"
             )
 
+    foreign_key_failures: list[str] = []
+    for (table_name, column_name), required_behavior in REQUIRED_FK_DELETE_BEHAVIORS.items():
+        if table_name not in existing_tables:
+            continue
+        matching_foreign_keys = [
+            foreign_key
+            for foreign_key in inspector.get_foreign_keys(table_name)
+            if foreign_key.get("constrained_columns") == [column_name]
+        ]
+        actual_behavior = (
+            (matching_foreign_keys[0].get("options") or {}).get("ondelete")
+            if matching_foreign_keys
+            else None
+        )
+        if (actual_behavior or "").upper() != required_behavior:
+            foreign_key_failures.append(
+                f"{table_name}.{column_name}: expected ON DELETE {required_behavior}, "
+                f"found {actual_behavior or 'no matching foreign key'}"
+            )
+
     failures = []
     if missing_tables:
         failures.append(f"Missing required tables: {', '.join(missing_tables)}")
@@ -135,6 +159,7 @@ def main() -> None:
         failures.append(f"Forbidden retired tables exist: {', '.join(forbidden_tables)}")
     failures.extend(column_failures)
     failures.extend(forbidden_column_failures)
+    failures.extend(foreign_key_failures)
 
     if failures:
         print("Clean baseline schema smoke check failed:", file=sys.stderr)

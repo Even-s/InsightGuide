@@ -34,6 +34,8 @@ describe('ProjectDetailPage add-role form', () => {
           title: '測試專案',
           description: '測試說明',
           status: 'active',
+          mode: 'formal',
+          isEphemeral: false,
           createdAt: '2026-07-14T00:00:00Z',
           updatedAt: '2026-07-14T00:00:00Z',
         },

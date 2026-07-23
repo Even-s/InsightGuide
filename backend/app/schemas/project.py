@@ -28,6 +28,10 @@ class ProjectSchema(BaseModel):
     description: Optional[str] = None
     brdScope: Optional[Dict[str, Any]] = None
     status: str
+    mode: str = "formal"
+    isEphemeral: bool = False
+    expiresAt: Optional[datetime] = None
+    templateId: Optional[str] = None
     createdAt: datetime
     updatedAt: datetime
 

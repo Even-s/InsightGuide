@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import JSON, Column, DateTime, ForeignKey, String, Text
+from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, String, Text
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base
@@ -23,6 +23,10 @@ class Project(Base):
     description = Column(Text, nullable=True)
     brd_scope = Column(JSON, nullable=True)
     status = Column(String, nullable=False, default="active", index=True)
+    mode = Column(String, nullable=False, default="formal", index=True)
+    is_ephemeral = Column(Boolean, nullable=False, default=False, index=True)
+    expires_at = Column(DateTime, nullable=True, index=True)
+    template_id = Column(String, nullable=True, index=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
 

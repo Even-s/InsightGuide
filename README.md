@@ -8,13 +8,13 @@ InsightGuide 是一款 AI 驅動的需求訪談輔助系統，透過 OpenAI Real
 
 **版本**: v0.2.0
 **開發階段**: 核心功能完成，進入優化階段
-**最後更新**: 2026-07-15
+**最後更新**: 2026-07-23
 
 ### 實施統計
-- **後端服務**: 31 個 service files
-- **資料模型**: 22 個 models
-- **API Routes**: 19 個 route files
-- **前端頁面**: 13 個 pages
+- **後端服務**: 27 個 service files
+- **資料模型**: 24 個 models
+- **API Routes**: 17 個 route files
+- **前端頁面**: 12 個 pages
 - **React Hooks**: 11 個 custom hooks
 
 ---
@@ -54,8 +54,13 @@ macOS 使用者也可以雙擊 `InsightGuide.command` 啟動，或雙擊 `StopIn
 
 ## 功能
 
+### 快速 Demo 訪談
+- 首頁可直接選擇「現況流程探索」、「痛點與需求探索」或「新系統需求確認」公版模板
+- 後端在單一交易中建立獨立暫存 Project、預設受訪角色、完整訪談指南與 Interview Session，不經 Celery 或文件分析
+- 建立後直接沿用正式 PresenterPage；Demo 專案不會出現在正式專案列表，24 小時到期後會在後續建立 Demo 時清理
+
 ### 需求文件上傳與分析
-- 支援 PDF、Word、Markdown 文件上傳
+- 上傳 API 接受 PDF、Word、Markdown 與純文字；目前分析 worker 僅可靠解析 UTF-8 Markdown／純文字，PDF／Word 二進位內容擷取尚未實作
 - AI 自動分析文件內容，產生訪談主題與問題卡片（Question Cards）
 - 每張卡片包含 coverage rules、semantic anchors、expected keywords
 
@@ -87,7 +92,7 @@ macOS 使用者也可以雙擊 `InsightGuide.command` 啟動，或雙擊 `StopIn
 ### BRD 文件生成
 - 專案模式：從 Round Aggregate / Evidence Matrix 整合多訪談證據產生完整 BRD
 - BRD Readiness 會先檢查證據是否足夠，再進入生成流程
-- 支援 PDF 匯出
+- 目前產出並快取 Markdown；PDF 匯出尚未實作
 
 ---
 
@@ -95,12 +100,16 @@ macOS 使用者也可以雙擊 `InsightGuide.command` 啟動，或雙擊 `StopIn
 
 | 層級 | 技術 |
 |------|------|
-| 前端 | React + TypeScript + Vite + Tailwind CSS + Zustand |
-| 後端 | Python + FastAPI |
-| 背景任務 | Celery + Redis |
+| 前端 | React 18 + TypeScript + Vite + Tailwind CSS + React Router；以 React hooks／元件狀態管理 |
+| 後端 | Python 3.11 + FastAPI + SQLAlchemy + Pydantic |
+| 背景任務 | Celery + Redis；目前只註冊文件分析 worker |
 | 資料庫 | PostgreSQL + pgvector |
 | 物件儲存 | MinIO (S3-compatible) |
-| AI | OpenAI GPT-5.5 / GPT-4o / GPT-5.4-mini / Realtime API / Embeddings |
+| AI | GPT-4o（初始 themes/cards）、GPT-5.5（卡片 metadata）、GPT-5.4-mini（語意與專案分析）、Realtime API |
+
+本機採 hybrid topology：PostgreSQL、Redis、MinIO 在 Docker，FastAPI、Celery、Vite 在主機執行。EC2 prototype 則以單機 Docker Compose 運行完整服務，並由 Caddy 提供 TLS、React SPA、API／SSE 反向代理與檔案網域。
+
+本機啟動會先執行 `alembic upgrade head`；EC2 deploy／restore 另採 clean-v2 fail-closed gate，拒絕無 Alembic 版本的非空 schema，並檢查 retired table／column。認證目前仍是單一使用者開發 stub，不可視為正式的多使用者權限邊界。
 
 完整架構文件請參考 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)。
 

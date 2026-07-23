@@ -1,13 +1,13 @@
 # GPT Model Configuration
 
-**Last Updated**: 2026-07-15
+**Last Updated**: 2026-07-23
 **Status**: Current configuration guide. Historical GPT-4o/Whisper notes remain in archived reports only.
 
 ## Current Model Selection
 
 | Use Case | Model / Service | Configuration Source |
 | --- | --- | --- |
-| High-context document/section analysis | `gpt-5.5` | `DOCUMENT_ANALYSIS_MODEL` / `backend/app/services/openai_service.py` |
+| Configurable Question Card metadata generation | `gpt-5.5` | `DOCUMENT_ANALYSIS_MODEL` / `OpenAIService.generate_card_metadata()` |
 | Uploaded-document theme and Question Card generation | `gpt-4o` | `backend/app/services/openai_service.py` |
 | Stakeholder-specific round guide generation | `gpt-5.4-mini` | `backend/app/services/stakeholder_card_generator.py` |
 | Semantic judgment and Topic Card completion | `gpt-5.4-mini` | `SEMANTIC_UNDERSTANDING_MODEL` |
@@ -36,8 +36,8 @@ Do not keep production credentials in the root `.env`; local service startup use
 
 ## Why This Split
 
-- `gpt-5.5` is the configurable high-context document-analysis model.
-- `gpt-4o` currently generates themes and cards for an uploaded source document.
+- `gpt-5.5` is the configurable model currently used by the Question Card metadata generation path.
+- `gpt-4o` is currently hard-coded in the two-stage uploaded-document pipeline that generates Interview Themes and Question Cards.
 - `gpt-5.4-mini` handles stakeholder-specific planning, live evaluation, memo extraction, and matrix consolidation where latency and cost matter.
 - Realtime transcription stays on the OpenAI Realtime/WebRTC path rather than a backup HTTP audio transcription flow.
 - The application stores only completed Realtime transcript segments; it does not run speaker classification or Q/A reconstruction.

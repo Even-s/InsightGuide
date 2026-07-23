@@ -156,15 +156,20 @@ def ensure_demo_project() -> None:
         connection.execute(
             text(
                 "INSERT INTO projects "
-                "(id, user_id, title, description, brd_scope, status, created_at, updated_at) "
+                "(id, user_id, title, description, brd_scope, status, mode, is_ephemeral, "
+                "expires_at, template_id, created_at, updated_at) "
                 "VALUES (:id, :user_id, :title, :description, CAST(:brd_scope AS JSON), "
-                "'active', NOW(), NOW()) "
+                "'active', 'formal', FALSE, NULL, NULL, NOW(), NOW()) "
                 "ON CONFLICT (id) DO UPDATE SET "
                 "user_id = EXCLUDED.user_id, "
                 "title = EXCLUDED.title, "
                 "description = EXCLUDED.description, "
                 "brd_scope = EXCLUDED.brd_scope, "
                 "status = EXCLUDED.status, "
+                "mode = EXCLUDED.mode, "
+                "is_ephemeral = EXCLUDED.is_ephemeral, "
+                "expires_at = EXCLUDED.expires_at, "
+                "template_id = EXCLUDED.template_id, "
                 "updated_at = NOW()"
             ),
             {

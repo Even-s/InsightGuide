@@ -4,7 +4,7 @@ This deployment runs the complete prototype on one Ubuntu EC2 instance:
 
 - Caddy: HTTPS, React static files, API and SSE reverse proxy
 - FastAPI: application API
-- Celery: document analysis and report jobs
+- Celery: uploaded-document analysis; interview evaluation, memo generation, and theme prewarming still use FastAPI background tasks
 - PostgreSQL 16 with pgvector
 - Redis 7: SSE Pub/Sub and Celery broker/result backend
 - MinIO: private S3-compatible object storage

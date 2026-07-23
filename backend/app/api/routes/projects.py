@@ -63,6 +63,10 @@ def _project_to_schema(project) -> ProjectSchema:
         description=project.description,
         brdScope=project.brd_scope,
         status=project.status,
+        mode=getattr(project, "mode", "formal"),
+        isEphemeral=getattr(project, "is_ephemeral", False),
+        expiresAt=getattr(project, "expires_at", None),
+        templateId=getattr(project, "template_id", None),
         createdAt=project.created_at,
         updatedAt=project.updated_at,
     )

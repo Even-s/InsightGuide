@@ -77,7 +77,7 @@ class ProjectService:
     def list_projects(self, db: Session, user_id: str) -> List[Project]:
         return (
             db.query(Project)
-            .filter(Project.user_id == user_id)
+            .filter(Project.user_id == user_id, Project.mode == "formal")
             .order_by(Project.created_at.desc())
             .all()
         )
@@ -100,9 +100,30 @@ class ProjectService:
         project = db.query(Project).filter(Project.id == project_id).first()
         if not project:
             return False
-        db.delete(project)
-        db.commit()
+
+        try:
+            self.prepare_project_deletion(db, project)
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
         return True
+
+    def prepare_project_deletion(self, db: Session, project: Project) -> None:
+        """Clear cross-aggregate theme pointers before deleting a project.
+
+        The database FK also uses ``ON DELETE SET NULL``. Clearing and flushing
+        first keeps deletion safe for databases that have not yet applied the
+        latest migration and gives both explicit and opportunistic cleanup the
+        same ordering guarantees.
+        """
+        sessions = (
+            db.query(InterviewSession).filter(InterviewSession.project_id == project.id).all()
+        )
+        for session in sessions:
+            session.current_theme_id = None
+        db.flush()
+        db.delete(project)
 
     def get_dashboard(self, db: Session, project_id: str) -> Dict[str, Any]:
         project = db.query(Project).filter(Project.id == project_id).first()

@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 # InsightGuide routes
 from app.api.routes import (
     auth,
+    demo_sessions,
     documents,
     events,
     evidence_matrix,
@@ -44,6 +45,7 @@ app.add_middleware(
 
 # Include InsightGuide routers
 app.include_router(documents.router, prefix="/api/documents", tags=["documents"])
+app.include_router(demo_sessions.router, prefix="/api/demo-sessions", tags=["demo-sessions"])
 app.include_router(question_cards.router, prefix="/api/question-cards", tags=["question-cards"])
 app.include_router(
     interview_sessions.router,

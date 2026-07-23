@@ -2,374 +2,324 @@
 
 ## Overview
 
-InsightGuide is an AI-powered requirements interview assistant. It helps Business Analysts (BAs) conduct structured interviews by:
+InsightGuide is a modular monolith with a separate Celery worker. It supports the complete requirements-interview lifecycle: preparing an interview guide, conducting a Realtime interview, consolidating evidence across rounds, checking BRD readiness, and generating a Markdown BRD.
 
-1. Analyzing uploaded BRD (Business Requirements Document) drafts
-2. Generating interview themes and question cards with coverage rules
-3. Providing real-time transcription and answer evaluation during interviews
-4. Producing post-interview insight memos, evidence matrices, and BRD documents
+The browser, FastAPI application, Celery worker, PostgreSQL, Redis, MinIO, and OpenAI API are the main runtime components. Local development uses a hybrid topology; the EC2 prototype packages the same components into a single-host Docker Compose deployment.
 
 ## System Stack
 
 | Layer | Technology |
-|-------|-----------|
-| Frontend | React 18 + TypeScript + Vite + Tailwind CSS + Zustand |
-| Backend | Python 3.11 + FastAPI + SQLAlchemy + Pydantic |
-| Database | PostgreSQL + pgvector |
-| Cache/PubSub | Redis (SSE events, Celery broker) |
-| Object Storage | MinIO (S3-compatible) |
-| AI | OpenAI GPT-5.x family + Realtime API (WebRTC) |
-| Task Queue | Celery (document analysis worker) |
+|-------|------------|
+| Frontend | React 18, TypeScript, Vite 5, Tailwind CSS, React Router |
+| Frontend state | React hooks and component state; there is no Zustand store layer |
+| Backend | Python 3.11, FastAPI, SQLAlchemy, Pydantic |
+| Database | PostgreSQL 16 with pgvector |
+| Events / queue | Redis Pub/Sub for SSE; separate Redis databases for Celery broker and result backend |
+| Object storage | MinIO (S3-compatible) |
+| Background worker | Celery; currently only the document-analysis task is registered |
+| AI | OpenAI Chat Completions and Realtime transcription over WebRTC |
 
-## Architecture Diagram
+## Runtime Topology
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                         Frontend (Vite)                          │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌───────────────┐   │
-│  │  Upload  │  │  Editor  │  │Interview │  │   Project     │   │
-│  │  Page    │  │  Page    │  │  Page    │  │   Dashboard   │   │
-│  └────┬─────┘  └────┬─────┘  └────┬─────┘  └──────┬────────┘   │
-│       │              │             │               │             │
-│       │         REST API      WebRTC + REST    REST API          │
-└───────┼──────────────┼─────────────┼───────────────┼────────────┘
-        │              │             │               │
-┌───────┼──────────────┼─────────────┼───────────────┼────────────┐
-│       ▼              ▼             ▼               ▼            │
-│                    FastAPI Backend (port 8002)                   │
-│  ┌─────────────────────────────────────────────────────────┐    │
-│  │                     API Routes                          │    │
-│  │  documents | prep-sessions | interview-sessions | brd   │    │
-│  │  projects | evidence-matrix | insight-memos | realtime  │    │
-│  │  question-cards | events | outputs                         │    │
-│  └──────────────────────────┬──────────────────────────────┘    │
-│                             │                                   │
-│  ┌──────────────────────────▼──────────────────────────────┐    │
-│  │                    Services Layer                        │    │
-│  │  ┌────────────────┐  ┌─────────────────────────────┐    │    │
-│  │  │ Document       │  │ Answer Evaluation Engine     │    │    │
-│  │  │ Analysis Flow  │  │  ├─ Semantic Judge (GPT)     │    │    │
-│  │  │  ├─ Themes     │  │  ├─ Keyword/ngram Prefilter │    │    │
-│  │  │  ├─ Cards      │  │  ├─ Criterion Ledger       │    │    │
-│  │  │  └─ Coverage   │  │  └─ State Reducer           │    │    │
-│  │  └────────────────┘  └─────────────────────────────┘    │    │
-│  │  ┌────────────────┐  ┌─────────────────────────────┐    │    │
-│  │  │ Post-Interview │  │ Project-Level Analysis      │    │    │
-│  │  │  ├─ Insight    │  │  ├─ Stakeholder Plan        │    │    │
-│  │  │  │   Memo      │  │  ├─ Evidence Matrix         │    │    │
-│  │  │  ├─ Round      │  │  ├─ BRD Readiness          │    │    │
-│  │  │  │  Aggregate  │  │  └─ Role Filter            │    │    │
-│  │  │  └─ BRD Gen    │  │                             │    │    │
-│  │  └────────────────┘  └─────────────────────────────┘    │    │
-│  │  ┌────────────────┐  ┌─────────────────────────────┐    │    │
-│  │  │ BRD Generation │  │ Billing Service             │    │    │
-│  │  │  ├─ Chapters   │  │  ├─ Token cost tracking     │    │    │
-│  │  │  ├─ AI Rewrite │  │  └─ Audio cost tracking     │    │    │
-│  │  │  └─ Caching    │  └─────────────────────────────┘    │    │
-│  │  └────────────────┘                                      │    │
-│  └──────────────────────────────────────────────────────────┘    │
-│                                                                  │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────────┐    │
-│  │PostgreSQL│  │  Redis   │  │  MinIO   │  │  OpenAI API  │    │
-│  └──────────┘  └──────────┘  └──────────┘  └──────────────┘    │
-└──────────────────────────────────────────────────────────────────┘
+### Local development (hybrid)
+
+`docker-compose.yml` starts infrastructure only. `./insightguide.sh` runs the application processes directly on the host after applying database migrations.
+
+```text
+Browser
+  ├── UI assets ─────> Vite :5174
+  ├── REST/SSE ─────> FastAPI :8002
+  └── WebRTC audio ─> OpenAI Realtime API
+
+Host processes
+  ├── FastAPI :8002
+  ├── Celery worker (solo pool)
+  └── Vite :5174
+
+Docker infrastructure
+  ├── PostgreSQL + pgvector :5432
+  ├── Redis :6379
+  └── MinIO API :9000 / Console :9001
+
+FastAPI / Celery ──> PostgreSQL, Redis, MinIO, OpenAI API
 ```
 
-## Data Model (Entity Relationships)
+### EC2 prototype (single host)
 
-```
-User
- ├── Project (1:N) — multi-interview container
- │    ├── StakeholderSlot (1:N) — AI-suggested role requirements
- │    │    └── StakeholderProfile (1:N) — actual participants
- │    │         └── InterviewSeries (1:N) — one topic across repeated interviews
- │    │              └── InterviewRound (1:N) — an immutable guide/question version
- │    │                   ├── Document (1:1) — guide document selected for this round
- │    │                   ├── InterviewSession (0:N) — resumable visits in one round
- │    │                   ├── InterviewInsightMemo (0:N) — one per visit; latest memo is cumulative
- │    │                   └── InterviewRoundAggregate (0:1) — canonical latest memo/snapshots
- │    ├── InterviewInsightMemo (1:N) — post-interview analysis
- │    ├── RequirementEvidenceMatrix (0:1) — cross-interview consolidation
- │    │    └── EvidenceMatrixEntry (1:N) — candidate requirements
- │    └── BRDReadinessReport (0:N) — generation readiness checks
- │
- ├── Document (1:N) — guide document
- │    ├── InterviewTheme (1:N) — AI-generated interview units
- │    │    └── QuestionCard (1:N) — questions with coverage rules
- │    │         ├── InterviewCardState (1:N per session)
- │    │         ├── CardCoverageEvaluation (1:N, Realtime transcript only)
- │    │         └── CardCriterionEvidence (1:N)
- │    ├── PrepSession (1:1) — preparation container
- │    │    └── InterviewSession (1:N) — actual interview runs
- │    │         ├── InterviewCardState (1:N)
- │    │         ├── LiveUtterance (1:N) — canonical Realtime transcript
- │    │         ├── InterviewBrief (0:1) — pre-interview guide
- │    │         ├── AIUsageEvent (1:N)
- │    └── AIUsageEvent (1:N, document-level costs)
+`deploy/ec2/docker-compose.yml` runs all services on one EC2 host. Only Caddy's HTTP/HTTPS ports are public by default; MinIO's API is bound to loopback unless overridden.
+
+```text
+Internet
+  │
+  ▼
+Caddy :80/:443
+  ├── application host
+  │    ├── /api/*, /health, /docs*, /redoc*, /openapi.json
+  │    │       └── reverse_proxy ──> FastAPI :8002
+  │    └── all other paths ───────> React static files with SPA fallback
+  └── files host ─────────────────> MinIO :9000
+
+Docker Compose network
+  ├── backend (FastAPI, default 2 workers)
+  ├── worker (Celery, default concurrency 2)
+  ├── migrate (on-demand bootstrap / migration tool)
+  ├── PostgreSQL + pgvector
+  ├── password-protected Redis
+  └── MinIO + one-shot bucket initializer
 ```
 
-## Core Workflows
+Caddy keeps upstream reads open (`read_timeout 0` and `flush_interval -1`) so SSE responses are streamed instead of buffered. TLS is managed by Caddy for the configured application and file host names.
 
-### 1. Document Upload & Analysis
+## Application Boundaries
 
-```
-User uploads PDF/DOCX/Markdown
-  → S3 storage
-  → Celery worker: document_analysis_worker.py
-    → Phase 1: generate_interview_themes() [GPT-4o]
-       Analyzes the full document and requests 5-8 interview themes
-    → Phase 2: generate_theme_question_cards() [GPT-4o]
-       For each theme, requests 2-4 focused question cards
-    → Saves InterviewTheme + QuestionCard records
-  → SSE event: ANALYSIS_COMPLETE
-```
+### Frontend
 
-### 2. Interview Session (Real-time)
-
-```
-User selects a stakeholder and topic series
-  → Creates a new InterviewRound with objective, generation mode, and source sessions
-  → Generates a new Document + PrepSession + Themes + QuestionCards
-  → Once a session is created, the guide Document becomes immutable
-  → Historical rounds keep their cards, transcripts, completion state, and insight memo unchanged
-
-User starts interview
-  → Frontend: useRealtimeTranscription hook
-    → WebRTC connection to OpenAI Realtime API
-    → Ephemeral token from backend /api/realtime/token
-  → Audio streamed directly to OpenAI (browser → OpenAI)
-  → Transcript deltas received via WebRTC DataChannel
-  → On completed utterance:
-    Frontend → POST /api/interview-sessions/{id}/utterances
-      → Background task: process_utterance_evaluation
-        → Suggest matching question cards [GPT-5.4-mini]
-        → Add evidence only to human-confirmed active cards
-        → AI may move a card to probably_sufficient; only manual action marks sufficient
-      → SSE event: QUESTION_CARD_SUGGESTED / CARD_EVIDENCE_ADDED / CARD_PROBABLY_COVERED / etc.
-```
-
-### 3. Answer Evaluation Pipeline
-
-```
-Realtime utterance received
-  → Question-like text: suggest one or more question cards
-  → Human confirms the active card
-  → Answer-like text: evaluate evidence only for the confirmed card
-  → Criterion evidence updates are emitted to the UI
-  → AI can suggest probably_sufficient
-  → Human marks sufficient when the answer is complete
-```
-
-### 4. BRD / Readiness Generation (Project-Level)
-
-```
-User opens project readiness / BRD flow
-  → Read ready RoundAggregate records only
-  → Build BRD chapters from cumulative evidence + theme mapping
-  → AI rewrite: raw evidence → formal BRD paragraphs [GPT]
-  → Render markdown / export artifacts from aggregate-backed evidence
-```
-
-### 5. Post-Interview Pipeline
-
-```
-Interview ends
-  → Stop the Realtime connection and close the session
-  → Reuse live_utterances as the complete transcript
-  → Insight Memo Generation
-    → Pain points, requirement candidates, constraints, unresolved questions
-    → Memo is linked to InterviewRound and InterviewSeries
-    → Rebuild the InterviewRound Aggregate from the round's latest cumulative memo
-    → Multi-round insight views read one current aggregate memo per InterviewRound
-  → Stakeholder Plan Update (dynamic interview suggestions)
-  → Evidence Matrix Update from current Round Aggregates (if project-level)
-  → BRD Generation (from Realtime transcript and card-state evidence)
-```
-
-### 6. Project-Level Analysis
-
-```
-Project Dashboard
-  ├── Stakeholder Plan (AI-suggested roles + status tracking)
-  ├── Interview Progress (sessions completed, memos generated)
-  ├── Evidence Matrix (cross-interview requirement deduplication)
-  │    ├── Validation status: candidate | validated | conflicted | needs_more_evidence
-  │    ├── Stakeholder agreement: unanimous | majority | single_source | conflicted
-  │    └── Missing validation tracking → drives interview suggestions
-  └── BRD Readiness (readiness_score 0-1, mode: full | partial | not_ready)
-       └── Generation gate: checks evidence sufficiency before BRD creation
-```
-
-## Frontend Architecture
-
-### Pages (Routes)
+`frontend/src/App.tsx` lazy-loads route components behind React Router. State is kept in route components and custom hooks; API clients live under `frontend/src/api`. There is no `stores` directory or Zustand dependency.
 
 | Route | Component | Purpose |
 |-------|-----------|---------|
-| `/` | HomePage | Home with new-project and project-management entrances |
-| `/projects/new` | DocumentUploadPage | Create a project and upload requirement documents |
-| `/projects` | ProjectSessionsPage | Project-centric session management |
-| `/projects/:projectId` | ProjectDetailPage | Stakeholder plan, guides, readiness |
-| `/projects/:projectId/evidence-matrix` | EvidenceMatrixPage | Cross-stakeholder requirement validation |
-| `/projects/:projectId/readiness` | BRDReadinessPage | BRD generation feasibility check |
-| `/prep-sessions` | PrepSessionListPage | Manage all prep sessions (admin) |
-| `/editor/:documentId` | EditorPage | Review/edit themes & question cards |
-| `/interview/:documentId` | PresenterPage | Live interview with transcription |
-| `/interview/session/:sessionId` | PresenterPage | Resume interview by session |
-| `/sessions/:sessionId/insight-memo` | InsightMemoPage | Post-interview qualitative analysis |
-| `/sessions/:sessionId/log` | SessionLogPage | Event timeline |
+| `/` | `HomePage` | Quick Demo templates plus project creation and management entry points |
+| `/projects/new` | `DocumentUploadPage` | Create a project and upload source material |
+| `/projects` | `ProjectSessionsPage` | Project-centric session management |
+| `/projects/:projectId` | `ProjectDetailPage` | Project dashboard, plan, guides, and readiness |
+| `/projects/:projectId/stakeholders` | `StakeholdersPage` | Manage stakeholder people and role assignments |
+| `/projects/:projectId/evidence-matrix` | `EvidenceMatrixPage` | Cross-interview evidence consolidation |
+| `/projects/:projectId/readiness` | `BRDReadinessPage` | Readiness check and Markdown BRD generation |
+| `/prep-sessions` | `PrepSessionListPage` | Preparation-session administration |
+| `/editor/:documentId` | `EditorPage` | Review and edit themes and cards |
+| `/interview/:documentId` | `PresenterPage` | Start an interview from a guide document |
+| `/interview/session/:sessionId` | `PresenterPage` | Resume an interview session |
+| `/sessions/:sessionId/insight-memo` | `InsightMemoPage` | Post-interview memo |
+| `/sessions/:sessionId/log` | `SessionLogPage` | Transcript and event timeline |
 
-### Repeated Interview APIs
+Key hooks include `useRealtimeTranscription`, `useInterviewSession`, `useTranscriptProcessing`, `useCardEventHandlers`, `useSSEEvents`, `useProjectData`, `useSlotManagement`, and `useResponsiveLayout`.
 
-| Endpoint | Purpose |
-|----------|---------|
-| `GET/POST /api/projects/{projectId}/stakeholders/{profileId}/interview-series` | List or create stakeholder topic series |
-| `GET/POST /api/interview-series/{seriesId}/rounds` | List or create immutable rounds |
-| `GET /api/interview-rounds/{roundId}` | Read round status and guide/session metadata |
-| `POST /api/interview-rounds/{roundId}/generate-guide` | Generate an independent guide document for a round |
-| `POST /api/interview-rounds/{roundId}/sessions` | Start a session from the round guide |
+### FastAPI modular monolith
 
-New interview rounds should be created through the InterviewSeries / InterviewRound flow. Historical deck/section compatibility contracts are not part of the clean-break API.
+`backend/app/main.py` mounts routers for documents, question cards, interview sessions, authentication, events, Realtime, prep sessions, projects, insight memos, interview rounds, and evidence matrices. The interview-session router aggregates lifecycle, utterance, card-control, and output subrouters.
 
-### Key Hooks
+The service layer contains the business logic:
 
-| Hook | Purpose |
-|------|---------|
-| `useRealtimeTranscription` | WebRTC connection to OpenAI Realtime API |
-| `useInterviewSession` | Interview session lifecycle and current-session state |
-| `useTranscriptProcessing` | Realtime partial/completed transcript handling |
-| `useCardEventHandlers` | Card events, manual selection, and SSE coordination |
-| `useSSEEvents` | SSE subscription for card state updates & analysis progress |
-| `useResponsiveLayout` | Adaptive layout for interview mode |
+| Area | Main services |
+|------|---------------|
+| Document / card preparation | `document_service`, `openai_service`, `question_card_service`, `question_rubric_service`, `ai_question_generator` |
+| Live interview | `interview_service`, `answer_evaluation_engine`, `semantic_judge_service`, `event_service`, `realtime_service` |
+| Multi-interview planning | `project_service`, `stakeholder_plan_service`, `role_filter_service`, `stakeholder_card_generator`, `interview_brief_service` |
+| Post-interview derivation | `insight_memo_service`, `interview_round_aggregate_service`, `evidence_matrix_service`, `brd_readiness_service`, `brd_generation_service` |
+| Infrastructure / accounting | `s3_service`, `billing_service`, `prep_session_service` |
+| Ready-to-run demos | `demo_session_service` |
 
-### Real-time Communication
+### Celery worker scope
 
-- **SSE (Server-Sent Events)**: Backend → Frontend for card state updates, analysis progress
-- **WebRTC**: Browser → OpenAI for audio streaming (transcription)
-- **REST**: Frontend → Backend for utterance storage and evaluation triggers
+`app.workers.celery_app` registers only `app.workers.document_analysis_worker`. Its production task is `analyze_document`, which downloads the source from MinIO, parses guide chunks, calls OpenAI to create themes and cards, persists them, and publishes progress through Redis.
 
-## Backend Service Layer
+Realtime utterance evaluation is not a Celery job. The utterance endpoint stores each completed transcript segment, then uses a FastAPI background task plus one in-process debounce timer per session before running `answer_evaluation_engine`. This means pending evaluation timers are local to a FastAPI process and are not a durable distributed queue.
 
-### Core Services
+## Data Model
 
-| Service | Responsibility |
-|---------|---------------|
-| `openai_service` | All GPT API calls (analysis, classification, themes, cards) |
-| `answer_evaluation_engine` | Realtime transcript segment → card state and criterion-evidence updates |
-| `semantic_judge_service` | GPT-based coverage/sufficiency judgments |
-| `brd_generation_service` | Post-interview BRD document assembly + AI rewrite |
-| `interview_service` | Session lifecycle, utterance CRUD, card state management |
-| `document_service` | Document CRUD, file management |
-| `event_service` | Redis pub/sub → SSE event distribution |
-| `realtime_service` | OpenAI Realtime ephemeral token generation |
+The clean-v2 model is project- and round-centric. The important ownership paths are:
 
-### Multi-Interview Services
+```text
+User
+├── Project
+│   ├── StakeholderSlot                 recommended role
+│   ├── StakeholderProfile              actual person
+│   │   └── StakeholderProfileSlot      many-to-many person/role assignment
+│   ├── InterviewSeries                 person + recurring topic
+│   │   └── InterviewRound              immutable guide version / round
+│   │       ├── InterviewRoundSlot      targeted role assignment
+│   │       ├── Document                generated guide
+│   │       ├── InterviewSession        one or more visits
+│   │       ├── InterviewInsightMemo    memo per completed visit
+│   │       └── InterviewRoundAggregate canonical latest memo and snapshots
+│   ├── RequirementEvidenceMatrix       refresh metadata + Markdown, one per project
+│   └── BRDReadinessReport              readiness history
+└── Document
+    ├── InterviewTheme
+    │   └── QuestionCard
+    │       └── QuestionCardSlot        card/role targeting
+    ├── PrepSession
+    │   └── InterviewSession
+    │       ├── LiveUtterance           canonical Realtime transcript
+    │       ├── InterviewCardState
+    │       ├── CardCoverageEvaluation
+    │       ├── CardCriterionEvidence
+    │       │   └── CardEvidenceSlot    evidence/role attribution
+    │       ├── InterviewBrief
+    │       └── AIUsageEvent
+    └── AIUsageEvent                    document-level usage
+```
 
-| Service | Responsibility |
-|---------|---------------|
-| `project_service` | Project CRUD, dashboard |
-| `stakeholder_plan_service` | Dynamic interview suggestions, slot management |
-| `role_filter_service` | Filter cards by stakeholder expertise |
-| `interview_brief_service` | Pre-interview guide generation |
-| `insight_memo_service` | Post-interview qualitative analysis extraction |
-| `interview_round_aggregate_service` | One canonical cumulative memo, coverage snapshot, and evidence snapshot per round |
-| `evidence_matrix_service` | Cross-interview requirement consolidation & deduplication |
-| `brd_readiness_service` | Readiness scoring before BRD generation |
-| `stakeholder_card_generator` | Interview guide generation per stakeholder |
+Requirement rows are derived from ready `InterviewRoundAggregate` snapshots at read time. They are not stored in a separate `EvidenceMatrixEntry` table. This keeps the round aggregate as the source of truth for project-level evidence.
 
-### Supporting Services
+`Project` also carries explicit lifecycle metadata: `mode` (`formal` or `demo`), `is_ephemeral`, `expires_at`, and `template_id`. Formal project listings exclude Demo projects. Each Demo request creates a separate project aggregate, so transcripts and card state are never shared between visitors.
 
-| Service | Responsibility |
-|---------|---------------|
-| `answer_completion_scorer` | Answer completeness scoring |
-| `billing_service` | Token/audio cost tracking per session and per document |
-| `s3_service` | MinIO file upload/download |
-| `prep_session_service` | Prep session lifecycle |
-| `question_card_service` | Card CRUD and reordering |
-| `question_rubric_service` | Question rubric management |
-| `ai_question_generator` | Coverage rules, target roles, suggested followup |
-| `insight_memo_service` | Realtime transcript to round memo |
-| `interview_round_aggregate_service` | RoundAggregate rebuild and derivative invalidation |
-| `evidence_matrix_service` | Evidence Matrix from ready RoundAggregates |
-| `brd_readiness_service` | Readiness report from ready RoundAggregates |
-| `brd_generation_service` | BRD content generation from RoundAggregate |
+## Core Workflows
+
+### 0. Quick Demo interview
+
+```text
+HomePage selects one public template
+  └── POST /api/demo-sessions
+      └── one database transaction
+          ├── create ephemeral Project + default StakeholderSlot/Profile
+          ├── create InterviewSeries/Round + analyzed Document + ready PrepSession
+          ├── copy template InterviewThemes/Cards with precompiled rubrics
+          ├── create idle InterviewSession + card states
+          └── return /interview/session/{sessionId}
+              └── existing PresenterPage and Realtime workflow
+```
+
+The built-in templates are 現況流程探索, 痛點與需求探索, and 新系統需求確認. This path does not upload a source file, enqueue Celery, or call OpenAI to generate the guide. Demo projects expire after 24 hours; expired Demo aggregates are opportunistically deleted when another Demo is created.
+
+### 1. Document upload and analysis
+
+```text
+Upload source
+  └── FastAPI validates extension and writes the object to MinIO
+      └── Celery analyze_document
+          ├── read source as UTF-8 and split Markdown-style headings into chunks
+          ├── generate_interview_themes                 [hard-coded gpt-4o]
+          ├── generate_theme_question_cards per theme   [hard-coded gpt-4o]
+          ├── save InterviewTheme and QuestionCard rows
+          └── publish analysis progress/completion events through Redis
+```
+
+The upload API currently accepts `.pdf`, `.docx`, `.doc`, `.md`, and `.txt`, but the worker only decodes the downloaded object as UTF-8 text. Binary PDF/DOC/DOCX extraction is not implemented, so those accepted formats are not yet reliably analyzable unless they contain compatible text bytes. Markdown and plain text are the dependable analysis inputs today.
+
+### 2. Repeated interviews
+
+```text
+Project + StakeholderProfile
+  └── InterviewSeries
+      └── InterviewRound (objective, mode, sources, focus, target slots)
+          ├── generate an independent Document + PrepSession + themes/cards
+          ├── freeze the guide when a session is created
+          └── create/resume one or more InterviewSessions
+```
+
+Historical rounds retain their own guide, cards, transcript, state, and memo. New rounds use the `InterviewSeries` / `InterviewRound` APIs; retired deck/section compatibility contracts are not part of the clean-v2 API.
+
+### 3. Realtime interview and answer evaluation
+
+```text
+Browser requests POST /api/realtime/transcription-session
+  └── FastAPI exchanges the server API key for an ephemeral client secret
+      └── Browser opens WebRTC directly to OpenAI Realtime
+          ├── audio never passes through FastAPI
+          ├── transcript deltas stay in the browser
+          └── completed utterance POSTed to /api/interview-sessions/{id}/utterances
+              ├── persist LiveUtterance
+              ├── debounce and evaluate in the FastAPI process
+              ├── suggest/score cards with GPT-5.4-mini where needed
+              └── publish card/evidence updates through Redis → SSE → browser
+```
+
+`LiveUtterance` is the canonical transcript. The system does not upload a second recording or run a separate diarization/transcription pipeline.
+
+The card state flow is `pending → listening → probably_sufficient → sufficient`, with `at_risk` available during evaluation. AI can suggest and mark `probably_sufficient`; a human action is the final gate to `sufficient`.
+
+### 4. Post-interview and project outputs
+
+```text
+End session
+  └── create cumulative InterviewInsightMemo
+      └── rebuild InterviewRoundAggregate
+          ├── coverage snapshot
+          ├── evidence snapshot
+          └── latest cumulative memo
+
+Ready round aggregates
+  ├── Evidence Matrix refresh/read
+  ├── BRD Readiness report
+  └── BRD generation → cached Markdown content
+```
+
+Session or memo changes invalidate the round aggregate and project-level derivatives. Evidence Matrix, BRD Readiness, and project BRD generation read ready aggregates only. The current BRD API returns Markdown; PDF export is not implemented.
 
 ## AI Model Usage
 
-| Model | Use Case | Latency Profile |
-|-------|----------|----------------|
-| GPT-5.5 | High-context document/section analysis | High |
-| GPT-4o | Uploaded-document theme and question-card generation | Medium |
-| GPT-5.4-mini | Stakeholder planning, answer evaluation, semantic judging, memo/matrix analysis | Low |
-| gpt-realtime-whisper | Live audio transcription via WebRTC | Real-time |
-| text-embedding-3-large | Configured for future semantic recall; current card prefilter is keyword/ngram based | Reserved |
+| Configuration / model | Actual use |
+|-----------------------|------------|
+| `gpt-4o` | Hard-coded for the two initial uploaded-document phases: theme generation and per-theme question-card generation |
+| `DOCUMENT_ANALYSIS_MODEL` (default `gpt-5.5`) | Used by `openai_service.generate_card_metadata`; it is not the model used by the initial theme/card worker phases |
+| `SEMANTIC_UNDERSTANDING_MODEL` (default `gpt-5.4-mini`) | Semantic judgment and rubric-related calls; several planning, memo, matrix, guide, and evaluation services also explicitly select `gpt-5.4-mini` |
+| `REALTIME_TRANSCRIPTION_MODEL` (default `gpt-realtime-whisper`) | OpenAI Realtime transcription session configuration |
+| `gpt-4o-transcribe` | Voice-to-project/stakeholder field transcription endpoints in `projects.py` |
+| `EMBEDDING_MODEL` (default `text-embedding-3-large`) | Reserved configuration; the current card candidate prefilter uses keywords / character n-grams, not vector retrieval |
 
-## Key Design Decisions
+## Communication Paths
 
-1. **Theme-based interview structure**: Documents are analyzed into themes (not just pages), enabling logical interview flow regardless of document structure.
+- **REST:** browser to FastAPI for CRUD, lifecycle actions, completed utterances, and derived outputs.
+- **SSE:** FastAPI streams Redis Pub/Sub events for analysis progress and live card/evidence changes.
+- **WebRTC:** browser sends microphone audio directly to OpenAI and receives transcription events over the data channel.
+- **Celery:** FastAPI dispatches durable document-analysis work through the Redis broker; results use a separate Redis database.
+- **S3 API:** FastAPI and Celery use MinIO for source objects and presigned downloads.
 
-2. **Two-stage answer evaluation**: Fast keyword/character-ngram prefilter narrows candidates before the GPT semantic judgment, reducing unnecessary model calls.
+## Authentication and Security Status
 
-3. **WebRTC for transcription**: Audio goes directly from browser to OpenAI — backend never handles audio data, reducing latency and bandwidth.
+Authentication is currently a development stub, not a production multi-user authorization boundary:
 
-4. **Card state machine**: `pending → listening → probably_sufficient → sufficient` provides granular progress tracking with human confirmation as the gate.
+- registration returns a fixed development identity;
+- login accepts any submitted credentials and issues a JWT for `dev-user`;
+- `/api/auth/me` decodes no application identity and returns the fixed development user;
+- application routes are not consistently protected by `get_current_user`;
+- most application records use the seeded `user_default` database owner.
 
-5. **Coverage rules on cards**: Each question card has `semanticAnchors`, `expectedKeywords`, and `mustMentionElements` — enabling both AI and deterministic evaluation.
+Production use requires real credential verification, route authorization, tenant ownership checks, secret rotation, and a non-default `SECRET_KEY`. EC2 narrows CORS to `APP_ORIGIN`, protects Redis with a password, keeps MinIO private, and exposes application/file traffic through Caddy, but those controls do not replace application authentication.
 
-6. **Single Realtime transcript source**: `live_utterances` is used for the live UI, historical records, Insight Memo, RoundAggregate, and project outputs. The browser does not create or upload a second interview recording.
+## Database Migration and Clean-v2 Gate
 
-7. **Project-level multi-interview architecture**: Projects contain stakeholder plans, evidence matrices, and readiness gates — enabling systematic requirements research across multiple interviews.
+The two managed environments use different migration entry points:
 
-8. **BRD caching**: Generated BRD documents are persisted to avoid non-deterministic regeneration on repeated page visits.
+- **Local launcher:** `bin/restart-all.sh` calls `run_migrations`, which runs `alembic upgrade head` before FastAPI starts. It does not call the clean-schema smoke check.
+- **EC2 deploy / restore:** the Compose `migrate` service runs `python -m scripts.bootstrap_database` before the application is replaced or restored.
 
-9. **Project and round ownership**: Project is the research-level root. InterviewSeries and InterviewRound preserve repeated-interview history; each guide Document owns its themes and cards, while sessions retain their own transcripts and state.
+The EC2 bootstrap path is fail-closed:
 
-10. **Round Aggregate invalidation**: Session or memo changes mark the round aggregate and project-level derivatives stale. Evidence Matrix, BRD Readiness, and project BRD only read the latest memo selected by each ready round aggregate.
+1. An empty database gets the current SQLAlchemy schema, the `vector` extension, an Alembic head stamp, and the default user.
+2. An Alembic-managed database is upgraded to head.
+3. A non-empty application database without `alembic_version` is rejected; the script will not guess or stamp legacy state.
+4. `smoke_clean_baseline_schema.py` must pass. It requires clean-v2 tables and columns and fails if retired deck/section/transcript compatibility tables or columns remain.
+
+Therefore the enforced clean-v2 gate applies to the EC2 deploy/restore workflow. Local launches apply Alembic migrations, but developers must run the smoke check separately when they need to prove the absence of legacy compatibility shapes.
 
 ## Directory Structure
 
-```
+```text
 InsightGuide/
 ├── backend/
 │   ├── app/
-│   │   ├── api/routes/          # FastAPI route handlers
-│   │   ├── core/                # Config, security, logging
-│   │   ├── db/                  # SQLAlchemy session, Alembic migrations
-│   │   ├── models/              # SQLAlchemy ORM models
-│   │   ├── schemas/             # Pydantic request/response schemas
-│   │   ├── services/            # Business logic layer
-│   │   └── workers/             # Celery background tasks
-│   └── tests/                   # Pytest test suite
+│   │   ├── api/routes/       FastAPI routers and interview subrouters
+│   │   ├── core/             settings, logging, security helpers
+│   │   ├── db/               SQLAlchemy session and Alembic migrations
+│   │   ├── models/           SQLAlchemy ORM models
+│   │   ├── schemas/          Pydantic request/response models
+│   │   ├── services/         business logic
+│   │   └── workers/          Celery app and document analysis task
+│   ├── scripts/              database bootstrap and schema checks
+│   └── tests/                Pytest suite
 ├── frontend/
-│   ├── src/
-│   │   ├── api/                 # Axios API client modules
-│   │   ├── components/          # React components
-│   │   │   ├── common/          # Shared UI components
-│   │   │   ├── EditorMode/      # Question card editor
-│   │   │   ├── PresenterMode/   # Interview mode UI
-│   │   │   ├── InsightMemoPage  # Round-level interview record
-│   │   │   ├── SessionLogPage   # Realtime transcript/session log
-│   │   │   └── sessions/        # Session management
-│   │   ├── hooks/               # Custom React hooks
-│   │   ├── routes/              # Page-level components
-│   │   ├── stores/              # Zustand state management
-│   │   ├── types/               # TypeScript type definitions
-│   │   └── utils/               # Utility functions
-│   └── vite.config.ts
-├── docs/                        # Documentation
-│   ├── knowledge/               # AI model guides & feature docs
-│   └── ...
-├── insightguide.sh              # Primary launch/management script
-└── docker-compose.yml           # Docker services configuration
+│   └── src/
+│       ├── api/              Axios API clients
+│       ├── components/       shared and feature UI components
+│       ├── hooks/            local/session/realtime state orchestration
+│       ├── routes/           lazy-loaded page components
+│       ├── types/            TypeScript types
+│       └── utils/            formatting and language helpers
+├── deploy/ec2/               single-host Compose, Caddy, deploy/restore scripts
+├── docs/                     architecture, operations, plans, and model notes
+├── docker-compose.yml        local infrastructure only
+└── insightguide.sh           local application control center
 ```
 
-## Infrastructure Dependencies
+## Default Local Ports
 
-| Service | Default Port | Purpose |
-|---------|-------------|---------|
-| FastAPI | 8002 | Backend API server |
-| Vite dev server | 5174 | Frontend dev server |
-| PostgreSQL | 5432 | Primary database (with pgvector) |
-| Redis | 6379 | Event pub/sub + Celery broker |
-| MinIO | 9000 (API) / 9001 (Console) | S3-compatible object storage |
-| OpenAI API | — | AI inference (external) |
+| Service | Port | Purpose |
+|---------|------|---------|
+| Vite | 5174 | Frontend development server |
+| FastAPI | 8002 | Backend API and SSE |
+| PostgreSQL | 5432 | Primary database |
+| Redis | 6379 | Pub/Sub and Celery transport |
+| MinIO | 9000 / 9001 | S3 API / local console |
+| OpenAI API | external | Chat and Realtime inference |

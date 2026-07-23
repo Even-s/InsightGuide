@@ -1,7 +1,47 @@
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+
+import {
+  createDemoSession,
+  listDemoTemplates,
+  type DemoTemplate,
+} from '@/api/demoSessions'
 
 export default function HomePage() {
   const navigate = useNavigate()
+  const [templates, setTemplates] = useState<DemoTemplate[]>([])
+  const [isLoadingTemplates, setIsLoadingTemplates] = useState(true)
+  const [creatingTemplateId, setCreatingTemplateId] = useState<string | null>(null)
+  const [demoError, setDemoError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let active = true
+    listDemoTemplates()
+      .then((items) => {
+        if (active) setTemplates(items)
+      })
+      .catch(() => {
+        if (active) setDemoError('目前無法載入 Demo 模板，請稍後再試。')
+      })
+      .finally(() => {
+        if (active) setIsLoadingTemplates(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
+
+  async function startDemo(template: DemoTemplate) {
+    setCreatingTemplateId(template.id)
+    setDemoError(null)
+    try {
+      const result = await createDemoSession(template.id)
+      navigate(result.interviewPath)
+    } catch {
+      setDemoError('Demo 建立失敗，請再試一次。')
+      setCreatingTemplateId(null)
+    }
+  }
 
   return (
     <div className="min-h-screen overflow-hidden bg-cream-100">
@@ -29,7 +69,62 @@ export default function HomePage() {
           </p>
         </section>
 
-        <section className="mt-12 grid w-full gap-5 md:grid-cols-2" aria-label="專案入口">
+        <section className="mt-12 w-full rounded-3xl border border-sage-200 bg-white/80 p-6 shadow-natural sm:p-8" aria-labelledby="quick-demo-title">
+          <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
+            <div>
+              <div className="inline-flex rounded-full bg-sage-100 px-3 py-1 text-xs font-medium text-sage-700">
+                不用先建立專案
+              </div>
+              <h2 id="quick-demo-title" className="mt-3 text-2xl font-semibold text-natural-800">
+                快速 Demo 訪談
+              </h2>
+              <p className="mt-2 max-w-2xl text-sm leading-6 text-natural-500">
+                選一個公版情境，系統會準備獨立的暫存專案與訪談問題，直接進入完整訪談介面。
+              </p>
+            </div>
+            <span className="text-xs text-natural-400">Demo 資料 24 小時後清理</span>
+          </div>
+
+          {isLoadingTemplates ? (
+            <div className="mt-6 rounded-xl bg-cream-100 px-4 py-5 text-center text-sm text-natural-500" role="status">
+              載入 Demo 模板中...
+            </div>
+          ) : (
+            <div className="mt-6 grid gap-3 md:grid-cols-3">
+              {templates.map((template) => {
+                const isCreating = creatingTemplateId === template.id
+                return (
+                  <button
+                    key={template.id}
+                    type="button"
+                    onClick={() => startDemo(template)}
+                    disabled={creatingTemplateId !== null}
+                    aria-label={`使用${template.title}開始 Demo`}
+                    className="group rounded-2xl border border-cream-300 bg-cream-50 p-5 text-left transition hover:-translate-y-0.5 hover:border-sage-300 hover:bg-sage-50 disabled:cursor-wait disabled:opacity-60"
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <h3 className="font-semibold text-natural-800">{template.title}</h3>
+                      <svg className="h-4 w-4 shrink-0 text-sage-500 transition-transform group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                      </svg>
+                    </div>
+                    <p className="mt-2 min-h-12 text-sm leading-6 text-natural-500">{template.description}</p>
+                    <div className="mt-4 flex items-center gap-3 text-xs text-natural-400">
+                      <span>約 {template.estimatedMinutes} 分鐘</span>
+                      <span>{template.questionCount} 個問題</span>
+                    </div>
+                    <span className="mt-4 inline-flex text-sm font-medium text-sage-600">
+                      {isCreating ? '正在準備訪談...' : '立即開始'}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+          {demoError && <p className="mt-4 text-sm text-red-600" role="alert">{demoError}</p>}
+        </section>
+
+        <section className="mt-6 grid w-full gap-5 md:grid-cols-2" aria-label="專案入口">
           <button
             type="button"
             onClick={() => navigate('/projects/new')}

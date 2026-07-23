@@ -3,6 +3,7 @@
 # InsightGuide routes
 from app.api.routes import (
     auth,
+    demo_sessions,
     documents,
     events,
     interview_rounds,
@@ -14,6 +15,7 @@ from app.api.routes import (
 
 __all__ = [
     "documents",
+    "demo_sessions",
     "question_cards",
     "interview_sessions",
     "interview_rounds",

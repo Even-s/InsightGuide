@@ -140,7 +140,7 @@ curl http://localhost:8002/health
 
 ### 單次訪談模式
 
-1. 上傳 BRD 文件（PDF / DOCX / Markdown）
+1. 上傳 BRD 文件；目前 Markdown / TXT 可直接進入分析，PDF / DOCX 雖可上傳，但仍需補齊文字解析流程
 2. 等待 AI 分析產生訪談主題與問題卡
 3. 在編輯模式調整問題順序與重要性
 4. 進入訪談模式，開啟麥克風即時轉錄
@@ -165,6 +165,6 @@ curl http://localhost:8002/health
 
 **OpenAI API 錯誤**：確認 `backend/.env` 中 `OPENAI_API_KEY` 已正確設定。
 
-**前端無法連接後端**：確認 `frontend/.env` 中 `VITE_API_URL=http://localhost:8002`。
+**前端無法連接後端**：確認 `frontend/.env` 中 `VITE_API_BASE_URL=http://localhost:8002`；SSE 另讀取 `VITE_API_URL`，本機開發時兩者都應指向 `http://localhost:8002`。
 
 **insightguide.sh 無法執行**：執行 `chmod +x insightguide.sh`。

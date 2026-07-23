@@ -107,6 +107,10 @@ export interface Project {
   title: string
   description?: string
   status: string
+  mode: 'formal' | 'demo'
+  isEphemeral: boolean
+  expiresAt?: string | null
+  templateId?: string | null
   createdAt: string
   updatedAt: string
 }
